@@ -1,10 +1,38 @@
+use std::path::PathBuf;
+
 fn main() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
-        .unwrap();
+        .unwrap()
+        .to_path_buf();
     let lerc_lib = root.join("esri-lerc/src/LercLib");
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+
+    // --- Step 1: Compile and run gen_constants.cpp to produce constants.rs ---
+
+    let gen_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("gen_constants.cpp");
+    let gen_bin = out_dir.join("gen_constants");
+
+    let status = std::process::Command::new("c++")
+        .args(["-std=c++14", "-o"])
+        .arg(&gen_bin)
+        .arg(&gen_src)
+        .arg(format!("-I{}", lerc_lib.join("include").display()))
+        .status()
+        .expect("failed to compile gen_constants.cpp");
+    assert!(status.success(), "gen_constants.cpp compilation failed");
+
+    let output = std::process::Command::new(&gen_bin)
+        .output()
+        .expect("failed to run gen_constants");
+    assert!(output.status.success(), "gen_constants exited with error");
+
+    std::fs::write(out_dir.join("constants.rs"), &output.stdout)
+        .expect("failed to write constants.rs");
+
+    // --- Step 2: Compile the C++ LercLib as a static library ---
 
     cc::Build::new()
         .cpp(true)
@@ -12,7 +40,6 @@ fn main() {
         .define("LERC_STATIC", None)
         .include(lerc_lib.join("include"))
         .include(&lerc_lib)
-        // Core LercLib sources
         .file(lerc_lib.join("BitMask.cpp"))
         .file(lerc_lib.join("BitStuffer2.cpp"))
         .file(lerc_lib.join("Huffman.cpp"))
@@ -20,13 +47,11 @@ fn main() {
         .file(lerc_lib.join("Lerc2.cpp"))
         .file(lerc_lib.join("Lerc_c_api_impl.cpp"))
         .file(lerc_lib.join("RLE.cpp"))
-        // FPL (Float Point Lossless) sources
         .file(lerc_lib.join("fpl_Compression.cpp"))
         .file(lerc_lib.join("fpl_EsriHuffman.cpp"))
         .file(lerc_lib.join("fpl_Lerc2Ext.cpp"))
         .file(lerc_lib.join("fpl_Predictor.cpp"))
         .file(lerc_lib.join("fpl_UnitTypes.cpp"))
-        // Lerc1 decode support
         .file(lerc_lib.join("Lerc1Decode/BitStuffer.cpp"))
         .file(lerc_lib.join("Lerc1Decode/CntZImage.cpp"))
         .warnings(false)

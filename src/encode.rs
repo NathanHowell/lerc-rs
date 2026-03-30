@@ -36,6 +36,31 @@ fn encode_typed<T: LercDataType>(
     let band_size = width * height * n_depth;
 
     let max_z_error = if T::is_integer() {
+        // Magic value 777 means "use default bit-plane epsilon of 0.01"
+        let max_z_error = if max_z_error == 777.0 {
+            -0.01
+        } else {
+            max_z_error
+        };
+
+        // Negative maxZError signals bit-plane compression request
+        let max_z_error = if max_z_error < 0.0 {
+            let eps = -max_z_error;
+            try_bit_plane_compression::<T>(
+                data,
+                &image.valid_masks,
+                image.width as usize,
+                image.height as usize,
+                n_depth,
+                n_bands,
+                eps,
+                T::DATA_TYPE,
+            )
+            .unwrap_or(0.0)
+        } else {
+            max_z_error
+        };
+
         max_z_error.floor().max(0.5)
     } else {
         max_z_error.max(0.0)
@@ -230,6 +255,202 @@ fn prune_candidates(
     }
 
     !z_err.is_empty()
+}
+
+/// Count set bits per bit-plane in an unsigned XOR difference value.
+/// Equivalent to C++ `Lerc2::AddUIntToCounts`.
+#[inline]
+fn add_uint_to_counts(counts: &mut [i32], mut val: u32, n_bits: usize) {
+    counts[0] += (val & 1) as i32;
+    for i in 1..n_bits {
+        val >>= 1;
+        counts[i] += (val & 1) as i32;
+    }
+}
+
+/// Count set bits per bit-plane in a signed XOR difference value.
+/// Equivalent to C++ `Lerc2::AddIntToCounts`.
+#[inline]
+fn add_int_to_counts(counts: &mut [i32], mut val: i32, n_bits: usize) {
+    counts[0] += val & 1;
+    for i in 1..n_bits {
+        val >>= 1;
+        counts[i] += val & 1;
+    }
+}
+
+/// Try bit-plane compression for integer data. Analyzes XOR differences between
+/// neighboring pixels to find bit planes that look like random noise (1-bit
+/// frequency close to 0.5). Returns `Some(new_max_z_error)` if noisy bit planes
+/// were found, or `None` if the data doesn't qualify.
+fn try_bit_plane_compression<T: LercDataType>(
+    data: &[T],
+    valid_masks: &[BitMask],
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    n_bands: usize,
+    eps: f64,
+    data_type: DataType,
+) -> Option<f64> {
+    if eps <= 0.0 {
+        return None;
+    }
+
+    let max_shift = data_type.size() * 8;
+    let min_cnt: usize = 5000;
+    let is_signed = data_type.is_signed();
+    let band_size = width * height * n_depth;
+    let mut overall_result: Option<f64> = None;
+
+    for band in 0..n_bands {
+        let band_data = &data[band * band_size..(band + 1) * band_size];
+        let mask = if band < valid_masks.len() {
+            &valid_masks[band]
+        } else {
+            &valid_masks[0]
+        };
+
+        let num_valid = mask.count_valid().min(width * height);
+        if num_valid < min_cnt {
+            continue;
+        }
+
+        let mut cnt_diff_vec = vec![0i32; n_depth * max_shift];
+        let mut cnt: usize = 0;
+        let all_valid = num_valid == width * height;
+
+        if n_depth == 1 && all_valid {
+            if !is_signed {
+                for i in 0..height - 1 {
+                    for j in 0..width - 1 {
+                        let k = i * width + j;
+                        let c = (band_data[k].to_f64() as u32)
+                            ^ (band_data[k + 1].to_f64() as u32);
+                        add_uint_to_counts(&mut cnt_diff_vec, c, max_shift);
+                        cnt += 1;
+                        let c = (band_data[k].to_f64() as u32)
+                            ^ (band_data[k + width].to_f64() as u32);
+                        add_uint_to_counts(&mut cnt_diff_vec, c, max_shift);
+                        cnt += 1;
+                    }
+                }
+            } else {
+                for i in 0..height - 1 {
+                    for j in 0..width - 1 {
+                        let k = i * width + j;
+                        let c = (band_data[k].to_f64() as i32)
+                            ^ (band_data[k + 1].to_f64() as i32);
+                        add_int_to_counts(&mut cnt_diff_vec, c, max_shift);
+                        cnt += 1;
+                        let c = (band_data[k].to_f64() as i32)
+                            ^ (band_data[k + width].to_f64() as i32);
+                        add_int_to_counts(&mut cnt_diff_vec, c, max_shift);
+                        cnt += 1;
+                    }
+                }
+            }
+        } else {
+            if !is_signed {
+                for i in 0..height {
+                    for j in 0..width {
+                        let k = i * width + j;
+                        let m0 = k * n_depth;
+                        if all_valid || mask.is_valid(k) {
+                            if j < width - 1 && (all_valid || mask.is_valid(k + 1)) {
+                                for m in 0..n_depth {
+                                    let s0 = m * max_shift;
+                                    let c = (band_data[m0 + m].to_f64() as u32)
+                                        ^ (band_data[m0 + m + n_depth].to_f64() as u32);
+                                    add_uint_to_counts(&mut cnt_diff_vec[s0..], c, max_shift);
+                                }
+                                cnt += 1;
+                            }
+                            if i < height - 1 && (all_valid || mask.is_valid(k + width)) {
+                                for m in 0..n_depth {
+                                    let s0 = m * max_shift;
+                                    let c = (band_data[m0 + m].to_f64() as u32)
+                                        ^ (band_data[m0 + m + n_depth * width].to_f64() as u32);
+                                    add_uint_to_counts(&mut cnt_diff_vec[s0..], c, max_shift);
+                                }
+                                cnt += 1;
+                            }
+                        }
+                    }
+                }
+            } else {
+                for i in 0..height {
+                    for j in 0..width {
+                        let k = i * width + j;
+                        let m0 = k * n_depth;
+                        if all_valid || mask.is_valid(k) {
+                            if j < width - 1 && (all_valid || mask.is_valid(k + 1)) {
+                                for m in 0..n_depth {
+                                    let s0 = m * max_shift;
+                                    let c = (band_data[m0 + m].to_f64() as i32)
+                                        ^ (band_data[m0 + m + n_depth].to_f64() as i32);
+                                    add_int_to_counts(&mut cnt_diff_vec[s0..], c, max_shift);
+                                }
+                                cnt += 1;
+                            }
+                            if i < height - 1 && (all_valid || mask.is_valid(k + width)) {
+                                for m in 0..n_depth {
+                                    let s0 = m * max_shift;
+                                    let c = (band_data[m0 + m].to_f64() as i32)
+                                        ^ (band_data[m0 + m + n_depth * width].to_f64() as i32);
+                                    add_int_to_counts(&mut cnt_diff_vec[s0..], c, max_shift);
+                                }
+                                cnt += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if cnt < min_cnt {
+            continue;
+        }
+
+        let mut n_cut_found = 0i32;
+        let mut last_plane_kept = 0i32;
+
+        for s in (0..max_shift as i32).rev() {
+            let mut b_crit = true;
+            for i_depth in 0..n_depth {
+                let x = cnt_diff_vec[i_depth * max_shift + s as usize] as f64;
+                let n = cnt as f64;
+                let m = x / n;
+                if (1.0 - 2.0 * m).abs() >= eps {
+                    b_crit = false;
+                }
+            }
+
+            if b_crit && n_cut_found < 2 {
+                if n_cut_found == 0 {
+                    last_plane_kept = s;
+                }
+                if n_cut_found == 1 && s < last_plane_kept - 1 {
+                    last_plane_kept = s;
+                    n_cut_found = 0;
+                }
+                n_cut_found += 1;
+            }
+        }
+
+        last_plane_kept = last_plane_kept.max(0);
+        let new_max_z_error = ((1u64 << last_plane_kept as u64) >> 1) as f64;
+
+        overall_result = Some(match overall_result {
+            Some(existing) => existing.min(new_max_z_error),
+            None => new_max_z_error,
+        });
+    }
+
+    match overall_result {
+        Some(v) if v > 0.0 => Some(v),
+        _ => None,
+    }
 }
 
 fn encode_one_band<T: LercDataType>(

@@ -1,294 +1,10 @@
 #![cfg(feature = "cpp-validation")]
 #![allow(clippy::too_many_arguments)]
 
-//! Bidirectional cross-validation tests between the Rust LERC codec and the
-//! C++ reference implementation (esri-lerc).
-//!
-//! These tests verify that:
-//! - Blobs encoded by Rust can be decoded by the C++ library
-//! - Blobs encoded by C++ can be decoded by the Rust library
-//! - Full bidirectional round-trips preserve data within tolerance
-//!
-//! Note: Lossless float encoding (maxZErr=0) uses the FPL (Float Point
-//! Lossless) path in both implementations. For C++ -> Rust lossless float
-//! tests we use codec version 5 (pre-FPL) to avoid that path; for
-//! Rust -> C++ lossless float tests we use a tiny nonzero maxZErr instead.
-
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
+use lerc_cpp_ref::{self as cpp, DT_CHAR, DT_DOUBLE, DT_FLOAT, DT_INT, DT_SHORT, DT_UCHAR, DT_UINT, DT_USHORT, INFO_DATA_TYPE, INFO_N_BANDS, INFO_N_COLS, INFO_N_ROWS, RANGE_MAX_Z_ERR_USED};
 
-// ---------------------------------------------------------------------------
-// C API bindings (linked from the C++ LercLib built by build.rs)
-// ---------------------------------------------------------------------------
-
-// C++ data type codes
-const DT_CHAR: u32 = 0;
-const DT_UCHAR: u32 = 1;
-const DT_SHORT: u32 = 2;
-const DT_USHORT: u32 = 3;
-const DT_INT: u32 = 4;
-const DT_UINT: u32 = 5;
-const DT_FLOAT: u32 = 6;
-const DT_DOUBLE: u32 = 7;
-
-// InfoArray indices (from Lerc_types.h InfoArrOrder)
-const INFO_DATA_TYPE: usize = 1;
-const INFO_N_COLS: usize = 3;
-const INFO_N_ROWS: usize = 4;
-const INFO_N_BANDS: usize = 5;
-
-// DataRangeArray indices
-const RANGE_MAX_Z_ERR_USED: usize = 2;
-
-unsafe extern "C" {
-    fn lerc_computeCompressedSize(
-        pData: *const std::ffi::c_void,
-        dataType: u32,
-        nDepth: i32,
-        nCols: i32,
-        nRows: i32,
-        nBands: i32,
-        nMasks: i32,
-        pValidBytes: *const u8,
-        maxZErr: f64,
-        numBytes: *mut u32,
-    ) -> u32;
-
-    fn lerc_encode(
-        pData: *const std::ffi::c_void,
-        dataType: u32,
-        nDepth: i32,
-        nCols: i32,
-        nRows: i32,
-        nBands: i32,
-        nMasks: i32,
-        pValidBytes: *const u8,
-        maxZErr: f64,
-        pOutBuffer: *mut u8,
-        outBufferSize: u32,
-        nBytesWritten: *mut u32,
-    ) -> u32;
-
-    fn lerc_computeCompressedSizeForVersion(
-        pData: *const std::ffi::c_void,
-        codecVersion: i32,
-        dataType: u32,
-        nDepth: i32,
-        nCols: i32,
-        nRows: i32,
-        nBands: i32,
-        nMasks: i32,
-        pValidBytes: *const u8,
-        maxZErr: f64,
-        numBytes: *mut u32,
-    ) -> u32;
-
-    fn lerc_encodeForVersion(
-        pData: *const std::ffi::c_void,
-        codecVersion: i32,
-        dataType: u32,
-        nDepth: i32,
-        nCols: i32,
-        nRows: i32,
-        nBands: i32,
-        nMasks: i32,
-        pValidBytes: *const u8,
-        maxZErr: f64,
-        pOutBuffer: *mut u8,
-        outBufferSize: u32,
-        nBytesWritten: *mut u32,
-    ) -> u32;
-
-    fn lerc_getBlobInfo(
-        pLercBlob: *const u8,
-        blobSize: u32,
-        infoArray: *mut u32,
-        dataRangeArray: *mut f64,
-        infoArraySize: i32,
-        dataRangeArraySize: i32,
-    ) -> u32;
-
-    fn lerc_decode(
-        pLercBlob: *const u8,
-        blobSize: u32,
-        nMasks: i32,
-        pValidBytes: *mut u8,
-        nDepth: i32,
-        nCols: i32,
-        nRows: i32,
-        nBands: i32,
-        dataType: u32,
-        pData: *mut std::ffi::c_void,
-    ) -> u32;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers: C++ encode / decode / info
-// ---------------------------------------------------------------------------
-
-fn cpp_encode<T: Copy>(
-    data: &[T],
-    data_type: u32,
-    n_cols: i32,
-    n_rows: i32,
-    n_depth: i32,
-    n_bands: i32,
-    valid_bytes: Option<&[u8]>,
-    max_z_err: f64,
-) -> Vec<u8> {
-    let n_masks = if valid_bytes.is_some() { 1i32 } else { 0i32 };
-    let valid_ptr = valid_bytes
-        .map(|v| v.as_ptr())
-        .unwrap_or(std::ptr::null());
-
-    let mut num_bytes: u32 = 0;
-    let rc = unsafe {
-        lerc_computeCompressedSize(
-            data.as_ptr() as *const std::ffi::c_void,
-            data_type,
-            n_depth,
-            n_cols,
-            n_rows,
-            n_bands,
-            n_masks,
-            valid_ptr,
-            max_z_err,
-            &mut num_bytes,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_computeCompressedSize failed with code {rc}");
-    assert!(num_bytes > 0);
-
-    let mut buffer = vec![0u8; num_bytes as usize];
-    let mut bytes_written: u32 = 0;
-    let rc = unsafe {
-        lerc_encode(
-            data.as_ptr() as *const std::ffi::c_void,
-            data_type,
-            n_depth,
-            n_cols,
-            n_rows,
-            n_bands,
-            n_masks,
-            valid_ptr,
-            max_z_err,
-            buffer.as_mut_ptr(),
-            num_bytes,
-            &mut bytes_written,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_encode failed with code {rc}");
-    buffer.truncate(bytes_written as usize);
-    buffer
-}
-
-fn cpp_encode_for_version<T: Copy>(
-    data: &[T],
-    codec_version: i32,
-    data_type: u32,
-    n_cols: i32,
-    n_rows: i32,
-    n_depth: i32,
-    n_bands: i32,
-    valid_bytes: Option<&[u8]>,
-    max_z_err: f64,
-) -> Vec<u8> {
-    let n_masks = if valid_bytes.is_some() { 1i32 } else { 0i32 };
-    let valid_ptr = valid_bytes
-        .map(|v| v.as_ptr())
-        .unwrap_or(std::ptr::null());
-
-    let mut num_bytes: u32 = 0;
-    let rc = unsafe {
-        lerc_computeCompressedSizeForVersion(
-            data.as_ptr() as *const std::ffi::c_void,
-            codec_version,
-            data_type,
-            n_depth,
-            n_cols,
-            n_rows,
-            n_bands,
-            n_masks,
-            valid_ptr,
-            max_z_err,
-            &mut num_bytes,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_computeCompressedSizeForVersion failed: {rc}");
-    assert!(num_bytes > 0);
-
-    let mut buffer = vec![0u8; num_bytes as usize];
-    let mut bytes_written: u32 = 0;
-    let rc = unsafe {
-        lerc_encodeForVersion(
-            data.as_ptr() as *const std::ffi::c_void,
-            codec_version,
-            data_type,
-            n_depth,
-            n_cols,
-            n_rows,
-            n_bands,
-            n_masks,
-            valid_ptr,
-            max_z_err,
-            buffer.as_mut_ptr(),
-            num_bytes,
-            &mut bytes_written,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_encodeForVersion failed: {rc}");
-    buffer.truncate(bytes_written as usize);
-    buffer
-}
-
-fn cpp_decode<T: Copy + Default>(
-    blob: &[u8],
-    data_type: u32,
-    n_cols: i32,
-    n_rows: i32,
-    n_depth: i32,
-    n_bands: i32,
-) -> (Vec<T>, Vec<u8>) {
-    let pixel_count =
-        (n_cols as usize) * (n_rows as usize) * (n_depth as usize) * (n_bands as usize);
-    let mut data = vec![T::default(); pixel_count];
-    let mask_size = (n_cols as usize) * (n_rows as usize);
-    let mut valid_bytes = vec![0u8; mask_size];
-
-    let rc = unsafe {
-        lerc_decode(
-            blob.as_ptr(),
-            blob.len() as u32,
-            1,
-            valid_bytes.as_mut_ptr(),
-            n_depth,
-            n_cols,
-            n_rows,
-            n_bands,
-            data_type,
-            data.as_mut_ptr() as *mut std::ffi::c_void,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_decode failed with code {rc}");
-    (data, valid_bytes)
-}
-
-fn cpp_get_blob_info(blob: &[u8]) -> ([u32; 11], [f64; 3]) {
-    let mut info = [0u32; 11];
-    let mut range = [0.0f64; 3];
-    let rc = unsafe {
-        lerc_getBlobInfo(
-            blob.as_ptr(),
-            blob.len() as u32,
-            info.as_mut_ptr(),
-            range.as_mut_ptr(),
-            info.len() as i32,
-            range.len() as i32,
-        )
-    };
-    assert_eq!(rc, 0, "lerc_getBlobInfo failed with code {rc}");
-    (info, range)
-}
 
 // ---------------------------------------------------------------------------
 // Assertion helpers
@@ -390,14 +106,14 @@ fn rust_encode_cpp_decode_f32_near_lossless() {
 
     let blob = lerc::encode_typed(width, height, &data, max_z_err).unwrap();
 
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
     assert_eq!(info[INFO_N_COLS], width);
     assert_eq!(info[INFO_N_ROWS], height);
     assert_eq!(info[INFO_N_BANDS], 1);
 
     let (decoded, valid_bytes): (Vec<f32>, _) =
-        cpp_decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
     assert!(valid_bytes.iter().all(|&v| v == 1));
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
@@ -413,7 +129,7 @@ fn rust_encode_cpp_decode_f32_lossy() {
     for max_z_err in [0.01, 0.1, 1.0] {
         let blob = lerc::encode_typed(width, height, &data, max_z_err).unwrap();
 
-        let (info, range) = cpp_get_blob_info(&blob);
+        let (info, range) = cpp::get_blob_info(&blob);
         assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
         assert!(
             range[RANGE_MAX_Z_ERR_USED] <= max_z_err + f64::EPSILON,
@@ -422,7 +138,7 @@ fn rust_encode_cpp_decode_f32_lossy() {
         );
 
         let (decoded, _): (Vec<f32>, _) =
-            cpp_decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+            cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
         for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
             assert_f32_close(o, d, max_z_err, format_args!("maxZErr={max_z_err} pixel {i}"));
@@ -438,11 +154,11 @@ fn rust_encode_cpp_decode_f64_near_lossless() {
 
     let blob = lerc::encode_typed(width, height, &data, max_z_err).unwrap();
 
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_DOUBLE);
 
     let (decoded, _): (Vec<f64>, _) =
-        cpp_decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
 
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
         assert_f64_close(o, d, max_z_err, format_args!("pixel {i}"));
@@ -458,7 +174,7 @@ fn rust_encode_cpp_decode_f64_lossy() {
     let blob = lerc::encode_typed(width, height, &data, max_z_err).unwrap();
 
     let (decoded, _): (Vec<f64>, _) =
-        cpp_decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
 
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
         assert_f64_close(o, d, max_z_err, format_args!("pixel {i}"));
@@ -471,11 +187,11 @@ fn rust_encode_cpp_decode_u8() {
     let data = make_ramp_u8(width, height);
 
     let blob = lerc::encode_typed(width, height, &data, 0.5).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_UCHAR);
 
     let (decoded, _): (Vec<u8>, _) =
-        cpp_decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -487,11 +203,11 @@ fn rust_encode_cpp_decode_i8() {
         .collect();
 
     let blob = lerc::encode_typed(width, height, &data, 0.5).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_CHAR);
 
     let (decoded, _): (Vec<i8>, _) =
-        cpp_decode(&blob, DT_CHAR, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_CHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -501,11 +217,11 @@ fn rust_encode_cpp_decode_i16() {
     let data = make_ramp_i16(width, height);
 
     let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_SHORT);
 
     let (decoded, _): (Vec<i16>, _) =
-        cpp_decode(&blob, DT_SHORT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_SHORT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -515,11 +231,11 @@ fn rust_encode_cpp_decode_u16() {
     let data = make_ramp_u16(width, height);
 
     let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_USHORT);
 
     let (decoded, _): (Vec<u16>, _) =
-        cpp_decode(&blob, DT_USHORT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_USHORT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -529,11 +245,11 @@ fn rust_encode_cpp_decode_u32() {
     let data = make_ramp_u32(width, height);
 
     let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_UINT);
 
     let (decoded, _): (Vec<u32>, _) =
-        cpp_decode(&blob, DT_UINT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_UINT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -543,11 +259,11 @@ fn rust_encode_cpp_decode_i32() {
     let data = make_ramp_i32(width, height);
 
     let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_INT);
 
     let (decoded, _): (Vec<i32>, _) =
-        cpp_decode(&blob, DT_INT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_INT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -560,11 +276,11 @@ fn rust_encode_cpp_decode_with_mask() {
 
     let blob = lerc::encode_typed_masked(width, height, &data, &mask, max_z_err).unwrap();
 
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
 
     let (decoded, dec_valid): (Vec<f32>, _) =
-        cpp_decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
     let n = (width * height) as usize;
     for i in 0..n {
@@ -586,7 +302,7 @@ fn cpp_encode_rust_decode_f32_lossless() {
     let data = make_gradient_f32(width, height);
 
     let blob =
-        cpp_encode_for_version(&data, 5, DT_FLOAT, width as i32, height as i32, 1, 1, None, 0.0);
+        cpp::encode_for_version(&data, 5, DT_FLOAT, width as i32, height as i32, 1, 1, None, 0.0);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.width, width);
@@ -605,7 +321,7 @@ fn cpp_encode_rust_decode_f32_lossy() {
     let data = make_gradient_f32(width, height);
 
     for max_z_err in [0.01, 0.1, 1.0] {
-        let blob = cpp_encode(
+        let blob = cpp::encode(
             &data,
             DT_FLOAT,
             width as i32,
@@ -630,7 +346,7 @@ fn cpp_encode_rust_decode_f64_lossless() {
     let (width, height) = (32, 32);
     let data = make_gradient_f64(width, height);
 
-    let blob = cpp_encode_for_version(
+    let blob = cpp::encode_for_version(
         &data, 5, DT_DOUBLE, width as i32, height as i32, 1, 1, None, 0.0,
     );
 
@@ -647,7 +363,7 @@ fn cpp_encode_rust_decode_u8() {
     let (width, height) = (64, 64);
     let data = make_ramp_u8(width, height);
 
-    let blob = cpp_encode(&data, DT_UCHAR, width as i32, height as i32, 1, 1, None, 0.5);
+    let blob = cpp::encode(&data, DT_UCHAR, width as i32, height as i32, 1, 1, None, 0.5);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Byte);
@@ -661,7 +377,7 @@ fn cpp_encode_rust_decode_i8() {
         .map(|i| ((i % 256) as i16 - 128) as i8)
         .collect();
 
-    let blob = cpp_encode(&data, DT_CHAR, width, height, 1, 1, None, 0.5);
+    let blob = cpp::encode(&data, DT_CHAR, width, height, 1, 1, None, 0.5);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Char);
@@ -673,7 +389,7 @@ fn cpp_encode_rust_decode_i16() {
     let (width, height) = (64, 64);
     let data = make_ramp_i16(width, height);
 
-    let blob = cpp_encode(&data, DT_SHORT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(&data, DT_SHORT, width as i32, height as i32, 1, 1, None, 0.0);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Short);
@@ -685,7 +401,7 @@ fn cpp_encode_rust_decode_u16() {
     let (width, height) = (64, 64);
     let data = make_ramp_u16(width, height);
 
-    let blob = cpp_encode(&data, DT_USHORT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(&data, DT_USHORT, width as i32, height as i32, 1, 1, None, 0.0);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::UShort);
@@ -697,7 +413,7 @@ fn cpp_encode_rust_decode_u32() {
     let (width, height) = (64, 64);
     let data = make_ramp_u32(width, height);
 
-    let blob = cpp_encode(&data, DT_UINT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(&data, DT_UINT, width as i32, height as i32, 1, 1, None, 0.0);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::UInt);
@@ -709,7 +425,7 @@ fn cpp_encode_rust_decode_i32() {
     let (width, height) = (64, 64);
     let data = make_ramp_i32(width, height);
 
-    let blob = cpp_encode(&data, DT_INT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(&data, DT_INT, width as i32, height as i32, 1, 1, None, 0.0);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Int);
@@ -723,7 +439,7 @@ fn cpp_encode_rust_decode_with_mask() {
     let (_mask, valid_bytes) = make_validity_mask(width, height);
     let max_z_err = 0.01;
 
-    let blob = cpp_encode(
+    let blob = cpp::encode(
         &data,
         DT_FLOAT,
         width as i32,
@@ -784,13 +500,13 @@ fn rust_encode_cpp_decode_multiband_f32() {
 
     let blob = lerc::encode(&image, max_z_err).unwrap();
 
-    let (info, _) = cpp_get_blob_info(&blob);
+    let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
     assert_eq!(info[INFO_N_COLS], width);
     assert_eq!(info[INFO_N_ROWS], height);
     assert_eq!(info[INFO_N_BANDS], n_bands);
 
-    let (decoded, _): (Vec<f32>, _) = cpp_decode(
+    let (decoded, _): (Vec<f32>, _) = cpp::decode(
         &blob,
         DT_FLOAT,
         width as i32,
@@ -817,7 +533,7 @@ fn cpp_encode_rust_decode_multiband_u8() {
         }
     }
 
-    let blob = cpp_encode(&data, DT_UCHAR, w, h, 1, nb, None, 0.5);
+    let blob = cpp::encode(&data, DT_UCHAR, w, h, 1, nb, None, 0.5);
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Byte);
@@ -837,8 +553,8 @@ fn roundtrip_rust_cpp_rust_f32() {
 
     let rust_blob = lerc::encode_typed(width, height, &original, max_z_err).unwrap();
     let (cpp_decoded, _): (Vec<f32>, _) =
-        cpp_decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
-    let cpp_blob = cpp_encode(
+        cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+    let cpp_blob = cpp::encode(
         &cpp_decoded,
         DT_FLOAT,
         width as i32,
@@ -862,7 +578,7 @@ fn roundtrip_cpp_rust_cpp_f32() {
     let original = make_gradient_f32(width, height);
     let max_z_err = 0.01;
 
-    let cpp_blob = cpp_encode(
+    let cpp_blob = cpp::encode(
         &original,
         DT_FLOAT,
         width as i32,
@@ -876,7 +592,7 @@ fn roundtrip_cpp_rust_cpp_f32() {
     let rust_decoded: Vec<f32> = rust_image.as_typed::<f32>().unwrap().to_vec();
     let rust_blob = lerc::encode_typed(width, height, &rust_decoded, max_z_err).unwrap();
     let (final_decoded, _): (Vec<f32>, _) =
-        cpp_decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
     for (i, (&o, &d)) in original.iter().zip(final_decoded.iter()).enumerate() {
         assert_f32_close(o, d, 2.0 * max_z_err, format_args!("pixel {i}"));
@@ -890,10 +606,10 @@ fn roundtrip_rust_cpp_rust_u8_lossless() {
 
     let rust_blob = lerc::encode_typed(width, height, &original, 0.5).unwrap();
     let (cpp_decoded, _): (Vec<u8>, _) =
-        cpp_decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
+        cpp::decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(original, cpp_decoded);
 
-    let cpp_blob = cpp_encode(
+    let cpp_blob = cpp::encode(
         &cpp_decoded,
         DT_UCHAR,
         width as i32,
@@ -912,7 +628,7 @@ fn roundtrip_cpp_rust_cpp_u8_lossless() {
     let (width, height) = (64, 64);
     let original = make_ramp_u8(width, height);
 
-    let cpp_blob = cpp_encode(
+    let cpp_blob = cpp::encode(
         &original,
         DT_UCHAR,
         width as i32,
@@ -928,7 +644,7 @@ fn roundtrip_cpp_rust_cpp_u8_lossless() {
 
     let rust_blob = lerc::encode_typed(width, height, &rust_decoded, 0.5).unwrap();
     let (final_decoded, _): (Vec<u8>, _) =
-        cpp_decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
+        cpp::decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(original, final_decoded);
 }
 
@@ -942,13 +658,13 @@ fn roundtrip_with_mask_f32() {
     let rust_blob =
         lerc::encode_typed_masked(width, height, &original, &mask, max_z_err).unwrap();
     let (cpp_decoded, cpp_valid): (Vec<f32>, _) =
-        cpp_decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
     for i in 0..(width * height) as usize {
         assert_eq!(valid_bytes[i], cpp_valid[i], "mask mismatch at pixel {i}");
     }
 
-    let cpp_blob = cpp_encode(
+    let cpp_blob = cpp::encode(
         &cpp_decoded,
         DT_FLOAT,
         width as i32,
@@ -993,7 +709,7 @@ fn rust_encode_cpp_decode_large_f32() {
 
     let blob = lerc::encode_typed(width, height, &data, max_z_err).unwrap();
     let (decoded, _): (Vec<f32>, _) =
-        cpp_decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
         assert_f32_close(o, d, max_z_err, format_args!("pixel {i}"));
@@ -1006,7 +722,7 @@ fn cpp_encode_rust_decode_large_f32() {
     let data = make_gradient_f32(width, height);
     let max_z_err = 0.001;
 
-    let blob = cpp_encode(
+    let blob = cpp::encode(
         &data,
         DT_FLOAT,
         width as i32,
@@ -1036,7 +752,7 @@ fn rust_encode_cpp_decode_constant_f32() {
 
     let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
     let (decoded, _): (Vec<f32>, _) =
-        cpp_decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -1045,7 +761,7 @@ fn cpp_encode_rust_decode_constant_f32() {
     let (width, height): (i32, i32) = (32, 32);
     let data = vec![42.5f32; (width * height) as usize];
 
-    let blob = cpp_encode(&data, DT_FLOAT, width, height, 1, 1, None, 0.0);
+    let blob = cpp::encode(&data, DT_FLOAT, width, height, 1, 1, None, 0.0);
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(data.as_slice(), image.as_typed::<f32>().unwrap());
 }
@@ -1057,6 +773,6 @@ fn rust_encode_cpp_decode_all_zeros_u8() {
 
     let blob = lerc::encode_typed(width, height, &data, 0.5).unwrap();
     let (decoded, _): (Vec<u8>, _) =
-        cpp_decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
+        cpp::decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }

@@ -1,0 +1,10 @@
+[package]
+name = "lerc-cpp-ref"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "C++ LERC reference library FFI bindings (test helper)"
+publish = false
+
+[build-dependencies]
+cc = "1"

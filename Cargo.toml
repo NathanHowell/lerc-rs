@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/lerc-cpp-ref"]
+
 [package]
 name = "lerc"
 version = "0.1.0"
@@ -9,10 +12,8 @@ description = "Pure Rust LERC (Limited Error Raster Compression) encoder and dec
 default = ["std"]
 std = ["alloc"]
 alloc = []
-cpp-validation = ["dep:cc"]
-
-[build-dependencies]
-cc = { version = "1", optional = true }
+cpp-validation = []
 
 [dev-dependencies]
 proptest = "1"
+lerc-cpp-ref = { path = "crates/lerc-cpp-ref" }

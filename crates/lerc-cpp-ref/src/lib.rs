@@ -1,0 +1,231 @@
+//! FFI bindings to the C++ LERC reference implementation.
+//!
+//! This crate exists solely as a test helper — it compiles the C++ LercLib
+//! and exposes the C API for cross-validation against the pure Rust codec.
+
+#![allow(clippy::too_many_arguments)]
+
+use std::ffi::c_void;
+use std::ptr;
+
+unsafe extern "C" {
+    fn lerc_computeCompressedSize(
+        pData: *const c_void,
+        dataType: u32,
+        nDepth: i32,
+        nCols: i32,
+        nRows: i32,
+        nBands: i32,
+        nMasks: i32,
+        pValidBytes: *const u8,
+        maxZErr: f64,
+        numBytes: *mut u32,
+    ) -> u32;
+
+    fn lerc_encode(
+        pData: *const c_void,
+        dataType: u32,
+        nDepth: i32,
+        nCols: i32,
+        nRows: i32,
+        nBands: i32,
+        nMasks: i32,
+        pValidBytes: *const u8,
+        maxZErr: f64,
+        pOutBuffer: *mut u8,
+        outBufferSize: u32,
+        nBytesWritten: *mut u32,
+    ) -> u32;
+
+    fn lerc_computeCompressedSizeForVersion(
+        pData: *const c_void,
+        codecVersion: i32,
+        dataType: u32,
+        nDepth: i32,
+        nCols: i32,
+        nRows: i32,
+        nBands: i32,
+        nMasks: i32,
+        pValidBytes: *const u8,
+        maxZErr: f64,
+        numBytes: *mut u32,
+    ) -> u32;
+
+    fn lerc_encodeForVersion(
+        pData: *const c_void,
+        codecVersion: i32,
+        dataType: u32,
+        nDepth: i32,
+        nCols: i32,
+        nRows: i32,
+        nBands: i32,
+        nMasks: i32,
+        pValidBytes: *const u8,
+        maxZErr: f64,
+        pOutBuffer: *mut u8,
+        outBufferSize: u32,
+        nBytesWritten: *mut u32,
+    ) -> u32;
+
+    fn lerc_getBlobInfo(
+        pLercBlob: *const u8,
+        blobSize: u32,
+        infoArray: *mut u32,
+        dataRangeArray: *mut f64,
+        infoArraySize: i32,
+        dataRangeArraySize: i32,
+    ) -> u32;
+
+    fn lerc_decode(
+        pLercBlob: *const u8,
+        blobSize: u32,
+        nMasks: i32,
+        pValidBytes: *mut u8,
+        nDepth: i32,
+        nCols: i32,
+        nRows: i32,
+        nBands: i32,
+        dataType: u32,
+        pData: *mut c_void,
+    ) -> u32;
+}
+
+/// Encode data using the C++ reference implementation.
+pub fn encode<T: Copy>(
+    data: &[T],
+    data_type: u32,
+    n_cols: i32,
+    n_rows: i32,
+    n_depth: i32,
+    n_bands: i32,
+    valid_bytes: Option<&[u8]>,
+    max_z_err: f64,
+) -> Vec<u8> {
+    let n_masks = if valid_bytes.is_some() { 1i32 } else { 0i32 };
+    let valid_ptr = valid_bytes.map(|v| v.as_ptr()).unwrap_or(ptr::null());
+
+    let mut num_bytes: u32 = 0;
+    let rc = unsafe {
+        lerc_computeCompressedSize(
+            data.as_ptr() as *const c_void,
+            data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
+            valid_ptr, max_z_err, &mut num_bytes,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_computeCompressedSize failed: {rc}");
+
+    let mut buffer = vec![0u8; num_bytes as usize];
+    let mut bytes_written: u32 = 0;
+    let rc = unsafe {
+        lerc_encode(
+            data.as_ptr() as *const c_void,
+            data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
+            valid_ptr, max_z_err,
+            buffer.as_mut_ptr(), num_bytes, &mut bytes_written,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_encode failed: {rc}");
+    buffer.truncate(bytes_written as usize);
+    buffer
+}
+
+/// Encode data using the C++ reference at a specific codec version.
+pub fn encode_for_version<T: Copy>(
+    data: &[T],
+    codec_version: i32,
+    data_type: u32,
+    n_cols: i32,
+    n_rows: i32,
+    n_depth: i32,
+    n_bands: i32,
+    valid_bytes: Option<&[u8]>,
+    max_z_err: f64,
+) -> Vec<u8> {
+    let n_masks = if valid_bytes.is_some() { 1i32 } else { 0i32 };
+    let valid_ptr = valid_bytes.map(|v| v.as_ptr()).unwrap_or(ptr::null());
+
+    let mut num_bytes: u32 = 0;
+    let rc = unsafe {
+        lerc_computeCompressedSizeForVersion(
+            data.as_ptr() as *const c_void,
+            codec_version, data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
+            valid_ptr, max_z_err, &mut num_bytes,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_computeCompressedSizeForVersion failed: {rc}");
+
+    let mut buffer = vec![0u8; num_bytes as usize];
+    let mut bytes_written: u32 = 0;
+    let rc = unsafe {
+        lerc_encodeForVersion(
+            data.as_ptr() as *const c_void,
+            codec_version, data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
+            valid_ptr, max_z_err,
+            buffer.as_mut_ptr(), num_bytes, &mut bytes_written,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_encodeForVersion failed: {rc}");
+    buffer.truncate(bytes_written as usize);
+    buffer
+}
+
+/// Decode a LERC blob using the C++ reference implementation.
+pub fn decode<T: Copy + Default>(
+    blob: &[u8],
+    data_type: u32,
+    n_cols: i32,
+    n_rows: i32,
+    n_depth: i32,
+    n_bands: i32,
+) -> (Vec<T>, Vec<u8>) {
+    let pixel_count =
+        (n_cols as usize) * (n_rows as usize) * (n_depth as usize) * (n_bands as usize);
+    let mut data = vec![T::default(); pixel_count];
+    let mask_size = (n_cols as usize) * (n_rows as usize);
+    let mut valid_bytes = vec![0u8; mask_size];
+
+    let rc = unsafe {
+        lerc_decode(
+            blob.as_ptr(), blob.len() as u32,
+            1, valid_bytes.as_mut_ptr(),
+            n_depth, n_cols, n_rows, n_bands, data_type,
+            data.as_mut_ptr() as *mut c_void,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_decode failed: {rc}");
+    (data, valid_bytes)
+}
+
+/// Get blob info using the C++ reference implementation.
+pub fn get_blob_info(blob: &[u8]) -> ([u32; 11], [f64; 3]) {
+    let mut info = [0u32; 11];
+    let mut range = [0.0f64; 3];
+    let rc = unsafe {
+        lerc_getBlobInfo(
+            blob.as_ptr(), blob.len() as u32,
+            info.as_mut_ptr(), range.as_mut_ptr(),
+            info.len() as i32, range.len() as i32,
+        )
+    };
+    assert_eq!(rc, 0, "lerc_getBlobInfo failed: {rc}");
+    (info, range)
+}
+
+// C++ data type codes
+pub const DT_CHAR: u32 = 0;
+pub const DT_UCHAR: u32 = 1;
+pub const DT_SHORT: u32 = 2;
+pub const DT_USHORT: u32 = 3;
+pub const DT_INT: u32 = 4;
+pub const DT_UINT: u32 = 5;
+pub const DT_FLOAT: u32 = 6;
+pub const DT_DOUBLE: u32 = 7;
+
+// InfoArray indices (from Lerc_types.h)
+pub const INFO_DATA_TYPE: usize = 1;
+pub const INFO_N_COLS: usize = 3;
+pub const INFO_N_ROWS: usize = 4;
+pub const INFO_N_BANDS: usize = 5;
+
+// DataRangeArray indices
+pub const RANGE_MAX_Z_ERR_USED: usize = 2;

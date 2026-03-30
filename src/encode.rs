@@ -41,6 +41,34 @@ fn encode_typed<T: LercDataType>(
         max_z_error.max(0.0)
     };
 
+    // For float types with maxZError > 0, try to raise maxZError without extra loss.
+    // If float data has limited precision (e.g. values stored as "%.2f"), the actual
+    // rounding error is already bounded and we can safely use a coarser quantization.
+    let max_z_error = if !T::is_integer() && max_z_error > 0.0 {
+        let mut raised = max_z_error;
+        // We need any band's mask; use the first one for the scan.
+        let mask = if !image.valid_masks.is_empty() {
+            &image.valid_masks[0]
+        } else {
+            // Should not happen for a valid image, but be safe.
+            &image.valid_masks[0]
+        };
+        if try_raise_max_z_error(
+            data,
+            mask,
+            width,
+            height,
+            n_depth,
+            &mut raised,
+        ) {
+            raised
+        } else {
+            max_z_error
+        }
+    } else {
+        max_z_error
+    };
+
     let mut result = Vec::new();
 
     for band in 0..n_bands {
@@ -57,6 +85,151 @@ fn encode_typed<T: LercDataType>(
     }
 
     Ok(result)
+}
+
+/// Try to raise `max_z_error` for float data without introducing additional loss.
+///
+/// When float values have limited precision (e.g., stored as "%.2f"), raising
+/// maxZError to align with that precision loses nothing because the data's
+/// inherent rounding error is already bounded by the original maxZError.
+///
+/// This mirrors the C++ `Lerc2::TryRaiseMaxZError` algorithm.
+fn try_raise_max_z_error<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    max_z_error: &mut f64,
+) -> bool {
+    if T::is_integer() || *max_z_error <= 0.0 {
+        return false;
+    }
+
+    let num_valid = mask.count_valid().min(width * height);
+    if num_valid == 0 {
+        return false;
+    }
+
+    // Candidate precision levels (zErrCand) and their reciprocal multipliers (zFacCand).
+    // zErr = zErrCand / 2 is the half-quantum; zFac = 1 / (2 * zErr) = zFacCand.
+    let z_err_cand: [f64; 9] = [1.0, 0.5, 0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001];
+    let z_fac_cand: [i32; 9] = [1, 2, 10, 20, 100, 200, 1000, 2000, 10000];
+
+    // Keep only candidates where zErrCand[i] / 2 > maxZError (i.e., strictly coarser).
+    let mut z_err: Vec<f64> = Vec::new();
+    let mut z_fac: Vec<i32> = Vec::new();
+    let mut round_err: Vec<f64> = Vec::new();
+
+    for i in 0..z_err_cand.len() {
+        if z_err_cand[i] / 2.0 > *max_z_error {
+            z_err.push(z_err_cand[i] / 2.0);
+            z_fac.push(z_fac_cand[i]);
+            round_err.push(0.0);
+        }
+    }
+
+    if z_err.is_empty() {
+        return false;
+    }
+
+    let all_valid = num_valid == width * height;
+
+    if n_depth == 1 && all_valid {
+        // Optimized common case: single depth, all pixels valid
+        for i in 0..height {
+            let n_cand = z_err.len();
+
+            for j in 0..width {
+                let k = i * width + j;
+                let x = data[k].to_f64();
+
+                for n in 0..n_cand {
+                    let z = x * z_fac[n] as f64;
+                    // If z is already an integer, this candidate (and all coarser
+                    // ones before it) have zero error for this value.
+                    if z == (z as i64) as f64 {
+                        break;
+                    }
+                    let delta = (z + 0.5).floor() - z;
+                    let delta = delta.abs();
+                    if delta > round_err[n] {
+                        round_err[n] = delta;
+                    }
+                }
+            }
+
+            if !prune_candidates(&mut round_err, &mut z_err, &mut z_fac, *max_z_error) {
+                return false;
+            }
+        }
+    } else {
+        // General case: nDepth > 1 or not all pixels valid
+        for i in 0..height {
+            let n_cand = z_err.len();
+
+            for j in 0..width {
+                let k = i * width + j;
+                if !all_valid && !mask.is_valid(k) {
+                    continue;
+                }
+                for m in 0..n_depth {
+                    let x = data[k * n_depth + m].to_f64();
+
+                    for n in 0..n_cand {
+                        let z = x * z_fac[n] as f64;
+                        if z == (z as i64) as f64 {
+                            break;
+                        }
+                        let delta = (z + 0.5).floor() - z;
+                        let delta = delta.abs();
+                        if delta > round_err[n] {
+                            round_err[n] = delta;
+                        }
+                    }
+                }
+            }
+
+            if !prune_candidates(&mut round_err, &mut z_err, &mut z_fac, *max_z_error) {
+                return false;
+            }
+        }
+    }
+
+    // Pick the first remaining candidate whose actual rounding error fits.
+    for n in 0..z_err.len() {
+        if round_err[n] / z_fac[n] as f64 <= *max_z_error / 2.0 {
+            *max_z_error = z_err[n];
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Remove candidates whose accumulated rounding error exceeds the budget.
+/// Returns false if no candidates remain.
+fn prune_candidates(
+    round_err: &mut Vec<f64>,
+    z_err: &mut Vec<f64>,
+    z_fac: &mut Vec<i32>,
+    max_z_error: f64,
+) -> bool {
+    let n_cand = z_err.len();
+    if n_cand == 0 || max_z_error <= 0.0 {
+        return false;
+    }
+
+    // Walk backwards so removal indices stay valid.
+    for n in (0..n_cand).rev() {
+        if round_err[n] / z_fac[n] as f64 > max_z_error / 2.0 {
+            round_err.remove(n);
+            z_err.remove(n);
+            z_fac.remove(n);
+        }
+    }
+
+    !z_err.is_empty()
 }
 
 fn encode_one_band<T: LercDataType>(

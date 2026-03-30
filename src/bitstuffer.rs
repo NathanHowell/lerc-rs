@@ -410,33 +410,67 @@ pub fn num_bits_needed(max_elem: u32) -> u32 {
     num_bits
 }
 
+/// Count distinct values cheaply without sorting.
+///
+/// Uses a bitset for small domains or sampling for large ones.
+fn count_distinct_fast(data: &[u32], max_elem: u32) -> u32 {
+    if max_elem < 65536 {
+        // Use a bitset: one bit per possible value
+        let num_words = (max_elem as usize / 64) + 1;
+        let mut bitset = vec![0u64; num_words];
+        for &val in data {
+            let word = val as usize / 64;
+            let bit = val as usize % 64;
+            bitset[word] |= 1u64 << bit;
+        }
+        bitset.iter().map(|w| w.count_ones()).sum()
+    } else {
+        // For large domains, sample every Nth element to estimate distinct count.
+        // Use a small hash-set style approach on the sample.
+        let step = (data.len() / 512).max(1);
+        let mut seen = Vec::with_capacity(256);
+        for (i, &val) in data.iter().enumerate() {
+            if i % step != 0 {
+                continue;
+            }
+            if !seen.contains(&val) {
+                seen.push(val);
+                if seen.len() > 255 {
+                    return 256; // Exceeds LUT threshold
+                }
+            }
+        }
+        seen.len() as u32
+    }
+}
+
 /// Decide whether LUT encoding is beneficial, and return the sorted data if so.
+///
+/// Uses a cheap histogram/bitset first to count distinct values, avoiding the
+/// expensive sort when LUT clearly won't help.
 pub fn should_use_lut(data: &[u32]) -> Option<Vec<(u32, u32)>> {
     if data.len() < 2 {
         return None;
     }
 
-    let mut sorted: Vec<(u32, u32)> = data.iter().copied().zip(0u32..).collect();
-    sorted.sort_by_key(|&(val, _)| val);
-
-    let max_elem = sorted.last().unwrap().0;
-    let num_elem = sorted.len() as u32;
-
+    let max_elem = data.iter().copied().max().unwrap_or(0);
+    let num_elem = data.len() as u32;
     let num_bits = num_bits_needed(max_elem);
-    let num_bytes_simple =
-        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
-    // Count distinct values (excluding the min which maps to 0)
-    let mut n_lut = 0u32;
-    for i in 1..sorted.len() {
-        if sorted[i].0 != sorted[i - 1].0 {
-            n_lut += 1;
-        }
-    }
+    // Quick distinct-count check: if too many distinct values, LUT won't help
+    let n_distinct = count_distinct_fast(data, max_elem);
 
-    if !(1..255).contains(&n_lut) {
+    // LUT needs 1..255 distinct values (n_lut = n_distinct - 1 since min maps to 0)
+    // If n_distinct > 255 or n_distinct < 2, skip sorting
+    if !(2..=255).contains(&n_distinct) {
         return None;
     }
+
+    // Estimate whether LUT can beat simple encoding before sorting.
+    // n_lut = n_distinct - 1 (the min value is implicit)
+    let n_lut = n_distinct - 1;
+    let num_bytes_simple =
+        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
     let mut n_bits_lut = 0u32;
     while (n_lut >> n_bits_lut) != 0 {
@@ -447,11 +481,15 @@ pub fn should_use_lut(data: &[u32]) -> Option<Vec<(u32, u32)>> {
         1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
             + ((num_elem * n_bits_lut + 7) >> 3);
 
-    if num_bytes_lut < num_bytes_simple {
-        Some(sorted)
-    } else {
-        None
+    if num_bytes_lut >= num_bytes_simple {
+        return None;
     }
+
+    // Only now do the expensive sort
+    let mut sorted: Vec<(u32, u32)> = data.iter().copied().zip(0u32..).collect();
+    sorted.sort_by_key(|&(val, _)| val);
+
+    Some(sorted)
 }
 
 #[cfg(test)]

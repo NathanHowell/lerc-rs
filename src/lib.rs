@@ -1,17 +1,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(
-    clippy::too_many_arguments,
-    clippy::manual_div_ceil,
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::cast_lossless,
-    clippy::manual_range_contains,
-    clippy::ptr_arg,
-    clippy::needless_range_loop,
-    clippy::manual_memcpy,
-    clippy::identity_op
 )]
 
 extern crate alloc;

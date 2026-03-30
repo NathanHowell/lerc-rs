@@ -78,9 +78,6 @@ impl HeaderInfo {
         size
     }
 
-    pub fn num_pixels(&self) -> usize {
-        self.n_rows as usize * self.n_cols as usize
-    }
 }
 
 struct Cursor<'a> {
@@ -140,7 +137,7 @@ pub fn read_header(data: &[u8]) -> Result<(HeaderInfo, usize)> {
     }
 
     let version = c.read_i32()?;
-    if version < MIN_VERSION || version > MAX_VERSION {
+    if !(MIN_VERSION..=MAX_VERSION).contains(&version) {
         return Err(LercError::UnsupportedVersion(version));
     }
 
@@ -275,7 +272,7 @@ pub fn write_header(header: &HeaderInfo) -> Vec<u8> {
 }
 
 /// Patch the blob size and checksum into an already-written blob.
-pub fn finalize_blob(blob: &mut Vec<u8>) {
+pub fn finalize_blob(blob: &mut [u8]) {
     let blob_size = blob.len() as i32;
 
     // Patch blobSize field.

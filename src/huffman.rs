@@ -317,7 +317,7 @@ impl HuffmanCodec {
             total_bits += self.code_table[k].0 as u64;
         }
 
-        let num_uints = ((total_bits + 31) / 32) as usize;
+        let num_uints = total_bits.div_ceil(32) as usize;
         let start = buf.len();
         buf.resize(start + num_uints * 4 + 4, 0); // +4 for safety
 
@@ -711,7 +711,7 @@ pub fn encode_huffman(
         total_bits += codec.code_table[b as usize].0 as u64;
     }
 
-    let num_uints = (((total_bits + 7) / 8 + 3) / 4 + 1) as usize;
+    let num_uints = (total_bits.div_ceil(8).div_ceil(4) + 1) as usize;
     let mut encoded = vec![0u8; num_uints * 4];
     let mut bit_pos = 0i32;
 

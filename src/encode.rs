@@ -262,9 +262,9 @@ fn prune_candidates(
 #[inline]
 fn add_uint_to_counts(counts: &mut [i32], mut val: u32, n_bits: usize) {
     counts[0] += (val & 1) as i32;
-    for i in 1..n_bits {
+    for count in &mut counts[1..n_bits] {
         val >>= 1;
-        counts[i] += (val & 1) as i32;
+        *count += (val & 1) as i32;
     }
 }
 
@@ -273,9 +273,9 @@ fn add_uint_to_counts(counts: &mut [i32], mut val: u32, n_bits: usize) {
 #[inline]
 fn add_int_to_counts(counts: &mut [i32], mut val: i32, n_bits: usize) {
     counts[0] += val & 1;
-    for i in 1..n_bits {
+    for count in &mut counts[1..n_bits] {
         val >>= 1;
-        counts[i] += val & 1;
+        *count += val & 1;
     }
 }
 
@@ -283,6 +283,7 @@ fn add_int_to_counts(counts: &mut [i32], mut val: i32, n_bits: usize) {
 /// neighboring pixels to find bit planes that look like random noise (1-bit
 /// frequency close to 0.5). Returns `Some(new_max_z_error)` if noisy bit planes
 /// were found, or `None` if the data doesn't qualify.
+#[allow(clippy::too_many_arguments)]
 fn try_bit_plane_compression<T: LercDataType>(
     data: &[T],
     valid_masks: &[BitMask],
@@ -650,8 +651,8 @@ fn encode_one_band<T: LercDataType>(
                     }
                     // Update min/max to include sentinel
                     overall_min = overall_min.min(sentinel);
-                    for m in 0..n_depth {
-                        z_min_vec[m] = z_min_vec[m].min(sentinel);
+                    for val in &mut z_min_vec[..n_depth] {
+                        *val = val.min(sentinel);
                     }
                     data_buf = Some(buf);
                 } else {
@@ -721,11 +722,11 @@ fn encode_one_band<T: LercDataType>(
     }
 
     // Write per-depth min/max ranges (always for v6)
-    for m in 0..n_depth {
-        write_typed_value::<T>(&mut blob, z_min_vec[m]);
+    for val in &z_min_vec[..n_depth] {
+        write_typed_value::<T>(&mut blob, *val);
     }
-    for m in 0..n_depth {
-        write_typed_value::<T>(&mut blob, z_max_vec[m]);
+    for val in &z_max_vec[..n_depth] {
+        write_typed_value::<T>(&mut blob, *val);
     }
 
     // Check if all depths are constant
@@ -1019,7 +1020,7 @@ fn try_encode_huffman_int<T: LercDataType>(
 
     // Allocate buffer for Huffman-encoded data
     // numUInts = (bitPos > 0 ? 1 : 0) + 1 for padding (decode read-ahead)
-    let num_uints_data = ((total_bits + 31) / 32) as usize;
+    let num_uints_data = total_bits.div_ceil(32) as usize;
     let num_uints_total = num_uints_data + 1; // +1 for decode read-ahead padding
     let mut encoded = vec![0u8; num_uints_total * 4];
     let mut bit_pos = 0i32;
@@ -1097,8 +1098,8 @@ fn encode_tiles<T: LercDataType>(
     let n_cols = header.n_cols as usize;
     let max_z_error = header.max_z_error;
 
-    let num_tiles_vert = (n_rows + mb_size - 1) / mb_size;
-    let num_tiles_hori = (n_cols + mb_size - 1) / mb_size;
+    let num_tiles_vert = n_rows.div_ceil(mb_size);
+    let num_tiles_hori = n_cols.div_ceil(mb_size);
 
     let max_val_to_quantize: f64 = match header.data_type {
         DataType::Char | DataType::Byte | DataType::Short | DataType::UShort => {
@@ -1142,6 +1143,7 @@ fn encode_tiles<T: LercDataType>(
 /// When `try_diff` is true (depth > 0 with nDepth > 1), the encoder tries
 /// diff (delta) encoding relative to the previous depth slice and picks
 /// whichever representation is smaller.
+#[allow(clippy::too_many_arguments)]
 fn encode_tile<T: LercDataType>(
     blob: &mut Vec<u8>,
     data: &[T],
@@ -1283,6 +1285,7 @@ fn encode_tile<T: LercDataType>(
 /// (header byte + offset + bitstuffed data). When `b_diff_enc` is true, bit 2
 /// of the compression flag is set and the offset data type is forced to Int
 /// for integer source types.
+#[allow(clippy::too_many_arguments)]
 fn encode_tile_inner<T: LercDataType>(
     values: &[f64],
     num_valid: usize,
@@ -1325,7 +1328,7 @@ fn encode_tile_inner<T: LercDataType>(
 
     if !need_quantize {
         if !b_diff_enc {
-            let mut buf = vec![0 | integrity];
+            let mut buf = vec![integrity];
             for val in values {
                 let t = T::from_f64(*val);
                 write_typed_value_raw::<T>(&mut buf, t);
@@ -1391,7 +1394,7 @@ fn encode_tile_inner<T: LercDataType>(
         let raw_size = 1 + num_valid * T::BYTES;
         if encoded.len() >= raw_size {
             // Raw binary fallback
-            let mut buf = vec![0 | integrity];
+            let mut buf = vec![integrity];
             for val in values {
                 let t = T::from_f64(*val);
                 write_typed_value_raw::<T>(&mut buf, t);

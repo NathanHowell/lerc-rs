@@ -28,6 +28,7 @@ pub(crate) fn decode_huffman_flt<T: LercDataType>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_huffman_flt_slice<T: LercDataType>(
     data: &[u8],
     pos: &mut usize,
@@ -272,9 +273,7 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     // Write predictor code
     result.push(predictor_code);
 
-    for byte_index in 0..unit_size {
-        let plane = &byte_planes[byte_index];
-
+    for (byte_index, plane) in byte_planes[..unit_size].iter().enumerate() {
         // Try different delta levels and pick the best
         let (best_level, compressed) = compress_byte_plane(plane, width);
 
@@ -388,7 +387,6 @@ fn compress_byte_plane(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
 mod tests {
     use super::*;
     use alloc::vec;
-    #[allow(unused_imports)]
     use alloc::vec::Vec;
 
     #[test]

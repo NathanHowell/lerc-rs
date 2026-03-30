@@ -468,9 +468,9 @@ fn fill_const_image<T: LercDataType>(
 
     if n_depth == 1 {
         let z0 = T::from_f64(header.z_min);
-        for k in 0..n_rows * n_cols {
+        for (k, out) in output[..n_rows * n_cols].iter_mut().enumerate() {
             if mask.is_valid(k) {
-                output[k] = z0;
+                *out = z0;
             }
         }
     } else {
@@ -478,17 +478,15 @@ fn fill_const_image<T: LercDataType>(
         if header.z_min == header.z_max || z_min_vec.is_empty() {
             z_buf.resize(n_depth, T::from_f64(header.z_min));
         } else {
-            for m in 0..n_depth {
-                z_buf.push(T::from_f64(z_min_vec[m]));
+            for val in &z_min_vec[..n_depth] {
+                z_buf.push(T::from_f64(*val));
             }
         }
 
         for k in 0..n_rows * n_cols {
             if mask.is_valid(k) {
                 let m0 = k * n_depth;
-                for m in 0..n_depth {
-                    output[m0 + m] = z_buf[m];
-                }
+                output[m0..m0 + n_depth].copy_from_slice(&z_buf[..n_depth]);
             }
         }
     }

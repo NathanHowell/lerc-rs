@@ -104,12 +104,12 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
     let zf = z.to_f64();
     match dt {
         DataType::Short => {
-            let c = if zf >= -128.0 && zf <= 127.0 {
+            let c = if (-128.0..=127.0).contains(&zf) {
                 zf as i8
             } else {
                 0
             };
-            let b = if zf >= 0.0 && zf <= 255.0 {
+            let b = if (0.0..=255.0).contains(&zf) {
                 zf as u8
             } else {
                 0
@@ -123,7 +123,7 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
             }
         }
         DataType::UShort => {
-            let b = if zf >= 0.0 && zf <= 255.0 {
+            let b = if (0.0..=255.0).contains(&zf) {
                 zf as u8
             } else {
                 0
@@ -135,17 +135,17 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
             }
         }
         DataType::Int => {
-            let b = if zf >= 0.0 && zf <= 255.0 {
+            let b = if (0.0..=255.0).contains(&zf) {
                 zf as u8
             } else {
                 0
             };
-            let s = if zf >= -32768.0 && zf <= 32767.0 {
+            let s = if (-32768.0..=32767.0).contains(&zf) {
                 zf as i16
             } else {
                 0
             };
-            let us = if zf >= 0.0 && zf <= 65535.0 {
+            let us = if (0.0..=65535.0).contains(&zf) {
                 zf as u16
             } else {
                 0
@@ -161,12 +161,12 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
             }
         }
         DataType::UInt => {
-            let b = if zf >= 0.0 && zf <= 255.0 {
+            let b = if (0.0..=255.0).contains(&zf) {
                 zf as u8
             } else {
                 0
             };
-            let us = if zf >= 0.0 && zf <= 65535.0 {
+            let us = if (0.0..=65535.0).contains(&zf) {
                 zf as u16
             } else {
                 0
@@ -180,12 +180,12 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
             }
         }
         DataType::Float => {
-            let b = if zf >= 0.0 && zf <= 255.0 {
+            let b = if (0.0..=255.0).contains(&zf) {
                 zf as u8
             } else {
                 0
             };
-            let s = if zf >= -32768.0 && zf <= 32767.0 {
+            let s = if (-32768.0..=32767.0).contains(&zf) {
                 zf as i16
             } else {
                 0
@@ -199,17 +199,17 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
             }
         }
         DataType::Double => {
-            let s = if zf >= -32768.0 && zf <= 32767.0 {
+            let s = if (-32768.0..=32767.0).contains(&zf) {
                 zf as i16
             } else {
                 0
             };
-            let l = if zf >= i32::MIN as f64 && zf <= i32::MAX as f64 {
+            let l = if (i32::MIN as f64..=i32::MAX as f64).contains(&zf) {
                 zf as i32
             } else {
                 0
             };
-            let f = if zf >= f32::MIN as f64 && zf <= f32::MAX as f64 {
+            let f = if (f32::MIN as f64..=f32::MAX as f64).contains(&zf) {
                 zf as f32
             } else {
                 0.0
@@ -243,8 +243,8 @@ pub(crate) fn read_tiles<T: LercDataType>(
     let n_rows = header.n_rows as usize;
     let n_cols = header.n_cols as usize;
 
-    let num_tiles_vert = (n_rows + mb_size - 1) / mb_size;
-    let num_tiles_hori = (n_cols + mb_size - 1) / mb_size;
+    let num_tiles_vert = n_rows.div_ceil(mb_size);
+    let num_tiles_hori = n_cols.div_ceil(mb_size);
 
     for i_tile in 0..num_tiles_vert {
         let i0 = i_tile * mb_size;
@@ -266,6 +266,7 @@ pub(crate) fn read_tiles<T: LercDataType>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_tile<T: LercDataType>(
     data: &[u8],
     pos: &mut usize,

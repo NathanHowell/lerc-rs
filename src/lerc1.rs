@@ -188,8 +188,8 @@ fn bit_unstuff(cursor: &mut Cursor) -> Result<Vec<u32>> {
     let mut data_vec = vec![0u32; num_elements];
 
     if num_bits > 0 {
-        let num_uints = (num_elements as u64 * num_bits as u64 + 31) / 32;
-        let n_bytes_to_copy = ((num_elements as u64 * num_bits as u64 + 7) / 8) as usize;
+        let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32);
+        let n_bytes_to_copy = (num_elements as u64 * num_bits as u64).div_ceil(8) as usize;
 
         cursor.check(n_bytes_to_copy)?;
 
@@ -373,6 +373,7 @@ fn read_cnt_tile(
 /// Read a z tile (elevation values tile).
 ///
 /// Matches C++ `CntZImage::readZTile`.
+#[allow(clippy::too_many_arguments)]
 fn read_z_tile(
     cursor: &mut Cursor,
     cnt: &[f32],
@@ -517,6 +518,7 @@ fn read_tiles_cnt(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_tiles_z(
     cursor: &mut Cursor,
     cnt: &[f32],
@@ -656,13 +658,13 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
             }
         } else {
             // Count part is binary mask, RLE compressed
-            let mask_byte_count = (num_pixels + 7) / 8;
+            let mask_byte_count = num_pixels.div_ceil(8);
             let rle_data = &data[cursor.pos..cursor.pos + cnt_sec.num_bytes as usize];
             let mask_bytes = rle::decompress(rle_data, mask_byte_count)?;
             let bitmask = BitMask::from_bytes(mask_bytes, num_pixels);
 
-            for k in 0..num_pixels {
-                cnt[k] = if bitmask.is_valid(k) { 1.0 } else { 0.0 };
+            for (k, c) in cnt[..num_pixels].iter_mut().enumerate() {
+                *c = if bitmask.is_valid(k) { 1.0 } else { 0.0 };
             }
         }
     } else {
@@ -702,8 +704,8 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
 
     // Build validity mask from count array
     let mut mask = BitMask::new(num_pixels);
-    for k in 0..num_pixels {
-        if cnt[k] > 0.0 {
+    for (k, &c) in cnt[..num_pixels].iter().enumerate() {
+        if c > 0.0 {
             mask.set_valid(k);
         }
     }

@@ -52,7 +52,7 @@ fn bit_stuff(data: &[u32], num_bits: u32) -> Vec<u8> {
     }
 
     let num_elements = data.len() as u32;
-    let num_uints = ((num_elements as u64 * num_bits as u64 + 31) / 32) as usize;
+    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
     let mut buf = vec![0u32; num_uints];
 
     let mut bit_pos: u32 = 0;
@@ -96,7 +96,7 @@ fn bit_unstuff(
         return Err(LercError::InvalidData("bitstuffer: invalid params".into()));
     }
 
-    let num_uints = ((num_elements as u64 * num_bits as u64 + 31) / 32) as usize;
+    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
     let num_bytes_used =
         (num_uints * 4) - num_tail_bytes_not_needed(num_elements, num_bits) as usize;
 
@@ -158,10 +158,10 @@ fn bit_unstuff_before_v3(
         return Err(LercError::InvalidData("bitstuffer: invalid params".into()));
     }
 
-    let num_uints = ((num_elements as u64 * num_bits as u64 + 31) / 32) as usize;
+    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
     let ntbnn = num_tail_bytes_not_needed(num_elements, num_bits) as usize;
 
-    let num_bytes_to_copy = ((num_elements as u64 * num_bits as u64 + 7) / 8) as usize;
+    let num_bytes_to_copy = (num_elements as u64 * num_bits as u64).div_ceil(8) as usize;
 
     if *pos + num_bytes_to_copy > data.len() {
         return Err(LercError::BufferTooSmall {
@@ -434,7 +434,7 @@ pub fn should_use_lut(data: &[u32]) -> Option<Vec<(u32, u32)>> {
         }
     }
 
-    if n_lut < 1 || n_lut >= 255 {
+    if !(1..255).contains(&n_lut) {
         return None;
     }
 

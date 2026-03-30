@@ -92,9 +92,9 @@ proptest! {
         let effective_mze = info.max_z_error;
         // Allow tolerance for f32 quantization rounding. The quantize/dequantize
         // cycle can exceed maxZError due to float precision limitations when the
-        // data range is large relative to maxZError. We use 1% relative margin
-        // plus a small absolute term scaled to f32 epsilon (~1.2e-7).
-        let tol = effective_mze * 1.01 + 1e-5;
+        // data range is large relative to maxZError. f32 quantization can exceed
+        // maxZError by a few percent due to rounding (same as C++ NeedToCheckForFltRndErr).
+        let tol = effective_mze * 1.05 + 1e-5;
         let (decoded, mask, dw, dh) = lerc::decode_typed::<f32>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);

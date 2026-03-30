@@ -44,7 +44,7 @@ use alloc::vec::Vec;
 
 use bitmask::BitMask;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LercInfo {
     pub version: i32,
     pub width: u32,
@@ -74,6 +74,21 @@ pub struct LercImage {
     /// pixels matching this value in invalid depth slices are encoded with a sentinel.
     /// On decode, the sentinel is remapped back to this value.
     pub no_data_value: Option<f64>,
+}
+
+impl Default for LercImage {
+    fn default() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Byte,
+            valid_masks: Vec::new(),
+            data: LercData::U8(Vec::new()),
+            no_data_value: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

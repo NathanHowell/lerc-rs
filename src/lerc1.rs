@@ -615,6 +615,7 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         z_min: f64::NAN, // Not available from header alone
         z_max: z_sec.max_val_in_img as f64,
         blob_size: blob_size as u32,
+        ..Default::default()
     })
 }
 
@@ -715,6 +716,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         data_type: DataType::Float,
         valid_masks: vec![mask],
         data: LercData::F32(z),
+        ..Default::default()
     })
 }
 

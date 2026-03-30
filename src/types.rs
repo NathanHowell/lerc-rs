@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(i32)]
 pub enum DataType {
+    #[default]
     Char = 0,
     Byte = 1,
     Short = 2,

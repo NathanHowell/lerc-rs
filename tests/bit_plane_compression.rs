@@ -82,6 +82,7 @@ fn bit_plane_compression_u16_noisy_low_bits() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     // Negative max_z_error triggers bit-plane compression
@@ -137,6 +138,7 @@ fn bit_plane_compression_u32_noisy_low_bits() {
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane failed");
@@ -178,6 +180,7 @@ fn bit_plane_compression_i16_noisy_low_bits() {
         data_type: DataType::Short,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::I16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane failed");
@@ -218,6 +221,7 @@ fn positive_max_z_error_does_not_trigger_bit_plane() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     // With positive maxZError = 0.5 (lossless for integers), bit-plane should not activate
@@ -253,6 +257,7 @@ fn magic_value_777_triggers_bit_plane() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded_777 = lerc::encode(&image, 777.0).expect("encode with magic 777");
@@ -285,6 +290,7 @@ fn bit_plane_fallback_to_lossless_for_clean_data() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, -0.01).expect("encode with negative mze");
@@ -321,6 +327,7 @@ fn bit_plane_compression_smaller_than_lossless() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let lossy = lerc::encode(&image, -0.01).expect("lossy encode");
@@ -353,6 +360,7 @@ fn bit_plane_too_few_pixels_falls_back() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane");

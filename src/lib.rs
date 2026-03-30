@@ -56,6 +56,8 @@ pub struct LercInfo {
     pub z_min: f64,
     pub z_max: f64,
     pub blob_size: u32,
+    /// The original NoData value, if the blob uses NoData encoding (v6+, nDepth > 1).
+    pub no_data_value: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,10 @@ pub struct LercImage {
     pub data_type: DataType,
     pub valid_masks: Vec<BitMask>,
     pub data: LercData,
+    /// The original NoData value, if any. When set during encoding with nDepth > 1,
+    /// pixels matching this value in invalid depth slices are encoded with a sentinel.
+    /// On decode, the sentinel is remapped back to this value.
+    pub no_data_value: Option<f64>,
 }
 
 #[derive(Debug, Clone)]

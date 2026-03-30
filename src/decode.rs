@@ -41,6 +41,12 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         count
     };
 
+    let no_data_value = if hd.pass_no_data_values {
+        Some(hd.no_data_val_orig)
+    } else {
+        None
+    };
+
     Ok(LercInfo {
         version: hd.version,
         width: hd.n_cols as u32,
@@ -53,6 +59,7 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         z_min: hd.z_min,
         z_max: hd.z_max,
         blob_size: hd.blob_size as u32,
+        no_data_value,
     })
 }
 
@@ -63,6 +70,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
     let height = info.height;
     let n_depth = info.n_depth;
     let dt = info.data_type;
+    let no_data_value = info.no_data_value;
 
     let total_pixels = width as usize * height as usize * n_depth as usize * n_bands as usize;
     let band_pixels = width as usize * height as usize * n_depth as usize;
@@ -74,11 +82,21 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
             let mut offset = 0usize;
             for band in 0..n_bands as usize {
                 let prev_mask = masks.last();
-                let (mask, consumed) = decode_one_band(
+                let (mask, hd, consumed) = decode_one_band(
                     &data[offset..],
                     &mut output[band * band_pixels..(band + 1) * band_pixels],
                     prev_mask,
                 )?;
+
+                // Remap noData sentinel values if needed (v6+, nDepth > 1)
+                if hd.pass_no_data_values && hd.no_data_val != hd.no_data_val_orig {
+                    remap_no_data(
+                        &mut output[band * band_pixels..(band + 1) * band_pixels],
+                        &mask,
+                        &hd,
+                    );
+                }
+
                 masks.push(mask);
                 offset += consumed;
             }
@@ -90,6 +108,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
                 data_type: dt,
                 valid_masks: masks,
                 data: LercData::$variant(output),
+                no_data_value,
             })
         }};
     }
@@ -106,13 +125,44 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
     }
 }
 
-/// Decode one band blob, returning the mask and number of bytes consumed.
+/// Remap noData sentinel values from the internal encoding value back to the
+/// original user-specified noData value. This mirrors the C++ `RemapNoData`.
+fn remap_no_data<T: LercDataType>(
+    output: &mut [T],
+    mask: &BitMask,
+    hd: &HeaderInfo,
+) {
+    let n_cols = hd.n_cols as usize;
+    let n_rows = hd.n_rows as usize;
+    let n_depth = hd.n_depth as usize;
+
+    let no_data_old = T::from_f64(hd.no_data_val);
+    let no_data_new = T::from_f64(hd.no_data_val_orig);
+
+    for i in 0..n_rows {
+        let row_start = i * n_cols * n_depth;
+        for j in 0..n_cols {
+            let k = i * n_cols + j;
+            if mask.is_valid(k) {
+                let base = row_start + j * n_depth;
+                for m in 0..n_depth {
+                    if output[base + m].to_f64() == no_data_old.to_f64() {
+                        output[base + m] = no_data_new;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Decode one band blob, returning the mask, header info, and number of bytes consumed.
 fn decode_one_band<T: LercDataType>(
     blob: &[u8],
     output: &mut [T],
     prev_mask: Option<&BitMask>,
-) -> Result<(BitMask, usize)> {
+) -> Result<(BitMask, HeaderInfo, usize)> {
     let (hd, header_size) = header::read_header(blob)?;
+    let blob_size = hd.blob_size as usize;
 
     // Verify checksum
     header::verify_checksum(blob, &hd)?;
@@ -128,13 +178,13 @@ fn decode_one_band<T: LercDataType>(
     }
 
     if hd.num_valid_pixel == 0 {
-        return Ok((mask, hd.blob_size as usize));
+        return Ok((mask, hd, blob_size));
     }
 
     // Const image
     if hd.z_min == hd.z_max {
         fill_const_image(&hd, &mask, &[], &[], output)?;
-        return Ok((mask, hd.blob_size as usize));
+        return Ok((mask, hd, blob_size));
     }
 
     // Read per-depth min/max ranges (v4+)
@@ -147,7 +197,7 @@ fn decode_one_band<T: LercDataType>(
     // Check if all bands constant
     if z_min_vec == z_max_vec {
         fill_const_image(&hd, &mask, &z_min_vec, &z_max_vec, output)?;
-        return Ok((mask, hd.blob_size as usize));
+        return Ok((mask, hd, blob_size));
     }
 
     // Read "one sweep" flag
@@ -203,7 +253,7 @@ fn decode_one_band<T: LercDataType>(
                         || (hd.version >= 4 && mode == ImageEncodeMode::Huffman)
                     {
                         decode_huffman(blob, &mut pos, &hd, &mask, mode, output)?;
-                        return Ok((mask, hd.blob_size as usize));
+                        return Ok((mask, hd, blob_size));
                     } else {
                         return Err(LercError::InvalidData(
                             "invalid huffman mode for int".into(),
@@ -221,7 +271,7 @@ fn decode_one_band<T: LercDataType>(
                         hd.n_depth as usize,
                         output,
                     )?;
-                    return Ok((mask, hd.blob_size as usize));
+                    return Ok((mask, hd, blob_size));
                 } else {
                     return Err(LercError::InvalidData(
                         "invalid huffman mode for float".into(),
@@ -234,7 +284,7 @@ fn decode_one_band<T: LercDataType>(
         tiles::read_tiles(blob, &mut pos, &hd, &mask, &z_min_vec, &z_max_vec, output)?;
     }
 
-    Ok((mask, hd.blob_size as usize))
+    Ok((mask, hd, blob_size))
 }
 
 fn read_mask(

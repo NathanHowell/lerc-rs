@@ -32,6 +32,7 @@ fn round_trip_u16_ndepth3_lossless() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -79,6 +80,7 @@ fn round_trip_i32_ndepth3_lossless() {
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::I32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -118,6 +120,7 @@ fn round_trip_f32_ndepth3_lossy() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -165,6 +168,7 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::U16(correlated.clone()),
+        no_data_value: None,
     };
 
     let encoded_correlated = lerc::encode(&image_correlated, 0.5).expect("encode correlated");
@@ -185,6 +189,7 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::U16(uncorrelated.clone()),
+        no_data_value: None,
     };
 
     let encoded_uncorrelated = lerc::encode(&image_uncorrelated, 0.5).expect("encode uncorrelated");
@@ -238,6 +243,7 @@ fn round_trip_u8_ndepth3_lossless() {
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::U8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -285,6 +291,7 @@ fn round_trip_ndepth3_with_mask() {
         data_type: DataType::Short,
         valid_masks: vec![mask.clone()],
         data: LercData::I16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -340,6 +347,7 @@ fn round_trip_identical_depths() {
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::I32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -375,6 +383,7 @@ fn round_trip_f64_ndepth2_lossless() {
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::F64(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -419,6 +428,7 @@ fn round_trip_u32_ndepth4_lossless() {
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: LercData::U32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");

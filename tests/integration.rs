@@ -19,6 +19,7 @@ fn huffman_u8_compression_ratio() {
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -58,6 +59,7 @@ fn round_trip_i8_lossless() {
         data_type: DataType::Char,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::I8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -97,6 +99,7 @@ fn round_trip_u8_with_mask_huffman() {
         data_type: DataType::Byte,
         valid_masks: vec![mask.clone()],
         data: LercData::U8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -139,6 +142,7 @@ fn round_trip_u8_multiband_huffman() {
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: LercData::U8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -274,6 +278,7 @@ fn round_trip_u8_lossless() {
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U8(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -306,6 +311,7 @@ fn round_trip_f32_lossy() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -340,6 +346,7 @@ fn round_trip_i32_lossless() {
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::I32(pixels.clone()),
+        no_data_value: None,
     };
 
     // maxZError = 0.5 is lossless for integers
@@ -381,6 +388,7 @@ fn round_trip_with_partial_mask() {
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.01).expect("encode failed");
@@ -425,6 +433,7 @@ fn round_trip_f32_lossless() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -471,6 +480,7 @@ fn round_trip_f32_lossless_varied_data() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -507,6 +517,7 @@ fn round_trip_f64_lossless() {
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F64(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -553,6 +564,7 @@ fn round_trip_f64_lossless_varied() {
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F64(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -588,6 +600,7 @@ fn round_trip_f32_lossless_constant() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -618,6 +631,7 @@ fn round_trip_f32_lossless_multi_depth() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -672,6 +686,7 @@ fn block_size_selection_smooth_gradient_prefers_16() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.01).expect("encode failed");
@@ -730,6 +745,7 @@ fn block_size_selection_noisy_data_prefers_8() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -777,6 +793,7 @@ fn block_size_16_round_trip_f32_lossy() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -813,6 +830,7 @@ fn block_size_header_field_is_valid() {
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::U16(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.5).expect("encode failed");
@@ -867,6 +885,7 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -923,6 +942,7 @@ fn try_raise_max_z_error_improves_compression() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     // Encode with TryRaiseMaxZError active (the default path)
@@ -989,6 +1009,7 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
@@ -1040,6 +1061,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F64(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -1082,6 +1104,7 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::I32(pixels.clone()),
+        no_data_value: None,
     };
 
     // For integers, maxZError=0.5 is lossless; the encoder clamps it.
@@ -1125,6 +1148,7 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F64(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -1180,6 +1204,7 @@ fn try_raise_max_z_error_already_optimal() {
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
@@ -1254,6 +1279,7 @@ fn try_raise_max_z_error_with_partial_mask() {
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: LercData::F32(pixels.clone()),
+        no_data_value: None,
     };
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");

@@ -453,6 +453,91 @@ fn try_bit_plane_compression<T: LercDataType>(
     }
 }
 
+/// Compute an internal noData sentinel value that lies below the valid data range.
+/// This mirrors the C++ approach of picking a value below `zMin - 2 * maxZError`.
+fn compute_no_data_sentinel<T: LercDataType>(
+    min_val: f64,
+    max_z_error: f64,
+) -> Option<f64> {
+    let is_int = T::is_integer();
+
+    if is_int {
+        // For integer types: pick candidates below minVal - 2*maxZErr, must be integer
+        let max_z_err = max_z_error;
+        let threshold = min_val - 2.0 * max_z_err;
+        let candidates: &[f64] = &[
+            threshold - 1.0,
+            threshold - 10.0,
+            threshold - 100.0,
+            threshold - 1000.0,
+        ];
+
+        // low int limit depends on type size
+        let low_limit = match T::DATA_TYPE {
+            DataType::Char => i8::MIN as f64,
+            DataType::Byte => u8::MIN as f64,
+            DataType::Short => i16::MIN as f64,
+            DataType::UShort => u16::MIN as f64,
+            DataType::Int => i32::MIN as f64,
+            DataType::UInt => u32::MIN as f64,
+            _ => f64::MIN,
+        };
+
+        for &c in candidates {
+            let c = c.floor();
+            if c > low_limit && c < threshold && c == (c as i64) as f64 {
+                return Some(c);
+            }
+        }
+        None
+    } else {
+        // For float/double: pick candidates below minVal - 2*maxZErr
+        let max_z_err = max_z_error;
+        let threshold = min_val - 2.0 * max_z_err;
+        let dist_candidates: &[f64] = &[
+            4.0 * max_z_err,
+            0.0001,
+            0.001,
+            0.01,
+            0.1,
+            1.0,
+            10.0,
+            100.0,
+            1000.0,
+            10000.0,
+        ];
+
+        let is_f32 = T::DATA_TYPE == DataType::Float;
+        let lowest_val: f64 = if is_f32 {
+            -(f32::MAX as f64)
+        } else {
+            -f64::MAX
+        };
+
+        let mut candidates: Vec<f64> = Vec::new();
+        for &dist in dist_candidates {
+            candidates.push(min_val - dist);
+        }
+        // candidate for large min values
+        let cand = if min_val > 0.0 {
+            (min_val / 2.0).floor()
+        } else {
+            min_val * 2.0
+        };
+        candidates.push(cand);
+
+        // Sort descending (pick closest one that's far enough from valid range)
+        candidates.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+
+        for c in candidates {
+            if c > lowest_val && c < threshold {
+                return Some(c);
+            }
+        }
+        None
+    }
+}
+
 fn encode_one_band<T: LercDataType>(
     data: &[T],
     mask: &BitMask,
@@ -499,6 +584,91 @@ fn encode_one_band<T: LercDataType>(
         overall_max = 0.0;
     }
 
+    // Handle NoData values for nDepth > 1.
+    // When the user specifies a no_data_value and nDepth > 1, we need to check
+    // if any valid pixels have the nodata value at some (but not all) depth slices.
+    // If so, we compute an internal sentinel below the valid range and remap.
+    let mut pass_no_data = false;
+    let mut no_data_val_internal = 0.0;
+    let mut no_data_val_orig = 0.0;
+    let mut data_buf: Option<Vec<T>> = None;
+
+    if let Some(nd_orig) = image.no_data_value
+        && n_depth > 1
+        && num_valid > 0
+    {
+        let nd_t = T::from_f64(nd_orig);
+        let nd_f64 = nd_t.to_f64();
+
+        // Check if any valid pixel has nodata at some but not all depths
+        let mut needs_no_data = false;
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if mask.is_valid(k) {
+                    let base = k * n_depth;
+                    let mut cnt_nd = 0;
+                    for m in 0..n_depth {
+                        if data[base + m].to_f64() == nd_f64 {
+                            cnt_nd += 1;
+                        }
+                    }
+                    // Mixed: some depths are nodata, some are valid
+                    if cnt_nd > 0 && cnt_nd < n_depth {
+                        needs_no_data = true;
+                        break;
+                    }
+                }
+            }
+            if needs_no_data {
+                break;
+            }
+        }
+
+        if needs_no_data {
+            // Compute an internal sentinel below the valid range
+            if let Some(sentinel) = compute_no_data_sentinel::<T>(overall_min, max_z_error) {
+                pass_no_data = true;
+                no_data_val_orig = nd_orig;
+
+                if sentinel != nd_f64 {
+                    no_data_val_internal = sentinel;
+                    // Remap: replace original nodata with sentinel in a copy
+                    let mut buf = data.to_vec();
+                    for i in 0..height {
+                        for j in 0..width {
+                            let k = i * width + j;
+                            if mask.is_valid(k) {
+                                let base = k * n_depth;
+                                for m in 0..n_depth {
+                                    if buf[base + m].to_f64() == nd_f64 {
+                                        buf[base + m] = T::from_f64(sentinel);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Update min/max to include sentinel
+                    overall_min = overall_min.min(sentinel);
+                    for m in 0..n_depth {
+                        z_min_vec[m] = z_min_vec[m].min(sentinel);
+                    }
+                    data_buf = Some(buf);
+                } else {
+                    no_data_val_internal = nd_orig;
+                }
+            }
+        } else {
+            // NoData value provided but not needed (all depths are either
+            // all-nodata or all-valid). Still pass it through for info.
+            pass_no_data = true;
+            no_data_val_orig = nd_orig;
+            no_data_val_internal = nd_orig;
+        }
+    }
+
+    let encode_data: &[T] = data_buf.as_deref().unwrap_or(data);
+
     let mut hd = HeaderInfo {
         version: 6,
         checksum: 0,
@@ -510,19 +680,19 @@ fn encode_one_band<T: LercDataType>(
         blob_size: 0,        // patched later
         data_type: T::DATA_TYPE,
         n_blobs_more,
-        pass_no_data_values: false,
+        pass_no_data_values: pass_no_data,
         is_int: false,
         max_z_error,
         z_min: overall_min,
         z_max: overall_max,
-        no_data_val: 0.0,
-        no_data_val_orig: 0.0,
+        no_data_val: no_data_val_internal,
+        no_data_val_orig,
     };
 
     // Select the best micro block size by trying both 8 and 16.
     // The block size only affects the tiling path, not Huffman or FPL.
     let best_block_size =
-        select_block_size::<T>(data, mask, &hd, &z_min_vec, &z_max_vec)?;
+        select_block_size::<T>(encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
     hd.micro_block_size = best_block_size;
 
     let mut blob = header::write_header(&hd);
@@ -575,10 +745,10 @@ fn encode_one_band<T: LercDataType>(
 
     if try_huffman_int {
         // Try Huffman encoding for 8-bit integer types
-        if let Some(huffman_blob) = try_encode_huffman_int(data, mask, &hd) {
+        if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, &hd) {
             // Huffman is beneficial; compare against tiling size
             let mut tiling_blob = Vec::new();
-            encode_tiles(&mut tiling_blob, data, mask, &hd, &z_min_vec, &z_max_vec)?;
+            encode_tiles(&mut tiling_blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
 
             if huffman_blob.len() < tiling_blob.len() {
                 blob.extend_from_slice(&huffman_blob);
@@ -592,7 +762,7 @@ fn encode_one_band<T: LercDataType>(
     } else if try_huffman_flt {
         // For lossless float/double, use FPL encoding
         let is_double = T::DATA_TYPE == DataType::Double;
-        let fpl_data = fpl::encode_huffman_flt(data, is_double, width, height, n_depth)?;
+        let fpl_data = fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
         blob.push(3u8); // IEM_DeltaDeltaHuffman
         blob.extend_from_slice(&fpl_data);
         header::finalize_blob(&mut blob);
@@ -600,7 +770,7 @@ fn encode_one_band<T: LercDataType>(
     }
 
     // Write tiles
-    encode_tiles(&mut blob, data, mask, &hd, &z_min_vec, &z_max_vec)?;
+    encode_tiles(&mut blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
 
     header::finalize_blob(&mut blob);
     Ok(blob)

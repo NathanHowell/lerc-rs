@@ -11,3 +11,4 @@ std = ["alloc"]
 alloc = []
 
 [dev-dependencies]
+proptest = "1"

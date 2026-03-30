@@ -58,10 +58,19 @@ pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt
     fn to_bits_u64(self) -> u64;
     fn from_bits_u64(v: u64) -> Self;
     fn is_integer() -> bool;
+
+    /// Wrap a `Vec<Self>` into the corresponding `LercData` variant.
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData;
+
+    /// Try to borrow the pixel slice from a `LercData` if the variant matches.
+    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]>;
+
+    /// Try to unwrap the pixel vector from a `LercData` if the variant matches.
+    fn try_from_lerc_data(data: super::LercData) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData>;
 }
 
 macro_rules! impl_lerc_data_type {
-    ($ty:ty, $dt:expr, $is_int:expr) => {
+    ($ty:ty, $dt:expr, $is_int:expr, $variant:ident) => {
         impl sealed::Sealed for $ty {}
         impl LercDataType for $ty {
             const DATA_TYPE: DataType = $dt;
@@ -91,16 +100,34 @@ macro_rules! impl_lerc_data_type {
             fn is_integer() -> bool {
                 $is_int
             }
+
+            fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
+                super::LercData::$variant(v)
+            }
+
+            fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+                match data {
+                    super::LercData::$variant(v) => Some(v),
+                    _ => None,
+                }
+            }
+
+            fn try_from_lerc_data(data: super::LercData) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+                match data {
+                    super::LercData::$variant(v) => Ok(v),
+                    other => Err(other),
+                }
+            }
         }
     };
 }
 
-impl_lerc_data_type!(i8, DataType::Char, true);
-impl_lerc_data_type!(u8, DataType::Byte, true);
-impl_lerc_data_type!(i16, DataType::Short, true);
-impl_lerc_data_type!(u16, DataType::UShort, true);
-impl_lerc_data_type!(i32, DataType::Int, true);
-impl_lerc_data_type!(u32, DataType::UInt, true);
+impl_lerc_data_type!(i8, DataType::Char, true, I8);
+impl_lerc_data_type!(u8, DataType::Byte, true, U8);
+impl_lerc_data_type!(i16, DataType::Short, true, I16);
+impl_lerc_data_type!(u16, DataType::UShort, true, U16);
+impl_lerc_data_type!(i32, DataType::Int, true, I32);
+impl_lerc_data_type!(u32, DataType::UInt, true, U32);
 
 impl sealed::Sealed for f32 {}
 impl LercDataType for f32 {
@@ -130,6 +157,24 @@ impl LercDataType for f32 {
     #[inline]
     fn is_integer() -> bool {
         false
+    }
+
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
+        super::LercData::F32(v)
+    }
+
+    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+        match data {
+            super::LercData::F32(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    fn try_from_lerc_data(data: super::LercData) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+        match data {
+            super::LercData::F32(v) => Ok(v),
+            other => Err(other),
+        }
     }
 }
 
@@ -161,5 +206,23 @@ impl LercDataType for f64 {
     #[inline]
     fn is_integer() -> bool {
         false
+    }
+
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
+        super::LercData::F64(v)
+    }
+
+    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+        match data {
+            super::LercData::F64(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    fn try_from_lerc_data(data: super::LercData) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+        match data {
+            super::LercData::F64(v) => Ok(v),
+            other => Err(other),
+        }
     }
 }

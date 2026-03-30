@@ -1,0 +1,201 @@
+use lerc::bitmask::BitMask;
+
+// ---------------------------------------------------------------------------
+// Round-trip tests for every data type via encode_typed / decode_typed
+// ---------------------------------------------------------------------------
+
+macro_rules! round_trip_test {
+    ($test_name:ident, $ty:ty, $values:expr) => {
+        #[test]
+        fn $test_name() {
+            let width = 4u32;
+            let height = 4u32;
+            let pixels: Vec<$ty> = $values;
+            assert_eq!(pixels.len(), (width * height) as usize);
+
+            let blob = lerc::encode_typed(width, height, &pixels, 0.0).expect("encode failed");
+            let (decoded_pixels, mask, w, h) =
+                lerc::decode_typed::<$ty>(&blob).expect("decode failed");
+
+            assert_eq!(w, width);
+            assert_eq!(h, height);
+            assert_eq!(decoded_pixels, pixels);
+            // All pixels should be valid
+            for k in 0..(width * height) as usize {
+                assert!(mask.is_valid(k), "pixel {k} should be valid");
+            }
+        }
+    };
+}
+
+round_trip_test!(round_trip_i8, i8, (0..16).map(|i| (i - 8) as i8).collect());
+round_trip_test!(round_trip_u8, u8, (0..16).map(|i| i as u8).collect());
+round_trip_test!(
+    round_trip_i16,
+    i16,
+    (0..16).map(|i| (i * 100 - 800) as i16).collect()
+);
+round_trip_test!(
+    round_trip_u16,
+    u16,
+    (0..16).map(|i| (i * 100) as u16).collect()
+);
+round_trip_test!(
+    round_trip_i32,
+    i32,
+    (0..16).map(|i| i * 1000 - 8000).collect()
+);
+round_trip_test!(
+    round_trip_u32,
+    u32,
+    (0..16).map(|i| i * 1000).collect()
+);
+round_trip_test!(
+    round_trip_f32,
+    f32,
+    (0..16).map(|i| i as f32 * 0.5).collect()
+);
+round_trip_test!(
+    round_trip_f64,
+    f64,
+    (0..16).map(|i| i as f64 * 0.25).collect()
+);
+
+// ---------------------------------------------------------------------------
+// Masked encode/decode round-trips
+// ---------------------------------------------------------------------------
+
+#[test]
+fn round_trip_f32_masked() {
+    let width = 8u32;
+    let height = 8u32;
+    let n = (width * height) as usize;
+
+    let mut mask = BitMask::new(n);
+    for k in 0..n {
+        if k % 2 == 0 {
+            mask.set_valid(k);
+        }
+    }
+
+    let pixels: Vec<f32> = (0..n as u32).map(|i| i as f32 * 1.5).collect();
+    let blob =
+        lerc::encode_typed_masked(width, height, &pixels, &mask, 0.0).expect("encode failed");
+    let (decoded_pixels, decoded_mask, w, h) =
+        lerc::decode_typed::<f32>(&blob).expect("decode failed");
+
+    assert_eq!(w, width);
+    assert_eq!(h, height);
+    for k in 0..n {
+        if mask.is_valid(k) {
+            assert!(decoded_mask.is_valid(k), "pixel {k} should be valid");
+            assert_eq!(decoded_pixels[k], pixels[k], "pixel {k} value mismatch");
+        }
+    }
+}
+
+#[test]
+fn round_trip_u8_masked() {
+    let width = 4u32;
+    let height = 4u32;
+    let n = (width * height) as usize;
+
+    let mut mask = BitMask::new(n);
+    for k in 0..n {
+        if k % 3 == 0 {
+            mask.set_valid(k);
+        }
+    }
+
+    let pixels: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
+    let blob =
+        lerc::encode_typed_masked(width, height, &pixels, &mask, 0.0).expect("encode failed");
+    let (decoded_pixels, decoded_mask, w, h) =
+        lerc::decode_typed::<u8>(&blob).expect("decode failed");
+
+    assert_eq!(w, width);
+    assert_eq!(h, height);
+    for k in 0..n {
+        if mask.is_valid(k) {
+            assert!(decoded_mask.is_valid(k));
+            assert_eq!(decoded_pixels[k], pixels[k]);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Accessor methods on LercImage via as_typed
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lerc_image_as_typed() {
+    let width = 4u32;
+    let height = 4u32;
+    let pixels: Vec<f32> = (0..16).map(|i| i as f32).collect();
+
+    let blob = lerc::encode_typed(width, height, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    // Correct type succeeds
+    assert_eq!(image.as_typed::<f32>().unwrap(), &pixels[..]);
+
+    // Wrong types return None
+    assert!(image.as_typed::<f64>().is_none());
+    assert!(image.as_typed::<u8>().is_none());
+    assert!(image.as_typed::<i32>().is_none());
+
+    // mask() helper
+    let m = image.mask().expect("should have a mask");
+    assert!(m.is_valid(0));
+}
+
+// ---------------------------------------------------------------------------
+// Validation error tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn encode_wrong_data_length() {
+    // 3x3 = 9 pixels but we provide 10 values
+    let result = lerc::encode_typed(3, 3, &[0.0f32; 10], 0.0);
+    assert!(result.is_err(), "should fail with wrong data length");
+}
+
+#[test]
+fn encode_masked_wrong_mask_length() {
+    let mask = BitMask::all_valid(100); // 100 pixels
+    let result = lerc::encode_typed_masked(3, 3, &[0.0f32; 9], &mask, 0.0); // 9 pixels vs 100
+    assert!(result.is_err(), "should fail with mismatched mask size");
+}
+
+#[test]
+fn decode_wrong_type() {
+    // Encode as u8 then try to decode as f32
+    let blob = lerc::encode_typed(2, 2, &[1u8, 2, 3, 4], 0.0).expect("encode failed");
+    let result = lerc::decode_typed::<f32>(&blob);
+    assert!(result.is_err(), "should fail with type mismatch");
+}
+
+// ---------------------------------------------------------------------------
+// Lossy round-trip test
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lossy_round_trip_f64() {
+    let width = 8u32;
+    let height = 8u32;
+    let max_z_error = 0.5;
+    let pixels: Vec<f64> = (0..64).map(|i| i as f64 * 0.1).collect();
+
+    let blob = lerc::encode_typed(width, height, &pixels, max_z_error).expect("encode failed");
+    let (decoded, _mask, w, h) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+
+    assert_eq!(w, width);
+    assert_eq!(h, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+        let diff = (orig - dec).abs();
+        assert!(
+            diff <= max_z_error,
+            "pixel {i}: diff {diff} exceeds max_z_error {max_z_error}"
+        );
+    }
+}

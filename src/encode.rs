@@ -3,7 +3,9 @@ use alloc::vec::Vec;
 
 use crate::bitmask::BitMask;
 use crate::error::Result;
+use crate::fpl;
 use crate::header::{self, HeaderInfo};
+use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
 use crate::types::{DataType, LercDataType};
@@ -165,18 +167,36 @@ fn encode_one_band<T: LercDataType>(
     // One sweep flag = 0 (we use tiling)
     blob.push(0u8);
 
-    // For now, always use tiling mode (no Huffman)
-    // TODO: implement Huffman for 8-bit types and FPL for float types
-
     // Check if Huffman-eligible types
     let try_huffman_int = matches!(T::DATA_TYPE, DataType::Char | DataType::Byte)
         && max_z_error == 0.5;
     let try_huffman_flt =
         matches!(T::DATA_TYPE, DataType::Float | DataType::Double) && max_z_error == 0.0;
 
-    if try_huffman_int || try_huffman_flt {
-        // Write tiling mode flag (IEM_Tiling = 0)
+    if try_huffman_int {
+        // Try Huffman encoding for 8-bit integer types
+        if let Some(huffman_blob) = try_encode_huffman_int(data, mask, &hd) {
+            // Huffman is beneficial; compare against tiling size
+            let mut tiling_blob = Vec::new();
+            encode_tiles(&mut tiling_blob, data, mask, &hd, &z_min_vec, &z_max_vec)?;
+
+            if huffman_blob.len() < tiling_blob.len() {
+                blob.extend_from_slice(&huffman_blob);
+                header::finalize_blob(&mut blob);
+                return Ok(blob);
+            }
+        }
+        // Huffman not beneficial or failed; fall through to tiling
+        // Write IEM_Tiling = 0
         blob.push(0u8);
+    } else if try_huffman_flt {
+        // For lossless float/double, use FPL encoding
+        let is_double = T::DATA_TYPE == DataType::Double;
+        let fpl_data = fpl::encode_huffman_flt(data, is_double, width, height, n_depth)?;
+        blob.push(3u8); // IEM_DeltaDeltaHuffman
+        blob.extend_from_slice(&fpl_data);
+        header::finalize_blob(&mut blob);
+        return Ok(blob);
     }
 
     // Write tiles
@@ -184,6 +204,286 @@ fn encode_one_band<T: LercDataType>(
 
     header::finalize_blob(&mut blob);
     Ok(blob)
+}
+
+/// Compute histograms for Huffman encoding of 8-bit data.
+/// Returns (direct_histogram, delta_histogram) each of size 256.
+/// The offset is 128 for i8 (DT_Char) and 0 for u8 (DT_Byte).
+fn compute_histo_for_huffman<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    header: &HeaderInfo,
+) -> ([i32; 256], [i32; 256]) {
+    let width = header.n_cols as usize;
+    let height = header.n_rows as usize;
+    let n_depth = header.n_depth as usize;
+    let offset: i32 = if header.data_type == DataType::Char {
+        128
+    } else {
+        0
+    };
+    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+
+    let mut histo = [0i32; 256];
+    let mut delta_histo = [0i32; 256];
+
+    // Direct histogram
+    for i in 0..height {
+        for j in 0..width {
+            let k = i * width + j;
+            if all_valid || mask.is_valid(k) {
+                for m in 0..n_depth {
+                    let val = data[k * n_depth + m].to_f64() as i32;
+                    let bin = (val + offset) as usize;
+                    histo[bin] += 1;
+                }
+            }
+        }
+    }
+
+    // Delta histogram
+    for i_depth in 0..n_depth {
+        let mut prev_val: i32 = 0;
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if all_valid || mask.is_valid(k) {
+                    let val = data[k * n_depth + i_depth].to_f64() as i32;
+                    let predictor = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                        prev_val
+                    } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
+                        data[(k - width) * n_depth + i_depth].to_f64() as i32
+                    } else {
+                        prev_val
+                    };
+                    let delta = val.wrapping_sub(predictor);
+                    let bin = (delta + offset) as u8 as usize;
+                    delta_histo[bin] += 1;
+                    prev_val = val;
+                }
+            }
+        }
+    }
+
+    (histo, delta_histo)
+}
+
+/// MSB-first bit push (for Huffman data encoding).
+fn push_value(buf: &mut [u8], bit_pos: &mut i32, value: u32, len: i32) {
+    let uint_idx = (*bit_pos / 32) as usize;
+    let local_bit = *bit_pos & 31;
+
+    if 32 - local_bit >= len {
+        if local_bit == 0 {
+            buf[uint_idx * 4..uint_idx * 4 + 4].fill(0);
+        }
+        let mut temp = u32::from_le_bytes(
+            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
+        );
+        temp |= value << (32 - local_bit - len);
+        buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
+        *bit_pos += len;
+    } else {
+        let overflow = local_bit + len - 32;
+        let mut temp = u32::from_le_bytes(
+            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
+        );
+        temp |= value >> overflow;
+        buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
+
+        let next_idx = uint_idx + 1;
+        let temp2 = value << (32 - overflow);
+        buf[next_idx * 4..next_idx * 4 + 4].copy_from_slice(&temp2.to_le_bytes());
+
+        *bit_pos += len;
+    }
+}
+
+/// Try Huffman encoding for 8-bit integer data (u8/i8).
+/// Returns Some(bytes) with the mode flag + Huffman data if beneficial, or None.
+fn try_encode_huffman_int<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    header: &HeaderInfo,
+) -> Option<Vec<u8>> {
+    let width = header.n_cols as usize;
+    let height = header.n_rows as usize;
+    let n_depth = header.n_depth as usize;
+    let offset: i32 = if header.data_type == DataType::Char {
+        128
+    } else {
+        0
+    };
+    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+
+    let (histo, delta_histo) = compute_histo_for_huffman(data, mask, header);
+
+    // Try delta Huffman
+    let mut delta_codec = HuffmanCodec::new();
+    let delta_ok = delta_codec.compute_codes(&delta_histo);
+    let delta_size = if delta_ok {
+        delta_codec
+            .compute_compressed_size(&delta_histo)
+            .map(|(bytes, _)| bytes)
+    } else {
+        None
+    };
+
+    // Try direct Huffman (IEM_Huffman, v4+)
+    let mut direct_codec = HuffmanCodec::new();
+    let direct_ok = direct_codec.compute_codes(&histo);
+    let direct_size = if direct_ok {
+        direct_codec
+            .compute_compressed_size(&histo)
+            .map(|(bytes, _)| bytes)
+    } else {
+        None
+    };
+
+    // Pick the best: delta Huffman or direct Huffman
+    enum HuffMode {
+        Delta,
+        Direct,
+    }
+
+    let (mode, codec) = match (delta_size, direct_size) {
+        (Some(ds), Some(hs)) => {
+            if ds <= hs {
+                (HuffMode::Delta, delta_codec)
+            } else {
+                (HuffMode::Direct, direct_codec)
+            }
+        }
+        (Some(_), None) => (HuffMode::Delta, delta_codec),
+        (None, Some(_)) => (HuffMode::Direct, direct_codec),
+        (None, None) => return None,
+    };
+
+    // Write the Huffman-encoded blob
+    let mut buf = Vec::new();
+
+    // Write mode flag
+    match mode {
+        HuffMode::Delta => buf.push(1u8), // IEM_DeltaHuffman
+        HuffMode::Direct => buf.push(2u8), // IEM_Huffman
+    }
+
+    // Write code table
+    let code_table_bytes = codec.write_code_table(6).ok()?;
+    buf.extend_from_slice(&code_table_bytes);
+
+    // Compute total bits needed for the data
+    let code_table = codec.code_table();
+
+    let mut total_bits = 0u64;
+    match mode {
+        HuffMode::Delta => {
+            for i_depth in 0..n_depth {
+                let mut prev_val: i32 = 0;
+                for i in 0..height {
+                    for j in 0..width {
+                        let k = i * width + j;
+                        if all_valid || mask.is_valid(k) {
+                            let val = data[k * n_depth + i_depth].to_f64() as i32;
+                            let predictor =
+                                if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                                    prev_val
+                                } else if i > 0
+                                    && (all_valid || mask.is_valid(k - width))
+                                {
+                                    data[(k - width) * n_depth + i_depth].to_f64() as i32
+                                } else {
+                                    prev_val
+                                };
+                            let delta = val.wrapping_sub(predictor);
+                            let bin = (delta + offset) as u8 as usize;
+                            total_bits += code_table[bin].0 as u64;
+                            prev_val = val;
+                        }
+                    }
+                }
+            }
+        }
+        HuffMode::Direct => {
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    if all_valid || mask.is_valid(k) {
+                        for m in 0..n_depth {
+                            let val = data[k * n_depth + m].to_f64() as i32;
+                            let bin = (val + offset) as usize;
+                            total_bits += code_table[bin].0 as u64;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Allocate buffer for Huffman-encoded data
+    // numUInts = (bitPos > 0 ? 1 : 0) + 1 for padding (decode read-ahead)
+    let num_uints_data = ((total_bits + 31) / 32) as usize;
+    let num_uints_total = num_uints_data + 1; // +1 for decode read-ahead padding
+    let mut encoded = vec![0u8; num_uints_total * 4];
+    let mut bit_pos = 0i32;
+
+    // Encode data
+    match mode {
+        HuffMode::Delta => {
+            for i_depth in 0..n_depth {
+                let mut prev_val: i32 = 0;
+                for i in 0..height {
+                    for j in 0..width {
+                        let k = i * width + j;
+                        if all_valid || mask.is_valid(k) {
+                            let val = data[k * n_depth + i_depth].to_f64() as i32;
+                            let predictor =
+                                if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                                    prev_val
+                                } else if i > 0
+                                    && (all_valid || mask.is_valid(k - width))
+                                {
+                                    data[(k - width) * n_depth + i_depth].to_f64() as i32
+                                } else {
+                                    prev_val
+                                };
+                            let delta = val.wrapping_sub(predictor);
+                            let bin = (delta + offset) as u8 as usize;
+                            let (len, code) = code_table[bin];
+                            push_value(&mut encoded, &mut bit_pos, code, len as i32);
+                            prev_val = val;
+                        }
+                    }
+                }
+            }
+        }
+        HuffMode::Direct => {
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    if all_valid || mask.is_valid(k) {
+                        for m in 0..n_depth {
+                            let val = data[k * n_depth + m].to_f64() as i32;
+                            let bin = (val + offset) as usize;
+                            let (len, code) = code_table[bin];
+                            push_value(&mut encoded, &mut bit_pos, code, len as i32);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Compute final size with padding: (bitPos > 0 ? 1 : 0) + 1 extra uint32s
+    let num_uints_final = if bit_pos > 0 {
+        (bit_pos as usize / 32) + 1 + 1
+    } else {
+        (bit_pos as usize / 32) + 1
+    };
+    encoded.truncate(num_uints_final * 4);
+
+    buf.extend_from_slice(&encoded);
+    Some(buf)
 }
 
 fn encode_tiles<T: LercDataType>(

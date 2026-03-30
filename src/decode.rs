@@ -448,6 +448,12 @@ fn decode_huffman<T: LercDataType>(
 
     let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
 
+    // For 8-bit types, use wrapping integer arithmetic for reconstruction
+    let is_byte_type = matches!(
+        header.data_type,
+        DataType::Char | DataType::Byte
+    );
+
     if mode == ImageEncodeMode::DeltaHuffman {
         for i_depth in 0..n_depth {
             let mut prev_val = T::default();
@@ -459,18 +465,29 @@ fn decode_huffman<T: LercDataType>(
                     if all_valid || mask.is_valid(k) {
                         let val =
                             codec.decode_one_value(data, &mut byte_pos, &mut bit_pos, num_bits_lut)?;
-                        let delta_f = (val - offset) as f64;
+                        let delta = val - offset;
 
                         let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1))
                         {
-                            prev_val.to_f64()
+                            prev_val
                         } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
-                            output[m - width * n_depth].to_f64()
+                            output[m - width * n_depth]
                         } else {
-                            prev_val.to_f64()
+                            prev_val
                         };
 
-                        let result = T::from_f64(delta_f + predicted);
+                        let result = if is_byte_type {
+                            // Use wrapping arithmetic for 8-bit types to match C++ behavior
+                            let predicted_i = predicted.to_f64() as i32;
+                            let reconstructed = (delta + predicted_i) as u8;
+                            if header.data_type == DataType::Char {
+                                T::from_f64(reconstructed as i8 as f64)
+                            } else {
+                                T::from_f64(reconstructed as f64)
+                            }
+                        } else {
+                            T::from_f64(delta as f64 + predicted.to_f64())
+                        };
                         output[m] = result;
                         prev_val = result;
                     }

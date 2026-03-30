@@ -2,6 +2,157 @@ use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
 #[test]
+fn huffman_u8_compression_ratio() {
+    // Data with repetitive patterns should compress well with Huffman
+    let width = 256u32;
+    let height = 256u32;
+    // Image where most pixels are 0 or 1, ideal for Huffman
+    let pixels: Vec<u8> = (0..width * height)
+        .map(|i| if i % 7 == 0 { 1 } else { 0 })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Byte,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::U8(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let raw_size = (width * height) as usize;
+
+    // Huffman-encoded output should be much smaller than raw pixel data
+    assert!(
+        encoded.len() < raw_size,
+        "encoded size {} should be less than raw size {}",
+        encoded.len(),
+        raw_size
+    );
+
+    // Verify round-trip
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    match &decoded.data {
+        LercData::U8(dec_pixels) => {
+            assert_eq!(dec_pixels, &pixels, "Huffman u8 round-trip mismatch");
+        }
+        _ => panic!("expected U8 data"),
+    }
+}
+
+#[test]
+fn round_trip_i8_lossless() {
+    let width = 64u32;
+    let height = 64u32;
+    let pixels: Vec<i8> = (0..width * height)
+        .map(|i| ((i % 256) as i16 - 128) as i8)
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Char,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::I8(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    match &decoded.data {
+        LercData::I8(dec_pixels) => {
+            assert_eq!(dec_pixels, &pixels, "lossless i8 round-trip mismatch");
+        }
+        _ => panic!("expected I8 data"),
+    }
+}
+
+#[test]
+fn round_trip_u8_with_mask_huffman() {
+    let width = 64u32;
+    let height = 64u32;
+    let mut mask = BitMask::new((width * height) as usize);
+
+    // Set every other pixel valid
+    for k in 0..(width * height) as usize {
+        if k % 2 == 0 {
+            mask.set_valid(k);
+        }
+    }
+
+    // Use repetitive data that benefits from Huffman
+    let pixels: Vec<u8> = (0..width * height)
+        .map(|i| if mask.is_valid(i as usize) { (i % 4) as u8 } else { 0 })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Byte,
+        valid_masks: vec![mask.clone()],
+        data: LercData::U8(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    let dec_mask = &decoded.valid_masks[0];
+    match &decoded.data {
+        LercData::U8(dec_pixels) => {
+            for k in 0..(width * height) as usize {
+                assert_eq!(mask.is_valid(k), dec_mask.is_valid(k), "mask mismatch at {k}");
+                if mask.is_valid(k) {
+                    assert_eq!(
+                        pixels[k], dec_pixels[k],
+                        "pixel mismatch at {k}: expected {}, got {}",
+                        pixels[k], dec_pixels[k]
+                    );
+                }
+            }
+        }
+        _ => panic!("expected U8 data"),
+    }
+}
+
+#[test]
+fn round_trip_u8_multiband_huffman() {
+    let width = 64u32;
+    let height = 64u32;
+    let n_bands = 3u32;
+    let band_size = (width * height) as usize;
+
+    let pixels: Vec<u8> = (0..band_size * n_bands as usize)
+        .map(|i| (i % 10) as u8)
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands,
+        data_type: DataType::Byte,
+        valid_masks: vec![BitMask::all_valid(band_size)],
+        data: LercData::U8(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    match &decoded.data {
+        LercData::U8(dec_pixels) => {
+            assert_eq!(dec_pixels, &pixels, "multiband u8 round-trip mismatch");
+        }
+        _ => panic!("expected U8 data"),
+    }
+}
+
+#[test]
 fn decode_california_float() {
     let data = include_bytes!("../esri-lerc/testData/california_400_400_1_float.lerc2");
     let info = lerc::decode_info(data).expect("decode_info failed");
@@ -253,6 +404,235 @@ fn round_trip_with_partial_mask() {
                     let diff = (pixels[k] - dec_pixels[k]).abs();
                     assert!(diff <= 0.01, "pixel {k}: diff={diff}");
                 }
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+#[test]
+fn round_trip_f32_lossless() {
+    let width = 32u32;
+    let height = 32u32;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| (i as f32) * 0.1 + 100.0)
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    assert_eq!(decoded.data_type, DataType::Float);
+
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                assert_eq!(
+                    orig.to_bits(),
+                    dec.to_bits(),
+                    "pixel {i}: orig={orig} (bits={:#010x}), decoded={dec} (bits={:#010x})",
+                    orig.to_bits(),
+                    dec.to_bits()
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn round_trip_f32_lossless_varied_data() {
+    let width = 64u32;
+    let height = 64u32;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f32 / width as f32;
+            let y = (i / width) as f32 / height as f32;
+            (x * std::f32::consts::PI).sin() * (y * std::f32::consts::E).cos() * 1000.0
+        })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                assert_eq!(
+                    orig.to_bits(),
+                    dec.to_bits(),
+                    "pixel {i}: orig={orig}, decoded={dec}"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn round_trip_f64_lossless() {
+    let width = 32u32;
+    let height = 32u32;
+    let pixels: Vec<f64> = (0..width * height)
+        .map(|i| (i as f64) * 0.123456789 + 1000.0)
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Double,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F64(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    assert_eq!(decoded.data_type, DataType::Double);
+
+    match &decoded.data {
+        LercData::F64(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                assert_eq!(
+                    orig.to_bits(),
+                    dec.to_bits(),
+                    "pixel {i}: orig={orig} (bits={:#018x}), decoded={dec} (bits={:#018x})",
+                    orig.to_bits(),
+                    dec.to_bits()
+                );
+            }
+        }
+        _ => panic!("expected F64 data"),
+    }
+}
+
+#[test]
+fn round_trip_f64_lossless_varied() {
+    let width = 48u32;
+    let height = 48u32;
+    let pixels: Vec<f64> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f64 / width as f64;
+            let y = (i / width) as f64 / height as f64;
+            (x * std::f64::consts::PI).sin() * (y * std::f64::consts::E).cos() * 1e6
+        })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Double,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F64(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    match &decoded.data {
+        LercData::F64(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                assert_eq!(
+                    orig.to_bits(),
+                    dec.to_bits(),
+                    "pixel {i}: orig={orig}, decoded={dec}"
+                );
+            }
+        }
+        _ => panic!("expected F64 data"),
+    }
+}
+
+#[test]
+fn round_trip_f32_lossless_constant() {
+    // Special case: all same value
+    let width = 16u32;
+    let height = 16u32;
+    let pixels: Vec<f32> = vec![42.5; (width * height) as usize];
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels, &pixels);
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn round_trip_f32_lossless_multi_depth() {
+    let width = 16u32;
+    let height = 16u32;
+    let n_depth = 3u32;
+    let pixels: Vec<f32> = (0..width * height * n_depth)
+        .map(|i| (i as f32) * 0.01 + 1.0)
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                assert_eq!(
+                    orig.to_bits(),
+                    dec.to_bits(),
+                    "pixel {i}: orig={orig}, decoded={dec}"
+                );
             }
         }
         _ => panic!("expected F32 data"),

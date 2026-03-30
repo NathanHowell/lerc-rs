@@ -1316,3 +1316,74 @@ fn try_raise_max_z_error_with_partial_mask() {
         _ => panic!("expected F32 data"),
     }
 }
+
+#[test]
+fn decode_lerc1_world() {
+    let data = std::fs::read("esri-lerc/testData/world.lerc1").expect("failed to read world.lerc1");
+
+    // Verify decode_info works for Lerc1
+    let info = lerc::decode_info(&data).expect("decode_info failed for lerc1");
+    assert_eq!(info.version, 11, "lerc1 version should be 11");
+    assert_eq!(info.width, 257, "unexpected width");
+    assert_eq!(info.height, 257, "unexpected height");
+    assert_eq!(info.n_depth, 1, "lerc1 always has n_depth=1");
+    assert_eq!(info.n_bands, 1, "lerc1 always has n_bands=1");
+    assert_eq!(info.data_type, DataType::Float, "lerc1 always produces f32");
+
+    // Verify full decode
+    let image = lerc::decode(&data).expect("decode failed for lerc1");
+    assert_eq!(image.width, 257);
+    assert_eq!(image.height, 257);
+    assert_eq!(image.n_depth, 1);
+    assert_eq!(image.n_bands, 1);
+    assert_eq!(image.data_type, DataType::Float);
+    assert_eq!(image.valid_masks.len(), 1);
+
+    let mask = &image.valid_masks[0];
+    let num_valid = mask.count_valid();
+    // The world DEM has some invalid pixels (ocean areas)
+    let total = 257 * 257;
+    assert!(
+        num_valid > 0 && num_valid < total,
+        "expected partial validity: {num_valid}/{total}"
+    );
+
+    match &image.data {
+        LercData::F32(pixels) => {
+            assert_eq!(pixels.len(), total);
+
+            // Check z range of valid pixels
+            let mut z_min = f32::MAX;
+            let mut z_max = f32::MIN;
+            let mut valid_count = 0usize;
+            for (k, &v) in pixels.iter().enumerate() {
+                if mask.is_valid(k) {
+                    assert!(v.is_finite(), "valid pixel {k} is not finite: {v}");
+                    if v < z_min {
+                        z_min = v;
+                    }
+                    if v > z_max {
+                        z_max = v;
+                    }
+                    valid_count += 1;
+                }
+            }
+
+            assert_eq!(valid_count, num_valid);
+            // World elevation: expect something like -500..9000 meters
+            assert!(
+                z_min < 0.0,
+                "expected some negative elevations (below sea level), got z_min={z_min}"
+            );
+            assert!(
+                z_max > 1000.0,
+                "expected some high elevations, got z_max={z_max}"
+            );
+            assert!(
+                z_max < 10000.0,
+                "z_max={z_max} seems unreasonably high for world DEM"
+            );
+        }
+        _ => panic!("expected F32 data for lerc1"),
+    }
+}

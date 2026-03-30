@@ -21,6 +21,10 @@ enum ImageEncodeMode {
 }
 
 pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
+    if crate::lerc1::is_lerc1(data) {
+        return crate::lerc1::decode_info(data);
+    }
+
     let (hd, _) = header::read_header(data)?;
 
     // Count total bands by walking concatenated blobs
@@ -64,6 +68,10 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
 }
 
 pub fn decode(data: &[u8]) -> Result<LercImage> {
+    if crate::lerc1::is_lerc1(data) {
+        return crate::lerc1::decode(data);
+    }
+
     let info = decode_info(data)?;
     let n_bands = info.n_bands;
     let width = info.width;

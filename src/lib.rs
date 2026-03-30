@@ -33,6 +33,7 @@ pub(crate) mod decode;
 pub(crate) mod encode;
 #[allow(dead_code)]
 pub(crate) mod fpl;
+pub(crate) mod lerc1;
 #[allow(dead_code)]
 pub(crate) mod tiles;
 

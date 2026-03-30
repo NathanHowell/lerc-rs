@@ -539,6 +539,58 @@ fn compute_no_data_sentinel<T: LercDataType>(
     }
 }
 
+/// Quick check whether 8-bit integer data has high entropy (nearly all 256
+/// byte values present with roughly uniform distribution). When this is true,
+/// Huffman encoding cannot beat tiling, so we skip the expensive Huffman attempt.
+fn is_high_entropy_u8<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    header: &HeaderInfo,
+) -> bool {
+    let width = header.n_cols as usize;
+    let height = header.n_rows as usize;
+    let n_depth = header.n_depth as usize;
+    let offset: i32 = if header.data_type == DataType::Char { 128 } else { 0 };
+    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+
+    // Build a quick histogram
+    let mut histo = [0u32; 256];
+    let mut total = 0u32;
+
+    for i in 0..height {
+        for j in 0..width {
+            let k = i * width + j;
+            if all_valid || mask.is_valid(k) {
+                for m in 0..n_depth {
+                    let val = data[k * n_depth + m].to_f64() as i32;
+                    let bin = (val + offset) as usize;
+                    histo[bin] += 1;
+                    total += 1;
+                }
+            }
+        }
+    }
+
+    if total == 0 {
+        return false;
+    }
+
+    let n_distinct = histo.iter().filter(|&&c| c > 0).count();
+
+    // If nearly all 256 values present and distribution is roughly uniform,
+    // Huffman can't compress much. Check: >= 248 distinct values and
+    // max bin frequency < 2x average.
+    if n_distinct < 248 {
+        return false;
+    }
+
+    let avg = total as f64 / 256.0;
+    let max_count = *histo.iter().max().unwrap_or(&0) as f64;
+
+    // If the max bin is less than 2x average, distribution is fairly uniform
+    max_count < avg * 2.0
+}
+
 fn encode_one_band<T: LercDataType>(
     data: &[T],
     mask: &BitMask,
@@ -745,19 +797,26 @@ fn encode_one_band<T: LercDataType>(
         matches!(T::DATA_TYPE, DataType::Float | DataType::Double) && max_z_error == 0.0;
 
     if try_huffman_int {
-        // Try Huffman encoding for 8-bit integer types
-        if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, &hd) {
-            // Huffman is beneficial; compare against tiling size
-            let mut tiling_blob = Vec::new();
-            encode_tiles(&mut tiling_blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
+        // Quick entropy check: if the data is high-entropy (nearly all 256 byte values
+        // present and roughly uniform), Huffman cannot beat tiling. Skip it to avoid
+        // building two Huffman trees.
+        let skip_huffman = is_high_entropy_u8(encode_data, mask, &hd);
 
-            if huffman_blob.len() < tiling_blob.len() {
-                blob.extend_from_slice(&huffman_blob);
-                header::finalize_blob(&mut blob);
-                return Ok(blob);
+        if !skip_huffman {
+            // Try Huffman encoding for 8-bit integer types
+            if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, &hd) {
+                // Huffman is beneficial; compare against tiling size
+                let mut tiling_blob = Vec::new();
+                encode_tiles(&mut tiling_blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
+
+                if huffman_blob.len() < tiling_blob.len() {
+                    blob.extend_from_slice(&huffman_blob);
+                    header::finalize_blob(&mut blob);
+                    return Ok(blob);
+                }
             }
         }
-        // Huffman not beneficial or failed; fall through to tiling
+        // Huffman not beneficial or skipped; fall through to tiling
         // Write IEM_Tiling = 0
         blob.push(0u8);
     } else if try_huffman_flt {
@@ -1557,11 +1616,11 @@ fn encode_tile_inner<T: LercDataType>(
 
     // Try LUT vs simple encoding
     let encoded_start = buf.len();
-    if let Some(sorted) = crate::bitstuffer::should_use_lut(quant_scratch) {
+    if let Some(lut_info) = crate::bitstuffer::should_use_lut(quant_scratch, max_quant) {
         let lut_bits67 = bits67;
         buf.push(1 | lut_bits67 | diff_flag | integrity);
         tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
-        let stuffed = crate::bitstuffer::encode_lut(&sorted);
+        let stuffed = crate::bitstuffer::encode_lut(&lut_info, num_valid as u32);
         buf.extend_from_slice(&stuffed);
     } else {
         buf.push(1 | bits67 | diff_flag | integrity);

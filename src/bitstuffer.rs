@@ -53,36 +53,47 @@ fn bit_stuff(data: &[u32], num_bits: u32) -> Vec<u8> {
 
     let num_elements = data.len() as u32;
     let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
-    let mut buf = vec![0u32; num_uints];
-
-    let mut bit_pos: u32 = 0;
-    let mut dst_idx = 0;
-
-    for &val in data {
-        if 32 - bit_pos >= num_bits {
-            buf[dst_idx] |= val << bit_pos;
-            bit_pos += num_bits;
-            if bit_pos == 32 {
-                dst_idx += 1;
-                bit_pos = 0;
-            }
-        } else {
-            buf[dst_idx] |= val << bit_pos;
-            dst_idx += 1;
-            buf[dst_idx] |= val >> (32 - bit_pos);
-            bit_pos = bit_pos + num_bits - 32;
-        }
-    }
-
     let num_bytes_used =
         (num_uints * 4) - num_tail_bytes_not_needed(num_elements, num_bits) as usize;
 
-    let mut out = Vec::with_capacity(num_bytes_used);
-    for &word in &buf {
-        out.extend_from_slice(&word.to_le_bytes());
-    }
-    out.truncate(num_bytes_used);
+    // Allocate output bytes directly (little-endian) and pack using a 64-bit accumulator
+    let mut out = vec![0u8; num_bytes_used];
+    bit_stuff_into(&mut out, data, num_bits);
     out
+}
+
+/// Bit-stuff values into an already-allocated byte slice using a 64-bit accumulator.
+/// The output slice must be at least as large as the bit-stuffed data.
+fn bit_stuff_into(out: &mut [u8], data: &[u32], num_bits: u32) {
+    if num_bits == 0 || data.is_empty() {
+        return;
+    }
+
+    let mut accum: u64 = 0;
+    let mut bits_in_accum: u32 = 0;
+    let mut dst = 0usize;
+
+    for &val in data {
+        accum |= (val as u64) << bits_in_accum;
+        bits_in_accum += num_bits;
+
+        if bits_in_accum >= 32 {
+            let word = accum as u32;
+            // Write the u32 word as little-endian bytes
+            out[dst..dst + 4].copy_from_slice(&word.to_le_bytes());
+            dst += 4;
+            accum >>= 32;
+            bits_in_accum -= 32;
+        }
+    }
+
+    // Flush remaining bits
+    if bits_in_accum > 0 {
+        let remaining_bytes = bits_in_accum.div_ceil(8) as usize;
+        let word_bytes = (accum as u32).to_le_bytes();
+        let n = remaining_bytes.min(out.len() - dst);
+        out[dst..dst + n].copy_from_slice(&word_bytes[..n]);
+    }
 }
 
 /// Bit-unstuff values from a buffer (v3+ format: LSB-first packing).
@@ -252,61 +263,61 @@ pub fn encode_simple(data: &[u32]) -> Vec<u8> {
     buf
 }
 
-/// Encode an array of unsigned ints using LUT mode.
-///
-/// `sorted_data` is a list of (value, original_index) pairs sorted by value.
-pub fn encode_lut(sorted_data: &[(u32, u32)]) -> Vec<u8> {
-    if sorted_data.is_empty() {
+/// Pre-computed LUT encoding info from `should_use_lut`, avoiding recomputation in `encode_lut`.
+pub struct LutInfo {
+    /// Distinct values excluding the minimum (which maps to index 0)
+    pub lut_vec: Vec<u32>,
+    /// Per-element LUT index
+    pub index_vec: Vec<u32>,
+    /// Number of bits needed for the max value in lut_vec
+    pub num_bits: u32,
+    /// Number of bits needed for lut indices
+    pub n_bits_lut: u32,
+}
+
+/// Encode an array of unsigned ints using LUT mode from pre-computed info.
+pub fn encode_lut(info: &LutInfo, num_elem: u32) -> Vec<u8> {
+    if num_elem == 0 {
         return Vec::new();
-    }
-
-    let num_elem = sorted_data.len() as u32;
-
-    // Build LUT (omitting the 0 which corresponds to min)
-    let mut lut_vec: Vec<u32> = Vec::new();
-    let mut index_vec = vec![0u32; num_elem as usize];
-    let mut index_lut = 0u32;
-
-    for i in 1..sorted_data.len() {
-        let prev = sorted_data[i - 1].0;
-        index_vec[sorted_data[i - 1].1 as usize] = index_lut;
-        if sorted_data[i].0 != prev {
-            lut_vec.push(sorted_data[i].0);
-            index_lut += 1;
-        }
-    }
-    index_vec[sorted_data[num_elem as usize - 1].1 as usize] = index_lut;
-
-    let max_elem = *lut_vec.last().unwrap();
-    let mut num_bits: u32 = 0;
-    while num_bits < 32 && (max_elem >> num_bits) != 0 {
-        num_bits += 1;
     }
 
     let n = num_bytes_uint(num_elem);
     let bits67 = if n == 4 { 0u8 } else { (3 - n) as u8 };
 
-    let mut header_byte = num_bits as u8;
+    let mut header_byte = info.num_bits as u8;
     header_byte |= bits67 << 6;
     header_byte |= 1 << 5; // bit 5 = 1 for LUT mode
 
-    let mut buf = Vec::new();
+    // Pre-compute output size for a single allocation
+    let n_lut = info.lut_vec.len() as u32;
+    let lut_bytes = if info.num_bits > 0 {
+        let num_uints = (n_lut as u64 * info.num_bits as u64).div_ceil(32) as usize;
+        (num_uints * 4) - num_tail_bytes_not_needed(n_lut, info.num_bits) as usize
+    } else {
+        0
+    };
+    let idx_bytes = if info.n_bits_lut > 0 {
+        let num_uints = (num_elem as u64 * info.n_bits_lut as u64).div_ceil(32) as usize;
+        (num_uints * 4) - num_tail_bytes_not_needed(num_elem, info.n_bits_lut) as usize
+    } else {
+        0
+    };
+    let total_size = 1 + n + 1 + lut_bytes + idx_bytes;
+
+    let mut buf = Vec::with_capacity(total_size);
     buf.push(header_byte);
     encode_uint(&mut buf, num_elem, n);
-
-    let n_lut = lut_vec.len() as u32;
     buf.push((n_lut + 1) as u8); // size including the 0
 
-    let stuffed_lut = bit_stuff(&lut_vec, num_bits);
-    buf.extend_from_slice(&stuffed_lut);
-
-    let mut n_bits_lut: u32 = 0;
-    while (n_lut >> n_bits_lut) != 0 {
-        n_bits_lut += 1;
+    if info.num_bits > 0 {
+        let stuffed_lut = bit_stuff(&info.lut_vec, info.num_bits);
+        buf.extend_from_slice(&stuffed_lut);
     }
 
-    let stuffed_idx = bit_stuff(&index_vec, n_bits_lut);
-    buf.extend_from_slice(&stuffed_idx);
+    if info.n_bits_lut > 0 {
+        let stuffed_idx = bit_stuff(&info.index_vec, info.n_bits_lut);
+        buf.extend_from_slice(&stuffed_idx);
+    }
 
     buf
 }
@@ -410,65 +421,54 @@ pub fn num_bits_needed(max_elem: u32) -> u32 {
     num_bits
 }
 
-/// Count distinct values cheaply without sorting.
+/// Decide whether LUT encoding is beneficial, and if so build the LUT info directly.
 ///
-/// Uses a bitset for small domains or sampling for large ones.
-fn count_distinct_fast(data: &[u32], max_elem: u32) -> u32 {
-    if max_elem < 65536 {
-        // Use a bitset: one bit per possible value
-        let num_words = (max_elem as usize / 64) + 1;
-        let mut bitset = vec![0u64; num_words];
-        for &val in data {
-            let word = val as usize / 64;
-            let bit = val as usize % 64;
-            bitset[word] |= 1u64 << bit;
-        }
-        bitset.iter().map(|w| w.count_ones()).sum()
-    } else {
-        // For large domains, sample every Nth element to estimate distinct count.
-        // Use a small hash-set style approach on the sample.
-        let step = (data.len() / 512).max(1);
-        let mut seen = Vec::with_capacity(256);
-        for (i, &val) in data.iter().enumerate() {
-            if i % step != 0 {
-                continue;
-            }
-            if !seen.contains(&val) {
-                seen.push(val);
-                if seen.len() > 255 {
-                    return 256; // Exceeds LUT threshold
-                }
-            }
-        }
-        seen.len() as u32
-    }
-}
-
-/// Decide whether LUT encoding is beneficial, and return the sorted data if so.
+/// For small domains (max_elem < 256, common for u8 data), uses a histogram-based
+/// approach that avoids sorting entirely. For larger domains, uses a bitset to count
+/// distinct values first, then builds the LUT via counting sort when possible.
 ///
-/// Uses a cheap histogram/bitset first to count distinct values, avoiding the
-/// expensive sort when LUT clearly won't help.
-pub fn should_use_lut(data: &[u32]) -> Option<Vec<(u32, u32)>> {
+/// Returns `Some(LutInfo)` with pre-computed LUT data ready for `encode_lut`,
+/// or `None` if simple encoding would be smaller.
+pub fn should_use_lut(data: &[u32], max_elem: u32) -> Option<LutInfo> {
     if data.len() < 2 {
         return None;
     }
 
-    let max_elem = data.iter().copied().max().unwrap_or(0);
     let num_elem = data.len() as u32;
     let num_bits = num_bits_needed(max_elem);
 
-    // Quick distinct-count check: if too many distinct values, LUT won't help
-    let n_distinct = count_distinct_fast(data, max_elem);
+    if max_elem < 256 {
+        // Fast path for u8-range data: histogram-based, no sorting needed
+        should_use_lut_small(data, num_elem, num_bits, max_elem)
+    } else if max_elem < 65536 {
+        // Medium domain: bitset count then counting sort
+        should_use_lut_medium(data, num_elem, num_bits, max_elem)
+    } else {
+        // Large domain: sample-based estimate
+        should_use_lut_large(data, num_elem, num_bits)
+    }
+}
 
-    // LUT needs 1..255 distinct values (n_lut = n_distinct - 1 since min maps to 0)
-    // If n_distinct > 255 or n_distinct < 2, skip sorting
+/// Fast LUT construction for u8-range data (max_elem < 256).
+/// Uses a 256-entry histogram to count distinct values AND build the value-to-index
+/// mapping in a single pass, completely avoiding any sorting.
+fn should_use_lut_small(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u32) -> Option<LutInfo> {
+    // Build histogram
+    let mut counts = [0u32; 256];
+    for &val in data {
+        counts[val as usize] += 1;
+    }
+
+    // Count distinct values
+    let n_distinct: u32 = counts.iter().filter(|&&c| c > 0).count() as u32;
+
     if !(2..=255).contains(&n_distinct) {
         return None;
     }
 
-    // Estimate whether LUT can beat simple encoding before sorting.
-    // n_lut = n_distinct - 1 (the min value is implicit)
     let n_lut = n_distinct - 1;
+
+    // Estimate size before building the full LUT
     let num_bytes_simple =
         1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
@@ -485,11 +485,170 @@ pub fn should_use_lut(data: &[u32]) -> Option<Vec<(u32, u32)>> {
         return None;
     }
 
-    // Only now do the expensive sort
-    let mut sorted: Vec<(u32, u32)> = data.iter().copied().zip(0u32..).collect();
-    sorted.sort_by_key(|&(val, _)| val);
+    // Build value-to-lut-index mapping: iterate values in order, assign indices.
+    // Index 0 = minimum value, then 1, 2, ... for subsequent distinct values.
+    let mut value_to_index = [0u32; 256];
+    let mut lut_vec = Vec::with_capacity(n_lut as usize);
+    let mut idx = 0u32;
+    for v in 0..=max_elem as usize {
+        if counts[v] > 0 {
+            value_to_index[v] = idx;
+            if idx > 0 {
+                lut_vec.push(v as u32);
+            }
+            idx += 1;
+        }
+    }
 
-    Some(sorted)
+    // Build index_vec by looking up each data value
+    let mut index_vec = vec![0u32; num_elem as usize];
+    for (i, &val) in data.iter().enumerate() {
+        index_vec[i] = value_to_index[val as usize];
+    }
+
+    Some(LutInfo {
+        lut_vec,
+        index_vec,
+        num_bits,
+        n_bits_lut,
+    })
+}
+
+/// LUT construction for medium domains (256..65536).
+fn should_use_lut_medium(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u32) -> Option<LutInfo> {
+    // Use a bitset to count distinct values
+    let num_words = (max_elem as usize / 64) + 1;
+    let mut bitset = vec![0u64; num_words];
+    for &val in data {
+        let word = val as usize / 64;
+        let bit = val as usize % 64;
+        bitset[word] |= 1u64 << bit;
+    }
+    let n_distinct: u32 = bitset.iter().map(|w| w.count_ones()).sum();
+
+    if !(2..=255).contains(&n_distinct) {
+        return None;
+    }
+
+    let n_lut = n_distinct - 1;
+
+    let num_bytes_simple =
+        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+
+    let mut n_bits_lut = 0u32;
+    while (n_lut >> n_bits_lut) != 0 {
+        n_bits_lut += 1;
+    }
+
+    let num_bytes_lut =
+        1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
+            + ((num_elem * n_bits_lut + 7) >> 3);
+
+    if num_bytes_lut >= num_bytes_simple {
+        return None;
+    }
+
+    // Build value-to-index map using the bitset
+    // We need a map from value -> lut index. Use a Vec since domain is < 65536.
+    let mut value_to_index = vec![0u32; max_elem as usize + 1];
+    let mut lut_vec = Vec::with_capacity(n_lut as usize);
+    let mut idx = 0u32;
+    for (v, slot) in value_to_index.iter_mut().enumerate() {
+        let word = v / 64;
+        let bit = v % 64;
+        if (bitset[word] >> bit) & 1 != 0 {
+            *slot = idx;
+            if idx > 0 {
+                lut_vec.push(v as u32);
+            }
+            idx += 1;
+        }
+    }
+
+    let mut index_vec = vec![0u32; num_elem as usize];
+    for (i, &val) in data.iter().enumerate() {
+        index_vec[i] = value_to_index[val as usize];
+    }
+
+    Some(LutInfo {
+        lut_vec,
+        index_vec,
+        num_bits,
+        n_bits_lut,
+    })
+}
+
+/// LUT construction for large domains (>= 65536).
+fn should_use_lut_large(data: &[u32], num_elem: u32, num_bits: u32) -> Option<LutInfo> {
+    // Sample to estimate distinct count
+    let step = (data.len() / 512).max(1);
+    let mut seen = Vec::with_capacity(256);
+    for (i, &val) in data.iter().enumerate() {
+        if i % step != 0 {
+            continue;
+        }
+        if !seen.contains(&val) {
+            seen.push(val);
+            if seen.len() > 255 {
+                return None; // Exceeds LUT threshold
+            }
+        }
+    }
+    let n_distinct_est = seen.len() as u32;
+
+    if !(2..=255).contains(&n_distinct_est) {
+        return None;
+    }
+
+    // Need to do the full sort for large domains
+    let mut sorted: Vec<(u32, u32)> = data.iter().copied().zip(0u32..).collect();
+    sorted.sort_unstable_by_key(|&(val, _)| val);
+
+    // Build LUT from sorted data
+    let mut lut_vec: Vec<u32> = Vec::new();
+    let mut index_vec = vec![0u32; num_elem as usize];
+    let mut index_lut = 0u32;
+
+    for i in 1..sorted.len() {
+        let prev = sorted[i - 1].0;
+        index_vec[sorted[i - 1].1 as usize] = index_lut;
+        if sorted[i].0 != prev {
+            lut_vec.push(sorted[i].0);
+            index_lut += 1;
+        }
+    }
+    index_vec[sorted[num_elem as usize - 1].1 as usize] = index_lut;
+
+    let n_lut = lut_vec.len() as u32;
+
+    // Check if LUT is beneficial
+    let num_bytes_simple =
+        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+
+    let mut n_bits_lut = 0u32;
+    while (n_lut >> n_bits_lut) != 0 {
+        n_bits_lut += 1;
+    }
+
+    let num_bytes_lut =
+        1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
+            + ((num_elem * n_bits_lut + 7) >> 3);
+
+    if num_bytes_lut >= num_bytes_simple {
+        return None;
+    }
+
+    let max_lut_elem = *lut_vec.last().unwrap_or(&0);
+    let actual_num_bits = num_bits_needed(max_lut_elem);
+    // Use the original num_bits (based on max_elem of the full data) for consistency
+    let _ = actual_num_bits;
+
+    Some(LutInfo {
+        lut_vec,
+        index_vec,
+        num_bits,
+        n_bits_lut,
+    })
 }
 
 #[cfg(test)]
@@ -528,10 +687,10 @@ mod tests {
     fn round_trip_lut() {
         // Data with few distinct values — good for LUT
         let data = vec![0, 100, 200, 0, 100, 200, 0, 100, 200, 0];
-        let mut sorted: Vec<(u32, u32)> = data.iter().copied().zip(0u32..).collect();
-        sorted.sort_by_key(|&(val, _)| val);
+        let max_elem = *data.iter().max().unwrap();
+        let info = should_use_lut(&data, max_elem).expect("should use LUT");
 
-        let encoded = encode_lut(&sorted);
+        let encoded = encode_lut(&info, data.len() as u32);
         let mut pos = 0;
         let decoded = decode(&encoded, &mut pos, 100, 6).unwrap();
         assert_eq!(decoded, data);

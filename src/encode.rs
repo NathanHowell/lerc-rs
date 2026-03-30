@@ -532,6 +532,7 @@ fn encode_tiles<T: LercDataType>(
                     j0,
                     j1,
                     i_depth,
+                    n_depth > 1 && i_depth > 0,
                 )?;
             }
         }
@@ -540,6 +541,10 @@ fn encode_tiles<T: LercDataType>(
     Ok(())
 }
 
+/// Encode a single tile block (one depth slice of one micro-block).
+/// When `try_diff` is true (depth > 0 with nDepth > 1), the encoder tries
+/// diff (delta) encoding relative to the previous depth slice and picks
+/// whichever representation is smaller.
 fn encode_tile<T: LercDataType>(
     blob: &mut Vec<u8>,
     data: &[T],
@@ -553,33 +558,27 @@ fn encode_tile<T: LercDataType>(
     j0: usize,
     j1: usize,
     i_depth: usize,
+    try_diff: bool,
 ) -> Result<()> {
     let n_cols = header.n_cols as usize;
     let n_depth = header.n_depth as usize;
 
-    // Collect valid pixels
-    let mut valid_data: Vec<T> = Vec::new();
-    let mut z_min = T::default();
-    let mut z_max = T::default();
-    let mut first = true;
+    // Collect valid pixels for this depth slice
+    let mut valid_data: Vec<f64> = Vec::new();
+    let mut z_min_f = f64::MAX;
+    let mut z_max_f = f64::MIN;
 
     for i in i0..i1 {
         let mut k = i * n_cols + j0;
         for _j in j0..j1 {
             if mask.is_valid(k) {
-                let val = data[k * n_depth + i_depth];
+                let val = data[k * n_depth + i_depth].to_f64();
                 valid_data.push(val);
-                if first {
-                    z_min = val;
-                    z_max = val;
-                    first = false;
-                } else {
-                    if val.to_f64() < z_min.to_f64() {
-                        z_min = val;
-                    }
-                    if val.to_f64() > z_max.to_f64() {
-                        z_max = val;
-                    }
+                if val < z_min_f {
+                    z_min_f = val;
+                }
+                if val > z_max_f {
+                    z_max_f = val;
                 }
             }
             k += 1;
@@ -592,14 +591,118 @@ fn encode_tile<T: LercDataType>(
     let pattern: u8 = 14; // v5+
     let integrity = ((j0 as u8 >> 3) & pattern) << 2;
 
-    if num_valid == 0 || (z_min.to_f64() == 0.0 && z_max.to_f64() == 0.0) {
-        // Constant 0 block
-        blob.push(2 | integrity);
-        return Ok(());
+    // Compute diff values if applicable
+    let diff_data: Option<Vec<f64>> = if try_diff {
+        let mut diffs = Vec::with_capacity(num_valid);
+        let mut overflow = false;
+        let mut idx = 0;
+        for i in i0..i1 {
+            let mut k = i * n_cols + j0;
+            for _j in j0..j1 {
+                if mask.is_valid(k) {
+                    let cur = data[k * n_depth + i_depth].to_f64();
+                    let prev = data[k * n_depth + i_depth - 1].to_f64();
+                    let diff = cur - prev;
+                    // Check for integer overflow: for integer types, the diff
+                    // must be representable as i32
+                    if T::is_integer()
+                        && (diff < i32::MIN as f64 || diff > i32::MAX as f64)
+                    {
+                        overflow = true;
+                        break;
+                    }
+                    diffs.push(diff);
+                    idx += 1;
+                }
+                k += 1;
+            }
+            if overflow {
+                break;
+            }
+        }
+        if overflow || idx != num_valid {
+            None
+        } else {
+            Some(diffs)
+        }
+    } else {
+        None
+    };
+
+    // Encode without diff
+    let non_diff_encoded = encode_tile_inner::<T>(
+        &valid_data,
+        num_valid,
+        z_min_f,
+        z_max_f,
+        max_z_error,
+        max_val_to_quantize,
+        integrity,
+        header.data_type,
+        false,
+    );
+
+    // Encode with diff (if available)
+    let diff_encoded = if let Some(ref diffs) = diff_data {
+        let mut diff_min = f64::MAX;
+        let mut diff_max = f64::MIN;
+        for &d in diffs.iter() {
+            if d < diff_min {
+                diff_min = d;
+            }
+            if d > diff_max {
+                diff_max = d;
+            }
+        }
+        Some(encode_tile_inner::<T>(
+            diffs,
+            num_valid,
+            diff_min,
+            diff_max,
+            max_z_error,
+            max_val_to_quantize,
+            integrity,
+            header.data_type,
+            true,
+        ))
+    } else {
+        None
+    };
+
+    // Pick the smaller encoding
+    match diff_encoded {
+        Some(ref diff_buf) if diff_buf.len() < non_diff_encoded.len() => {
+            blob.extend_from_slice(diff_buf);
+        }
+        _ => {
+            blob.extend_from_slice(&non_diff_encoded);
+        }
     }
 
-    let z_min_f = z_min.to_f64();
-    let z_max_f = z_max.to_f64();
+    Ok(())
+}
+
+/// Encode the payload for a single tile block. Returns the complete block bytes
+/// (header byte + offset + bitstuffed data). When `b_diff_enc` is true, bit 2
+/// of the compression flag is set and the offset data type is forced to Int
+/// for integer source types.
+fn encode_tile_inner<T: LercDataType>(
+    values: &[f64],
+    num_valid: usize,
+    z_min_f: f64,
+    z_max_f: f64,
+    max_z_error: f64,
+    max_val_to_quantize: f64,
+    integrity: u8,
+    src_data_type: DataType,
+    b_diff_enc: bool,
+) -> Vec<u8> {
+    let diff_flag: u8 = if b_diff_enc { 4 } else { 0 };
+
+    if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
+        // Constant 0 block (for diff enc this means all diffs are zero)
+        return vec![2 | diff_flag | integrity];
+    }
 
     // Check if we need quantization
     let need_quantize = if max_z_error == 0.0 {
@@ -610,38 +713,54 @@ fn encode_tile<T: LercDataType>(
     };
 
     if !need_quantize && z_min_f == z_max_f {
-        // Constant block (all same value)
-        let (dt_reduced, tc) = tiles::reduce_data_type(z_min, header.data_type);
+        // Constant block (all same value / all same diff)
+        let z_min_t = T::from_f64(z_min_f);
+        let (dt_reduced, tc) = if b_diff_enc && src_data_type.is_integer() {
+            tiles::reduce_data_type(z_min_f as i32, DataType::Int)
+        } else {
+            tiles::reduce_data_type(z_min_t, src_data_type)
+        };
         let bits67 = (tc as u8) << 6;
-        blob.push(3 | bits67 | integrity);
-        tiles::write_variable_data_type(blob, z_min_f, dt_reduced);
-        return Ok(());
+        let mut buf = vec![3 | bits67 | diff_flag | integrity];
+        tiles::write_variable_data_type(&mut buf, z_min_f, dt_reduced);
+        return buf;
     }
 
     if !need_quantize {
-        // Raw binary
-        blob.push(0 | integrity);
-        for val in &valid_data {
-            write_typed_value_raw::<T>(blob, *val);
+        if !b_diff_enc {
+            let mut buf = vec![0 | integrity];
+            for val in values {
+                let t = T::from_f64(*val);
+                write_typed_value_raw::<T>(&mut buf, t);
+            }
+            return buf;
         }
-        return Ok(());
+        // Raw binary is not allowed with diff enc per the decoder.
+        // Return an impossibly-large sentinel so the non-diff path wins
+        // the size comparison. We use raw-size + 1 so it always loses.
+        return vec![0u8; 1 + num_valid * T::BYTES + 1];
     }
 
     // Quantize and bit-stuff
-    let (dt_reduced, tc) = tiles::reduce_data_type(z_min, header.data_type);
+    let z_min_t = T::from_f64(z_min_f);
+    let (dt_reduced, tc) = if b_diff_enc && src_data_type.is_integer() {
+        tiles::reduce_data_type(z_min_f as i32, DataType::Int)
+    } else {
+        tiles::reduce_data_type(z_min_t, src_data_type)
+    };
     let bits67 = (tc as u8) << 6;
 
     // Quantize values
     let mut quant_vec: Vec<u32> = Vec::with_capacity(num_valid);
     if T::is_integer() && max_z_error == 0.5 {
         // Lossless integer
-        for val in &valid_data {
-            quant_vec.push((val.to_f64() - z_min_f) as u32);
+        for val in values {
+            quant_vec.push((*val - z_min_f) as u32);
         }
     } else {
         let scale = 1.0 / (2.0 * max_z_error);
-        for val in &valid_data {
-            quant_vec.push(((val.to_f64() - z_min_f) * scale + 0.5) as u32);
+        for val in values {
+            quant_vec.push(((*val - z_min_f) * scale + 0.5) as u32);
         }
     }
 
@@ -649,40 +768,42 @@ fn encode_tile<T: LercDataType>(
 
     if max_quant == 0 {
         // All values quantize to same -> constant block
-        blob.push(3 | bits67 | integrity);
-        tiles::write_variable_data_type(blob, z_min_f, dt_reduced);
-        return Ok(());
+        let mut buf = vec![3 | bits67 | diff_flag | integrity];
+        tiles::write_variable_data_type(&mut buf, z_min_f, dt_reduced);
+        return buf;
     }
 
     // Try LUT vs simple encoding
     let encoded = if let Some(sorted) = crate::bitstuffer::should_use_lut(&quant_vec) {
         let lut_bits67 = bits67;
-        let mut tile_buf = vec![1 | lut_bits67 | integrity];
+        let mut tile_buf = vec![1 | lut_bits67 | diff_flag | integrity];
         tiles::write_variable_data_type(&mut tile_buf, z_min_f, dt_reduced);
         let stuffed = crate::bitstuffer::encode_lut(&sorted);
         tile_buf.extend_from_slice(&stuffed);
         tile_buf
     } else {
-        let mut tile_buf = vec![1 | bits67 | integrity];
+        let mut tile_buf = vec![1 | bits67 | diff_flag | integrity];
         tiles::write_variable_data_type(&mut tile_buf, z_min_f, dt_reduced);
         let stuffed = crate::bitstuffer::encode_simple(&quant_vec);
         tile_buf.extend_from_slice(&stuffed);
         tile_buf
     };
 
-    // Check if raw binary would be smaller
-    let raw_size = 1 + num_valid * T::BYTES;
-    if encoded.len() < raw_size {
-        blob.extend_from_slice(&encoded);
-    } else {
-        // Raw binary fallback
-        blob.push(0 | integrity);
-        for val in &valid_data {
-            write_typed_value_raw::<T>(blob, *val);
+    // Check if raw binary would be smaller (only for non-diff mode)
+    if !b_diff_enc {
+        let raw_size = 1 + num_valid * T::BYTES;
+        if encoded.len() >= raw_size {
+            // Raw binary fallback
+            let mut buf = vec![0 | integrity];
+            for val in values {
+                let t = T::from_f64(*val);
+                write_typed_value_raw::<T>(&mut buf, t);
+            }
+            return buf;
         }
     }
 
-    Ok(())
+    encoded
 }
 
 fn write_typed_value<T: LercDataType>(blob: &mut Vec<u8>, val: f64) {

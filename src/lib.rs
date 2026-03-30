@@ -45,6 +45,18 @@ use alloc::vec::Vec;
 
 use bitmask::BitMask;
 
+/// Metadata returned from a decode-into operation (no owned pixel data).
+#[derive(Debug, Clone)]
+pub struct DecodeResult {
+    pub width: u32,
+    pub height: u32,
+    pub n_depth: u32,
+    pub n_bands: u32,
+    pub data_type: DataType,
+    pub valid_masks: Vec<BitMask>,
+    pub no_data_value: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LercInfo {
     pub version: i32,
@@ -225,4 +237,59 @@ impl LercImage {
     pub fn mask(&self) -> Option<&BitMask> {
         self.valid_masks.first()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Zero-copy decode-into API
+// ---------------------------------------------------------------------------
+
+/// Decode a LERC blob into a pre-allocated buffer, returning metadata.
+///
+/// The type `T` must match the blob's data type (e.g., `f32` for `DataType::Float`).
+/// The buffer must have at least `width * height * n_depth * n_bands` elements.
+///
+/// Returns `LercError::TypeMismatch` if `T` does not match the blob's data type.
+/// Returns `LercError::OutputBufferTooSmall` if the buffer is too small.
+pub fn decode_into<T: LercDataType>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `i8` buffer.
+pub fn decode_i8_into(data: &[u8], output: &mut [i8]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `u8` buffer.
+pub fn decode_u8_into(data: &[u8], output: &mut [u8]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `i16` buffer.
+pub fn decode_i16_into(data: &[u8], output: &mut [i16]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `u16` buffer.
+pub fn decode_u16_into(data: &[u8], output: &mut [u16]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `i32` buffer.
+pub fn decode_i32_into(data: &[u8], output: &mut [i32]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `u32` buffer.
+pub fn decode_u32_into(data: &[u8], output: &mut [u32]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `f32` buffer.
+pub fn decode_f32_into(data: &[u8], output: &mut [f32]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
+}
+
+/// Decode a LERC blob into a pre-allocated `f64` buffer.
+pub fn decode_f64_into(data: &[u8], output: &mut [f64]) -> Result<DecodeResult> {
+    decode::decode_into(data, output)
 }

@@ -11,6 +11,14 @@ pub enum LercError {
     InvalidDataType(i32),
     UnsupportedEncoding(u8),
     IntegrityCheckFailed,
+    TypeMismatch {
+        expected: crate::types::DataType,
+        actual: crate::types::DataType,
+    },
+    OutputBufferTooSmall {
+        needed: usize,
+        available: usize,
+    },
 }
 
 impl fmt::Display for LercError {
@@ -31,6 +39,15 @@ impl fmt::Display for LercError {
             Self::InvalidDataType(dt) => write!(f, "invalid data type: {dt}"),
             Self::UnsupportedEncoding(enc) => write!(f, "unsupported encoding: {enc}"),
             Self::IntegrityCheckFailed => write!(f, "block integrity check failed"),
+            Self::TypeMismatch { expected, actual } => {
+                write!(f, "type mismatch: expected {expected:?}, actual {actual:?}")
+            }
+            Self::OutputBufferTooSmall { needed, available } => {
+                write!(
+                    f,
+                    "output buffer too small: need {needed} elements, have {available}"
+                )
+            }
         }
     }
 }

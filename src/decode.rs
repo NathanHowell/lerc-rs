@@ -9,7 +9,7 @@ use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
 use crate::types::{DataType, LercDataType};
-use crate::{LercData, LercImage, LercInfo};
+use crate::{DecodeResult, LercData, LercImage, LercInfo};
 
 /// Image encoding mode (from C++ IEM_ enum).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,40 +81,18 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
     let no_data_value = info.no_data_value;
 
     let total_pixels = width as usize * height as usize * n_depth as usize * n_bands as usize;
-    let band_pixels = width as usize * height as usize * n_depth as usize;
 
     macro_rules! decode_bands {
         ($default:expr, $variant:ident) => {{
             let mut output = vec![$default; total_pixels];
-            let mut masks = Vec::with_capacity(n_bands as usize);
-            let mut offset = 0usize;
-            for band in 0..n_bands as usize {
-                let prev_mask = masks.last();
-                let (mask, hd, consumed) = decode_one_band(
-                    &data[offset..],
-                    &mut output[band * band_pixels..(band + 1) * band_pixels],
-                    prev_mask,
-                )?;
-
-                // Remap noData sentinel values if needed (v6+, nDepth > 1)
-                if hd.pass_no_data_values && hd.no_data_val != hd.no_data_val_orig {
-                    remap_no_data(
-                        &mut output[band * band_pixels..(band + 1) * band_pixels],
-                        &mask,
-                        &hd,
-                    );
-                }
-
-                masks.push(mask);
-                offset += consumed;
-            }
+            let result = decode_bands_into(data, &info, &mut output)?;
             Ok(LercImage {
                 width,
                 height,
                 n_depth,
                 n_bands,
                 data_type: dt,
-                valid_masks: masks,
+                valid_masks: result.valid_masks,
                 data: LercData::$variant(output),
                 no_data_value,
             })
@@ -131,6 +109,84 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         DataType::Float => decode_bands!(0.0f32, F32),
         DataType::Double => decode_bands!(0.0f64, F64),
     }
+}
+
+/// Decode LERC2 data into a pre-allocated typed buffer, returning metadata.
+/// The buffer must have at least `width * height * n_depth * n_bands` elements.
+/// The data type `T` must match the blob's data type.
+pub fn decode_into<T: LercDataType>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
+    if crate::lerc1::is_lerc1(data) {
+        return Err(LercError::InvalidData(
+            "decode_into does not support Lerc1 format".into(),
+        ));
+    }
+
+    let info = decode_info(data)?;
+
+    // Verify type match
+    if T::DATA_TYPE != info.data_type {
+        return Err(LercError::TypeMismatch {
+            expected: info.data_type,
+            actual: T::DATA_TYPE,
+        });
+    }
+
+    let total_pixels =
+        info.width as usize * info.height as usize * info.n_depth as usize * info.n_bands as usize;
+
+    // Verify buffer size
+    if output.len() < total_pixels {
+        return Err(LercError::OutputBufferTooSmall {
+            needed: total_pixels,
+            available: output.len(),
+        });
+    }
+
+    decode_bands_into(data, &info, output)
+}
+
+/// Shared implementation: decode all bands from LERC2 data into a pre-allocated buffer.
+fn decode_bands_into<T: LercDataType>(
+    data: &[u8],
+    info: &LercInfo,
+    output: &mut [T],
+) -> Result<DecodeResult> {
+    let n_bands = info.n_bands;
+    let band_pixels = info.width as usize * info.height as usize * info.n_depth as usize;
+
+    let mut masks = Vec::with_capacity(n_bands as usize);
+    let mut offset = 0usize;
+
+    for band in 0..n_bands as usize {
+        let prev_mask = masks.last();
+        let (mask, hd, consumed) = decode_one_band(
+            &data[offset..],
+            &mut output[band * band_pixels..(band + 1) * band_pixels],
+            prev_mask,
+        )?;
+
+        // Remap noData sentinel values if needed (v6+, nDepth > 1)
+        if hd.pass_no_data_values && hd.no_data_val != hd.no_data_val_orig {
+            remap_no_data(
+                &mut output[band * band_pixels..(band + 1) * band_pixels],
+                &mask,
+                &hd,
+            );
+        }
+
+        masks.push(mask);
+        offset += consumed;
+    }
+
+    Ok(DecodeResult {
+        width: info.width,
+        height: info.height,
+        n_depth: info.n_depth,
+        n_bands: info.n_bands,
+        data_type: info.data_type,
+        valid_masks: masks,
+        no_data_value: info.no_data_value,
+    })
 }
 
 /// Remap noData sentinel values from the internal encoding value back to the

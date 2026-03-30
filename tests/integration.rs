@@ -638,3 +638,191 @@ fn round_trip_f32_lossless_multi_depth() {
         _ => panic!("expected F32 data"),
     }
 }
+
+/// Read the micro_block_size field from a raw LERC2 v6 encoded blob.
+/// Header layout: magic(6) + version(4) + checksum(4) + nRows(4) + nCols(4) + nDepth(4)
+///                + numValidPixel(4) + microBlockSize(4) = offset 30
+fn read_micro_block_size(encoded: &[u8]) -> i32 {
+    let offset = 30; // 6 + 4 + 4 + 4 + 4 + 4 + 4
+    i32::from_le_bytes(encoded[offset..offset + 4].try_into().unwrap())
+}
+
+#[test]
+fn block_size_selection_smooth_gradient_prefers_16() {
+    // A large smooth gradient should benefit from 16x16 blocks because
+    // larger blocks have better statistics and fewer block headers for
+    // slowly-varying data.
+    let width = 256u32;
+    let height = 256u32;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f32;
+            let y = (i / width) as f32;
+            x * 0.1 + y * 0.1
+        })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let mbs = read_micro_block_size(&encoded);
+    assert_eq!(mbs, 16, "smooth gradient should select block size 16, got {mbs}");
+
+    // Verify round-trip correctness
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig - dec).abs();
+                assert!(
+                    diff <= 0.01,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff}"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn block_size_selection_noisy_data_prefers_8() {
+    // Data where each 8x8 block has a narrow value range but adjacent 8x8 blocks
+    // have very different ranges. This makes 8x8 win because each small block
+    // can use fewer bits, while 16x16 blocks spanning multiple "zones" need more bits.
+    let width = 128u32;
+    let height = 128u32;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as usize;
+            let y = (i / width) as usize;
+            // Assign each 8x8 block a base value that varies widely
+            let block_x = x / 8;
+            let block_y = y / 8;
+            // Use a hash-like function to make adjacent blocks have very different bases
+            let block_id = block_x + block_y * 16;
+            let base = ((block_id * 997) % 500) as f32;
+            // Small variation within the block
+            let local = ((x % 8) + (y % 8)) as f32 * 0.01;
+            base + local
+        })
+        .collect();
+
+    let max_z_error = 0.01;
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let mbs = read_micro_block_size(&encoded);
+    assert_eq!(mbs, 8, "block-structured noisy data should select block size 8, got {mbs}");
+
+    // Verify round-trip correctness
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig - dec).abs();
+                // The LERC max_z_error guarantee applies to the quantization;
+                // f32 representation can add small additional rounding.
+                assert!(
+                    diff <= (max_z_error as f32) + 0.005,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff}"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn block_size_16_round_trip_f32_lossy() {
+    // Verify that data encoded with block size 16 decodes correctly
+    // Use a gentle gradient that should pick block size 16
+    let width = 64u32;
+    let height = 64u32;
+    let max_z_error = 0.1;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f32;
+            let y = (i / width) as f32;
+            x + y
+        })
+        .collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+
+    // Regardless of which block size was chosen, verify round-trip
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig - dec).abs();
+                assert!(
+                    diff <= max_z_error as f32,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff} > max_z_error={max_z_error}"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn block_size_header_field_is_valid() {
+    // Verify the micro_block_size in the header is either 8 or 16
+    let width = 32u32;
+    let height = 32u32;
+    let pixels: Vec<u16> = (0..width * height).map(|i| (i % 1000) as u16).collect();
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 1,
+        data_type: DataType::UShort,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::U16(pixels.clone()),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let mbs = read_micro_block_size(&encoded);
+    assert!(
+        mbs == 8 || mbs == 16,
+        "micro_block_size should be 8 or 16, got {mbs}"
+    );
+
+    // Verify round-trip
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    match &decoded.data {
+        LercData::U16(dec_pixels) => {
+            assert_eq!(dec_pixels, &pixels, "lossless u16 round-trip mismatch");
+        }
+        _ => panic!("expected U16 data"),
+    }
+}

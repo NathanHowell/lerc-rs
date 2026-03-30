@@ -105,15 +105,15 @@ fn encode_one_band<T: LercDataType>(
         overall_max = 0.0;
     }
 
-    let hd = HeaderInfo {
+    let mut hd = HeaderInfo {
         version: 6,
         checksum: 0,
         n_rows: height as i32,
         n_cols: width as i32,
         n_depth: n_depth as i32,
         num_valid_pixel: num_valid as i32,
-        micro_block_size: 8,
-        blob_size: 0, // patched later
+        micro_block_size: 8, // will be updated after block size selection
+        blob_size: 0,        // patched later
         data_type: T::DATA_TYPE,
         n_blobs_more,
         pass_no_data_values: false,
@@ -124,6 +124,12 @@ fn encode_one_band<T: LercDataType>(
         no_data_val: 0.0,
         no_data_val_orig: 0.0,
     };
+
+    // Select the best micro block size by trying both 8 and 16.
+    // The block size only affects the tiling path, not Huffman or FPL.
+    let best_block_size =
+        select_block_size::<T>(data, mask, &hd, &z_min_vec, &z_max_vec)?;
+    hd.micro_block_size = best_block_size;
 
     let mut blob = header::write_header(&hd);
 
@@ -204,6 +210,33 @@ fn encode_one_band<T: LercDataType>(
 
     header::finalize_blob(&mut blob);
     Ok(blob)
+}
+
+/// Try encoding tiles with block sizes 8 and 16, return whichever is smaller.
+fn select_block_size<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    hd: &HeaderInfo,
+    z_min_vec: &[f64],
+    z_max_vec: &[f64],
+) -> Result<i32> {
+    // Encode with block size 8
+    let mut hd8 = hd.clone();
+    hd8.micro_block_size = 8;
+    let mut buf8 = Vec::new();
+    encode_tiles(&mut buf8, data, mask, &hd8, z_min_vec, z_max_vec)?;
+
+    // Encode with block size 16
+    let mut hd16 = hd.clone();
+    hd16.micro_block_size = 16;
+    let mut buf16 = Vec::new();
+    encode_tiles(&mut buf16, data, mask, &hd16, z_min_vec, z_max_vec)?;
+
+    if buf16.len() < buf8.len() {
+        Ok(16)
+    } else {
+        Ok(8)
+    }
 }
 
 /// Compute histograms for Huffman encoding of 8-bit data.

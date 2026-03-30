@@ -1,0 +1,3 @@
+[submodule "esri-lerc"]
+	path = esri-lerc
+	url = https://github.com/esri/lerc

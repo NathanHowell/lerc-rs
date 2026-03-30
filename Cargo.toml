@@ -1,0 +1,13 @@
+[package]
+name = "lerc"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Pure Rust LERC (Limited Error Raster Compression) encoder and decoder"
+
+[features]
+default = ["std"]
+std = ["alloc"]
+alloc = []
+
+[dev-dependencies]

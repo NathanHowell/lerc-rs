@@ -52,7 +52,7 @@ fn make_sin_f32(width: u32, height: u32) -> Vec<f32> {
         .map(|i| {
             let x = (i % width) as f32 / width as f32;
             let y = (i / width) as f32 / height as f32;
-            ((x * 6.2832).sin() * (y * 6.2832).cos() * 500.0) + 1000.0
+            ((x * std::f32::consts::TAU).sin() * (y * std::f32::consts::TAU).cos() * 500.0) + 1000.0
         })
         .collect()
 }

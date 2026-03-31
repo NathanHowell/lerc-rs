@@ -387,26 +387,33 @@ fn test_blocks_size(
 ) -> usize {
     let mut ret = 0usize;
 
+    // Pre-allocate buffers sized to the largest block
+    let max_length = blocks.iter().map(|tb| tb.height * raster_width).max().unwrap_or(0);
+    let mut plane_buffer = vec![0u8; max_length];
+    let mut delta_buf = if test_first_byte_delta {
+        vec![0u8; max_length]
+    } else {
+        Vec::new()
+    };
+
     for tb in blocks {
         let start = unit_size * tb.top * raster_width;
         let length = tb.height * raster_width;
 
-        let mut plane_buffer = vec![0u8; length];
-
         for byte in 0..unit_size {
             // Extract byte plane from interleaved data
             let mut ptr_offset = start + byte;
-            for dest in plane_buffer.iter_mut() {
+            for dest in &mut plane_buffer[..length] {
                 *dest = data[ptr_offset];
                 ptr_offset += unit_size;
             }
 
-            let plane_encoded = compression::estimate_compressed_size(&plane_buffer);
+            let plane_encoded = compression::estimate_compressed_size(&plane_buffer[..length]);
 
             if test_first_byte_delta {
-                let mut delta_buf = plane_buffer.clone();
-                set_derivative_prime(&mut delta_buf);
-                let plane_encoded2 = compression::estimate_compressed_size(&delta_buf);
+                delta_buf[..length].copy_from_slice(&plane_buffer[..length]);
+                set_derivative_prime(&mut delta_buf[..length]);
+                let plane_encoded2 = compression::estimate_compressed_size(&delta_buf[..length]);
                 ret += plane_encoded.min(plane_encoded2);
             } else {
                 ret += plane_encoded;

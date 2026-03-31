@@ -835,10 +835,12 @@ fn encode_one_band<T: LercDataType>(
     };
 
     // Select the best micro block size by trying both 8 and 16.
-    // The block size only affects the tiling path, not Huffman or FPL.
-    let best_block_size =
-        select_block_size::<T>(encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
-    hd.micro_block_size = best_block_size;
+    // Skip for lossless float/double — the FPL path doesn't use tiling.
+    if !try_huffman_flt {
+        let best_block_size =
+            select_block_size::<T>(encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
+        hd.micro_block_size = best_block_size;
+    }
 
     let mut blob = header::write_header(&hd);
 

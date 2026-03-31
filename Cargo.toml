@@ -26,3 +26,6 @@ harness = false
 [[bench]]
 name = "profile_encode"
 harness = false
+
+[dependencies]
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }

@@ -657,7 +657,11 @@ fn round_trip_f32_lossless_multi_depth() {
 /// Header layout: magic(6) + version(4) + checksum(4) + nRows(4) + nCols(4) + nDepth(4)
 ///                + numValidPixel(4) + microBlockSize(4) = offset 30
 fn read_micro_block_size(encoded: &[u8]) -> i32 {
-    let offset = 30; // 6 + 4 + 4 + 4 + 4 + 4 + 4
+    let version = i32::from_le_bytes(encoded[6..10].try_into().unwrap());
+    // magic(6) + version(4) + checksum(4) + nRows(4) + nCols(4) = 22
+    // + nDepth(4) if version >= 4
+    // + numValidPixel(4) = offset to microBlockSize
+    let offset = if version >= 4 { 30 } else { 26 };
     i32::from_le_bytes(encoded[offset..offset + 4].try_into().unwrap())
 }
 

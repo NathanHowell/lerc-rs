@@ -1,26 +1,17 @@
 /// Restore derivative sequence for a byte plane.
 /// This undoes the delta encoding applied during compression.
-pub(super) fn restore_sequence(data: &mut [u8], width: usize, level: u8) {
+/// The delta is applied linearly over the entire plane (1D), matching the C++ FPL format.
+pub(super) fn restore_sequence(data: &mut [u8], _width: usize, level: u8) {
     if data.is_empty() || level == 0 {
         return;
     }
 
-    let height = data.len() / width;
-    if height == 0 {
-        return;
-    }
+    let size = data.len();
 
-    // Apply inverse delta for each level
-    // Level 2: second-order delta (undo twice)
-    // Level 1: first-order delta (undo once)
-    for _ in 0..level {
-        // Undo row-wise delta: data[i] += data[i-1]
-        for row in 0..height {
-            let row_start = row * width;
-            for col in 1..width {
-                data[row_start + col] =
-                    data[row_start + col].wrapping_add(data[row_start + col - 1]);
-            }
+    // Apply inverse delta for each level (1D linear over entire buffer)
+    for l in 1..=level as usize {
+        for i in l..size {
+            data[i] = data[i].wrapping_add(data[i - 1]);
         }
     }
 }
@@ -79,25 +70,18 @@ pub(super) fn restore_byte_order(
 }
 
 /// Apply forward delta sequence for a byte plane (inverse of restore_sequence).
-/// Applies row-wise delta encoding: data[i] = data[i] - data[i-1] (wrapping).
-pub(super) fn apply_sequence(data: &mut [u8], width: usize, level: u8) {
+/// The delta is applied linearly over the entire plane (1D), matching the C++ FPL format.
+pub(super) fn apply_sequence(data: &mut [u8], _width: usize, level: u8) {
     if data.is_empty() || level == 0 {
         return;
     }
 
-    let height = data.len() / width;
-    if height == 0 {
-        return;
-    }
+    let size = data.len();
 
-    for _ in 0..level {
-        // Row-wise delta: from right to left
-        for row in 0..height {
-            let row_start = row * width;
-            for col in (1..width).rev() {
-                data[row_start + col] =
-                    data[row_start + col].wrapping_sub(data[row_start + col - 1]);
-            }
+    for l in 1..=level as usize {
+        // Forward delta: from end to start (reverse of restore)
+        for i in (l..size).rev() {
+            data[i] = data[i].wrapping_sub(data[i - 1]);
         }
     }
 }

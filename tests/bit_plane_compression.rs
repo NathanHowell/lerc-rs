@@ -56,13 +56,21 @@ fn make_noisy_i16(width: u32, height: u32, noisy_bits: u32) -> Vec<i16> {
     pixels
 }
 
-/// Read maxZError from the LERC2 header.
-/// Header layout: magic(6) + version(4) + checksum(4) + nRows(4) + nCols(4) + nDepth(4)
-///                + numValidPixel(4) + microBlockSize(4) + blobSize(4) + dataType(4)
-///                + nBlobsMore(4) + isInt(4) = offset 50, then 8 bytes for maxZError (f64)
+/// Read maxZError from the LERC2 header (version-aware).
 fn read_max_z_error(encoded: &[u8]) -> f64 {
-    // After the fixed header fields: 6 + 4*11 = 50 bytes, then comes maxZError as f64
-    let offset = 50;
+    let version = i32::from_le_bytes(encoded[6..10].try_into().unwrap());
+    // Compute offset to maxZError based on version:
+    // magic(6) + version(4) + checksum(4) + nRows(4) + nCols(4) = 22
+    let mut offset: usize = 22;
+    if version >= 4 {
+        offset += 4; // nDepth
+    }
+    offset += 4 * 4; // numValidPixel + microBlockSize + blobSize + dataType
+    if version >= 6 {
+        offset += 4; // nBlobsMore
+        offset += 4; // 4 flag bytes (passNoData, isInt, reserved, reserved)
+    }
+    // Now at maxZError (f64)
     f64::from_le_bytes(encoded[offset..offset + 8].try_into().unwrap())
 }
 

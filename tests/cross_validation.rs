@@ -54,9 +54,9 @@ fn read_le_f64(data: &[u8], off: usize) -> f64 {
     f64::from_le_bytes(data[off..off + 8].try_into().unwrap())
 }
 
-/// Parse a LERC2 v6 header from raw bytes.  Panics on anything unexpected.
+/// Parse a LERC2 header from raw bytes (version-aware).  Panics on anything unexpected.
 fn parse_header(data: &[u8]) -> RawHeader {
-    assert!(data.len() >= 90, "blob too small for v6 header");
+    assert!(data.len() >= 58, "blob too small for LERC2 header");
     assert_eq!(&data[0..6], b"Lerc2 ", "bad magic");
 
     let version = read_le_i32(data, 6);
@@ -163,7 +163,7 @@ fn fletcher32(data: &[u8]) -> u32 {
 fn validate_header(blob: &[u8], expected_dt: i32, expected_rows: i32, expected_cols: i32) {
     let h = parse_header(blob);
 
-    assert_eq!(h.version, 6, "expected encoder version 6");
+    assert!((3..=6).contains(&h.version), "expected encoder version 3-6, got {}", h.version);
     assert_eq!(h.n_rows, expected_rows);
     assert_eq!(h.n_cols, expected_cols);
     assert_eq!(h.data_type, expected_dt);

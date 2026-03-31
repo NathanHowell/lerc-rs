@@ -757,8 +757,23 @@ fn encode_one_band<T: LercDataType>(
 
     let encode_data: &[T] = data_buf.as_deref().unwrap_or(data);
 
+    // Compute the minimum required version.
+    // v3: baseline (with checksum)
+    // v4: if n_depth > 1
+    // v5: if n_depth > 1 (diff encoding may be used; also changes integrity pattern)
+    // v6: if pass_no_data, n_blobs_more > 0, or FPL encoding (lossless float)
+    let try_huffman_flt =
+        matches!(T::DATA_TYPE, DataType::Float | DataType::Double) && max_z_error == 0.0;
+    let min_version = if pass_no_data || n_blobs_more > 0 || try_huffman_flt {
+        6
+    } else if n_depth > 1 {
+        5
+    } else {
+        3
+    };
+
     let mut hd = HeaderInfo {
-        version: 6,
+        version: min_version,
         checksum: 0,
         n_rows: height as i32,
         n_cols: width as i32,
@@ -808,12 +823,14 @@ fn encode_one_band<T: LercDataType>(
         return Ok(blob);
     }
 
-    // Write per-depth min/max ranges (always for v6)
-    for val in &z_min_vec[..n_depth] {
-        write_typed_value::<T>(&mut blob, *val);
-    }
-    for val in &z_max_vec[..n_depth] {
-        write_typed_value::<T>(&mut blob, *val);
+    // Write per-depth min/max ranges (v4+)
+    if hd.version >= 4 {
+        for val in &z_min_vec[..n_depth] {
+            write_typed_value::<T>(&mut blob, *val);
+        }
+        for val in &z_max_vec[..n_depth] {
+            write_typed_value::<T>(&mut blob, *val);
+        }
     }
 
     // Check if all depths are constant
@@ -828,8 +845,6 @@ fn encode_one_band<T: LercDataType>(
     // Check if Huffman-eligible types
     let try_huffman_int = matches!(T::DATA_TYPE, DataType::Char | DataType::Byte)
         && max_z_error == 0.5;
-    let try_huffman_flt =
-        matches!(T::DATA_TYPE, DataType::Float | DataType::Double) && max_z_error == 0.0;
 
     if try_huffman_int {
         // Quick entropy check: if the data is high-entropy (nearly all 256 byte values
@@ -1173,9 +1188,9 @@ fn try_encode_huffman_int<T: LercDataType>(
         None
     };
 
-    // Try direct Huffman (IEM_Huffman, v4+)
+    // Try direct Huffman (IEM_Huffman, requires v4+)
     let mut direct_codec = HuffmanCodec::new();
-    let direct_ok = direct_codec.compute_codes(&histo);
+    let direct_ok = header.version >= 4 && direct_codec.compute_codes(&histo);
     let direct_size = if direct_ok {
         direct_codec
             .compute_compressed_size(&histo)
@@ -1213,7 +1228,7 @@ fn try_encode_huffman_int<T: LercDataType>(
     }
 
     // Write code table
-    let code_table_bytes = codec.write_code_table(6).ok()?;
+    let code_table_bytes = codec.write_code_table(header.version).ok()?;
     buf.extend_from_slice(&code_table_bytes);
 
     // Compute total bits needed for the data
@@ -1455,8 +1470,8 @@ fn encode_tile<T: LercDataType>(
 
     let num_valid = scratch.valid_data.len();
 
-    // Integrity check bits
-    let pattern: u8 = 14; // v5+
+    // Integrity check bits (pattern depends on version)
+    let pattern: u8 = if header.version >= 5 { 14 } else { 15 };
     let integrity = ((j0 as u8 >> 3) & pattern) << 2;
 
     // Compute diff values if applicable

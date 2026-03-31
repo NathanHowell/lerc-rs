@@ -169,26 +169,13 @@ pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
         }
     }
 
-    // Try Huffman only if entropy suggests it's worthwhile and we have enough data.
-    if data.len() >= 4 && distinct >= 2 {
-        // Quick entropy estimate in bits/byte. If > 7.5, Huffman overhead
-        // will likely make the result larger than raw.
-        let n = data.len() as f64;
-        let mut entropy_bpb = 0.0;
-        for &count in &histo {
-            if count > 0 {
-                let p = count as f64 / n;
-                entropy_bpb -= p * p.log2();
-            }
-        }
-
-        if entropy_bpb <= 7.5
-            && let Some(huffman) =
-                encode_fpl_huffman_with_histo_bounded(data, &histo, best_len)
-            && huffman.len() < best_len
-        {
-            best = Some(huffman);
-        }
+    // Try Huffman if we have enough data and at least 2 distinct values.
+    if data.len() >= 4
+        && distinct >= 2
+        && let Some(huffman) = encode_fpl_huffman_with_histo_bounded(data, &histo, best_len)
+        && huffman.len() < best_len
+    {
+        best = Some(huffman);
     }
 
     best.unwrap_or_else(|| encode_raw(data))
@@ -274,23 +261,16 @@ fn encode_packbits(data: &[u8]) -> Vec<u8> {
 fn encode_fpl_huffman_with_histo_bounded(
     data: &[u8],
     histo: &[i32; 256],
-    max_size: usize,
+    _max_size: usize,
 ) -> Option<Vec<u8>> {
     if data.len() < 4 {
         return None;
     }
 
-    // Build Huffman codes (cheap) and estimate output size before encoding.
+    // Build Huffman codes and encode.
     use crate::huffman::{HuffmanCodec, encode_huffman_with_codec};
     let mut codec = HuffmanCodec::new();
     if !codec.compute_codes(histo) {
-        return None;
-    }
-
-    // Estimate compressed size. If it exceeds max_size, skip the expensive encoding.
-    if let Some((estimated_bytes, _)) = codec.compute_compressed_size(histo)
-        && (1 + estimated_bytes as usize) >= max_size
-    {
         return None;
     }
 

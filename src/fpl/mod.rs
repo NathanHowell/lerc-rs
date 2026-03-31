@@ -151,39 +151,41 @@ fn decode_huffman_flt_slice<T: LercDataType>(
     Ok(())
 }
 
-/// Reverse the float bit reorganization: [mantissa(23) | exponent(8) | sign(1)] -> IEEE 754
+/// Reverse the float bit reorganization: [mantissa(23) | sign(1) | exponent(8)] -> IEEE 754
+/// Layout: mantissa in bits 0-22, sign in bit 23, exponent in bits 24-31.
 fn undo_float_transform(a: u32) -> u32 {
-    let mantissa = a >> 9; // upper 23 bits
-    let exponent = (a >> 1) & 0xFF; // next 8 bits
-    let sign = a & 1; // lowest bit
+    let mantissa = a & 0x007FFFFF;
+    let sign = (a >> 23) & 1;
+    let exponent = (a >> 24) & 0xFF;
     (sign << 31) | (exponent << 23) | mantissa
 }
 
-/// Reverse the double bit reorganization
+/// Reverse the double bit reorganization: [mantissa(52) | sign(1) | exponent(11)] -> IEEE 754
+/// Layout: mantissa in bits 0-51, sign in bit 52, exponent in bits 53-63.
 fn undo_double_transform(a: u64) -> u64 {
-    // The C++ moveBits2Front puts:
-    //   [mantissa(52) | exponent(11) | sign(1)] in a 64-bit word
-    // Undo: mantissa = a >> 12, exponent = (a >> 1) & 0x7FF, sign = a & 1
-    let mantissa_d = a >> 12;
-    let exponent_d = (a >> 1) & 0x7FF;
-    let sign_d = a & 1;
-    (sign_d << 63) | (exponent_d << 52) | mantissa_d
+    let mantissa = a & 0x000FFFFFFFFFFFFF;
+    let sign = (a >> 52) & 1;
+    let exponent = (a >> 53) & 0x7FF;
+    (sign << 63) | (exponent << 52) | mantissa
 }
 
-/// Apply the float bit reorganization for encoding
+/// Apply the float bit reorganization for encoding.
+/// Rearranges IEEE 754 bits to [mantissa(23) | sign(1) | exponent(8)] for better
+/// byte-plane compression. This matches the C++ moveBits2Front layout.
 pub(crate) fn float_transform(a: u32) -> u32 {
     let mantissa = a & 0x007FFFFF;
     let exponent = (a >> 23) & 0xFF;
     let sign = (a >> 31) & 1;
-    (mantissa << 9) | (exponent << 1) | sign
+    mantissa | (sign << 23) | (exponent << 24)
 }
 
-/// Apply the double bit reorganization for encoding
+/// Apply the double bit reorganization for encoding.
+/// Rearranges IEEE 754 bits to [mantissa(52) | sign(1) | exponent(11)].
 pub(crate) fn double_transform(a: u64) -> u64 {
     let mantissa = a & 0x000FFFFFFFFFFFFF;
     let exponent = (a >> 52) & 0x7FF;
     let sign = (a >> 63) & 1;
-    (mantissa << 12) | (exponent << 1) | sign
+    mantissa | (sign << 52) | (exponent << 53)
 }
 
 /// Encode float-point lossless data.
@@ -273,9 +275,10 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     // Write predictor code
     result.push(predictor_code);
 
+    // Use actual compression at each delta level for all byte planes to find
+    // the optimal delta level. This matches C++ behavior.
     for (byte_index, plane) in byte_planes[..unit_size].iter().enumerate() {
-        // Try different delta levels and pick the best
-        let (best_level, compressed) = compress_byte_plane(plane, width);
+        let (best_level, compressed) = compress_byte_plane_precise(plane, width);
 
         // Write byte plane header
         result.push(byte_index as u8);
@@ -300,18 +303,11 @@ fn select_predictor(
         return 0;
     }
 
-    let num_pixels = width * height;
     let stride = width * unit_size;
 
-    // For small images (under ~8KB of sample data), use full-buffer entropy.
-    // For larger images, sample every Nth row to keep sample size around 8KB.
-    let sample_step = if num_pixels * unit_size <= 8192 {
-        1
-    } else {
-        // Target ~8KB of sample data
-        let target_rows = 8192 / (width * unit_size).max(1);
-        (height / target_rows.max(1)).max(1)
-    };
+    // Use all rows for predictor selection (matching C++ thoroughness).
+    // This is affordable because the FPL path already processes the full buffer.
+    let sample_step = 1;
 
     let sampled_rows: Vec<usize> = (0..height).step_by(sample_step.max(1)).collect();
     let sampled_pixel_count: usize = sampled_rows.len() * width;
@@ -422,44 +418,25 @@ fn compute_entropy_from_histo(histo: &[u32; 256], total: usize) -> f64 {
     entropy * n // total bits for this plane
 }
 
-/// Compute entropy in bits per byte for a byte slice using a histogram.
-fn compute_entropy_bpb(data: &[u8]) -> f64 {
-    let mut histo = [0u32; 256];
-    for &b in data {
-        histo[b as usize] += 1;
-    }
-    let n = data.len() as f64;
-    let mut entropy = 0.0;
-    for &count in &histo {
-        if count > 0 {
-            let p = count as f64 / n;
-            entropy -= p * p.log2();
-        }
-    }
-    entropy
-}
-
 /// Compress a single byte plane with the best delta level.
 /// Returns (best_level, compressed_data).
 ///
-/// Uses a two-phase approach:
-/// Phase 1: Compute entropy at each delta level (cheap, O(n) per level)
-///          to find the best level, with early exit.
-/// Phase 2: Apply the winning delta level and compress once.
-#[allow(clippy::needless_range_loop)]
-fn compress_byte_plane(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
-    // Phase 1: Find best delta level using entropy estimation.
+/// Tries actual compression at each delta level (0 through 5) and picks
+/// whichever produces the smallest output. Uses early-exit when two
+/// successive levels produce worse results.
+fn compress_byte_plane_precise(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
+    let compressed_0 = compression::compress_buffer(plane);
     let mut best_level = 0u8;
-    let mut best_entropy = compute_entropy_bpb(plane);
+    let mut best_compressed = compressed_0;
     let mut worse_count = 0u8;
 
     let mut delta_plane = plane.to_vec();
     for level in 1..=5u8 {
         predictor::apply_sequence(&mut delta_plane, width, 1);
 
-        let entropy = compute_entropy_bpb(&delta_plane);
-        if entropy < best_entropy {
-            best_entropy = entropy;
+        let compressed = compression::compress_buffer(&delta_plane);
+        if compressed.len() < best_compressed.len() {
+            best_compressed = compressed;
             best_level = level;
             worse_count = 0;
         } else {
@@ -469,19 +446,7 @@ fn compress_byte_plane(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
             }
         }
     }
-
-    // Phase 2: Apply the winning delta level and compress.
-    if best_level == 0 {
-        let compressed = compression::compress_buffer(plane);
-        (0, compressed)
-    } else {
-        let mut result = plane.to_vec();
-        for _ in 0..best_level {
-            predictor::apply_sequence(&mut result, width, 1);
-        }
-        let compressed = compression::compress_buffer(&result);
-        (best_level, compressed)
-    }
+    (best_level, best_compressed)
 }
 
 #[cfg(test)]

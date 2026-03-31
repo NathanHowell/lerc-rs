@@ -391,8 +391,8 @@ fn test_blocks_size(
         for byte in 0..unit_size {
             // Extract byte plane from interleaved data
             let mut ptr_offset = start + byte;
-            for i in 0..length {
-                plane_buffer[i] = data[ptr_offset];
+            for dest in plane_buffer.iter_mut() {
+                *dest = data[ptr_offset];
                 ptr_offset += unit_size;
             }
 

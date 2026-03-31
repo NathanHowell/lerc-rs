@@ -118,15 +118,27 @@ const COMPRESS_PACKBITS: u8 = 0x03;
 /// Compress a byte plane using the best available method.
 /// Returns the compressed data (including the mode byte prefix).
 pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
+    compress_buffer_with_histo(data, None)
+}
+
+/// Compress a byte plane using the best available method, optionally reusing a
+/// pre-computed histogram. Returns the compressed data (including the mode byte
+/// prefix).
+pub(super) fn compress_buffer_with_histo(data: &[u8], precomputed_histo: Option<&[i32; 256]>) -> Vec<u8> {
     if data.is_empty() {
         return encode_raw(data);
     }
 
-    // Build histogram once for all compression decisions.
-    let mut histo = [0i32; 256];
-    for &b in data {
-        histo[b as usize] += 1;
-    }
+    // Build histogram (or reuse the caller's).
+    let mut local_histo = [0i32; 256];
+    let histo: &[i32; 256] = if let Some(h) = precomputed_histo {
+        h
+    } else {
+        for &b in data {
+            local_histo[b as usize] += 1;
+        }
+        &local_histo
+    };
 
     // Count distinct values and find max frequency
     let mut distinct = 0u32;
@@ -156,11 +168,15 @@ pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
     let mut best: Option<Vec<u8>> = None;
     let mut best_len = raw_size;
 
+    // Compute entropy once, used for both PackBits and Huffman skip decisions.
+    let entropy_bits_per_byte = compute_entropy_bits_per_byte(histo, data.len());
+
     // Try PackBits -- skip if data looks uniformly distributed (no runs expected).
     // PackBits helps when there are many runs of identical bytes. A rough heuristic:
     // if the most frequent value covers < 1% of the data and there are many distinct
-    // values, PackBits is unlikely to help.
-    let skip_packbits = distinct > 128 && (max_count as usize) < data.len() / 100;
+    // values, or if entropy is high, PackBits is unlikely to help.
+    let skip_packbits = (distinct > 128 && (max_count as usize) < data.len() / 100)
+        || entropy_bits_per_byte > 6.0;
     if !skip_packbits {
         let packbits = encode_packbits(data);
         if packbits.len() < best_len {
@@ -169,10 +185,15 @@ pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
         }
     }
 
+    // Skip Huffman if entropy is too high (near 8 bits/byte). The overhead of
+    // the Huffman code table makes it a net loss when entropy > ~7.5 bits/byte.
+    let skip_huffman = entropy_bits_per_byte > 7.5;
+
     // Try Huffman if we have enough data and at least 2 distinct values.
-    if data.len() >= 4
+    if !skip_huffman
+        && data.len() >= 4
         && distinct >= 2
-        && let Some(huffman) = encode_fpl_huffman_with_histo_bounded(data, &histo, best_len)
+        && let Some(huffman) = encode_fpl_huffman_with_histo_bounded(data, histo, best_len)
         && huffman.len() < best_len
     {
         best = Some(huffman);
@@ -180,6 +201,23 @@ pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
 
     best.unwrap_or_else(|| encode_raw(data))
 }
+
+/// Compute entropy in bits per byte from a histogram.
+fn compute_entropy_bits_per_byte(histo: &[i32; 256], total: usize) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+    let n = total as f64;
+    let mut entropy = 0.0;
+    for &count in histo.iter() {
+        if count > 0 {
+            let p = count as f64 / n;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
 
 fn encode_raw(data: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + data.len());
@@ -206,7 +244,9 @@ fn encode_rle(data: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn encode_packbits(data: &[u8]) -> Vec<u8> {
-    let mut buf = Vec::new();
+    // Worst case: every byte is a literal, needing 1 header byte per 128 bytes
+    // plus the data itself. Pre-allocate to avoid repeated growing.
+    let mut buf = Vec::with_capacity(1 + data.len() + data.len() / 128 + 2);
     buf.push(COMPRESS_PACKBITS);
 
     let len = data.len();
@@ -256,26 +296,36 @@ fn encode_packbits(data: &[u8]) -> Vec<u8> {
 }
 
 /// Huffman encode with a pre-built histogram (avoids rebuilding it).
-/// `max_size` is an optional upper bound: if the estimated Huffman output
-/// would exceed this, skip encoding entirely.
+/// `max_size` is an upper bound: if the estimated Huffman output
+/// would exceed this, skip the expensive full encoding entirely.
 fn encode_fpl_huffman_with_histo_bounded(
     data: &[u8],
     histo: &[i32; 256],
-    _max_size: usize,
+    max_size: usize,
 ) -> Option<Vec<u8>> {
     if data.len() < 4 {
         return None;
     }
 
-    // Build Huffman codes and encode.
-    use crate::huffman::{HuffmanCodec, encode_huffman_with_codec};
+    // Build Huffman codes.
+    use crate::huffman::{HuffmanCodec, encode_huffman_with_codec_histo};
     let mut codec = HuffmanCodec::new();
     if !codec.compute_codes(histo) {
         return None;
     }
 
+    // Estimate compressed size before doing the expensive full encode.
+    // If the estimate already exceeds the current best, skip.
+    if let Some((est_bytes, _)) = codec.compute_compressed_size(histo)
+        && (est_bytes as usize + 1) >= max_size
+    {
+        return None;
+    }
+
     // Encode using the codec we already built (avoids recomputing codes).
-    let encoded = encode_huffman_with_codec(&codec, data)?;
+    // Pass the histogram so total_bits can be computed from it (O(256))
+    // instead of scanning all data bytes (O(n)).
+    let encoded = encode_huffman_with_codec_histo(&codec, data, Some(histo))?;
 
     let mut buf = Vec::with_capacity(1 + encoded.len());
     buf.push(COMPRESS_HUFFMAN);

@@ -78,22 +78,38 @@ impl HuffmanCodec {
     }
 
     /// Build Huffman codes from a histogram.
+    ///
+    /// Uses a flat arena instead of Box-per-node to avoid many small heap
+    /// allocations. For a 256-symbol alphabet the arena needs at most 511
+    /// entries (256 leaves + 255 internal nodes).
     pub fn compute_codes(&mut self, histo: &[i32]) -> bool {
         if histo.is_empty() || histo.len() >= MAX_HISTO_SIZE {
             return false;
         }
 
-        // Use a BinaryHeap (min-heap via Reverse) of (weight, index)
-        // Weight is negative count so min-heap gives us smallest counts first
-        // Collect leaf nodes: (negative_weight, node)
-        let mut nodes: Vec<Option<Box<TreeNode>>> = Vec::new();
-        let mut heap: BinaryHeap<Reverse<(i32, usize)>> = BinaryHeap::new();
-
         let size = histo.len();
+
+        // Arena-based tree node: (value, child0_idx, child1_idx).
+        // value >= 0 means leaf; value == -1 means internal node.
+        // child indices are u32::MAX when absent.
+        const NO_CHILD: u32 = u32::MAX;
+        struct FlatNode {
+            value: i16,
+            child0: u32,
+            child1: u32,
+        }
+
+        let mut arena: Vec<FlatNode> = Vec::with_capacity(size * 2);
+        let mut heap: BinaryHeap<Reverse<(i32, u32)>> = BinaryHeap::new();
+
         for (i, &count) in histo.iter().enumerate() {
             if count > 0 {
-                let idx = nodes.len();
-                nodes.push(Some(Box::new(TreeNode::leaf(i as i16))));
+                let idx = arena.len() as u32;
+                arena.push(FlatNode {
+                    value: i as i16,
+                    child0: NO_CHILD,
+                    child1: NO_CHILD,
+                });
                 heap.push(Reverse((count, idx)));
             }
         }
@@ -106,19 +122,43 @@ impl HuffmanCodec {
         while heap.len() > 1 {
             let Reverse((w0, i0)) = heap.pop().unwrap();
             let Reverse((w1, i1)) = heap.pop().unwrap();
-            let c0 = nodes[i0].take().unwrap();
-            let c1 = nodes[i1].take().unwrap();
-            let idx = nodes.len();
-            nodes.push(Some(Box::new(TreeNode::internal(c0, c1))));
+            let idx = arena.len() as u32;
+            arena.push(FlatNode {
+                value: -1,
+                child0: i0,
+                child1: i1,
+            });
             heap.push(Reverse((w0 + w1, idx)));
         }
 
         let Reverse((_, root_idx)) = heap.pop().unwrap();
-        let root = nodes[root_idx].take().unwrap();
 
+        // Traverse arena tree to compute code lengths (iterative using a stack
+        // to avoid recursion overhead).
         self.code_table = vec![(0u16, 0u32); size];
-        if !root.tree_to_lut(0, 0, &mut self.code_table) {
-            return false;
+        let mut stack: Vec<(u32, u16, u32)> = Vec::with_capacity(64); // (node_idx, num_bits, bits)
+        stack.push((root_idx, 0, 0));
+
+        while let Some((node_idx, num_bits, bits)) = stack.pop() {
+            let node = &arena[node_idx as usize];
+            if node.child0 == NO_CHILD && node.child1 == NO_CHILD {
+                // Leaf
+                if num_bits == 0 && arena.len() > 1 {
+                    // Root is a leaf but there are other nodes -- shouldn't happen
+                    return false;
+                }
+                self.code_table[node.value as usize] = (num_bits, bits);
+            } else {
+                if num_bits >= 32 {
+                    return false;
+                }
+                if node.child0 != NO_CHILD {
+                    stack.push((node.child0, num_bits + 1, bits << 1));
+                }
+                if node.child1 != NO_CHILD {
+                    stack.push((node.child1, num_bits + 1, (bits << 1) + 1));
+                }
+            }
         }
 
         self.convert_codes_to_canonical()
@@ -128,7 +168,9 @@ impl HuffmanCodec {
     fn convert_codes_to_canonical(&mut self) -> bool {
         let table_size = self.code_table.len() as u32;
 
-        // Sort by (codeLength * tableSize - index) descending
+        // Only collect entries with non-zero code lengths (active symbols).
+        // Sort key: (codeLength * tableSize - index) descending, which
+        // orders by decreasing code length, then decreasing symbol index.
         let mut sort_vec: Vec<(i32, u32)> = Vec::with_capacity(table_size as usize);
         for (i, entry) in self.code_table.iter().enumerate() {
             if entry.0 > 0 {
@@ -136,30 +178,27 @@ impl HuffmanCodec {
                     entry.0 as i32 * table_size as i32 - i as i32,
                     i as u32,
                 ));
-            } else {
-                sort_vec.push((0, i as u32));
             }
         }
-        sort_vec.sort_by(|a, b| b.0.cmp(&a.0));
 
-        // Assign canonical codes
-        let mut i = 0usize;
-        if sort_vec[0].0 <= 0 {
+        if sort_vec.is_empty() {
             return false;
         }
 
+        sort_vec.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+
+        // Assign canonical codes
         let index = sort_vec[0].1 as usize;
         let mut code_len = self.code_table[index].0;
         let mut code_canonical: u32 = 0;
 
-        while i < sort_vec.len() && sort_vec[i].0 > 0 {
-            let idx = sort_vec[i].1 as usize;
+        for &(_, sym) in &sort_vec {
+            let idx = sym as usize;
             let delta = code_len - self.code_table[idx].0;
             code_canonical >>= delta;
             code_len -= delta;
             self.code_table[idx].1 = code_canonical;
             code_canonical += 1;
-            i += 1;
         }
 
         true
@@ -693,27 +732,74 @@ fn compute_num_bytes_needed_simple(num_elem: u32, max_elem: u32) -> u32 {
 }
 
 /// Encode data using a pre-built HuffmanCodec. Returns the encoded bytes.
+/// If a histogram is provided, it is used to compute the total bit count
+/// (avoiding a full scan of the data for that purpose).
 pub fn encode_huffman_with_codec(codec: &HuffmanCodec, data: &[u8]) -> Option<Vec<u8>> {
+    encode_huffman_with_codec_histo(codec, data, None)
+}
+
+/// Encode data using a pre-built HuffmanCodec, optionally reusing a histogram.
+pub fn encode_huffman_with_codec_histo(
+    codec: &HuffmanCodec,
+    data: &[u8],
+    histo: Option<&[i32; 256]>,
+) -> Option<Vec<u8>> {
     let code_table_bytes = codec.write_code_table(6).ok()?;
 
-    // Encode data using MSB-first PushValue
-    let mut total_bits = 0u64;
-    for &b in data {
-        total_bits += codec.code_table[b as usize].0 as u64;
-    }
+    // Compute total bits. If we have a histogram, use it (O(256)) instead
+    // of scanning all data bytes (O(n)).
+    let total_bits: u64 = if let Some(h) = histo {
+        h.iter()
+            .enumerate()
+            .map(|(i, &count)| count as u64 * codec.code_table()[i].0 as u64)
+            .sum()
+    } else {
+        data.iter()
+            .map(|&b| codec.code_table()[b as usize].0 as u64)
+            .sum()
+    };
 
     let num_uints = (total_bits.div_ceil(8).div_ceil(4) + 1) as usize;
     let mut encoded = vec![0u8; num_uints * 4];
-    let mut bit_pos = 0i32;
+
+    // Use a u64 accumulator to batch writes. We accumulate bits in the upper
+    // portion and flush complete u32s to the output buffer.
+    let mut accum: u64 = 0;
+    let mut accum_bits: u32 = 0; // number of valid bits in accumulator (MSB-aligned)
+    let mut out_idx: usize = 0; // byte index into encoded
+
+    // Cache the code table reference outside the loop.
+    let ct = codec.code_table();
 
     for &b in data {
-        let (len, code) = codec.code_table[b as usize];
+        let (len, code) = ct[b as usize];
         if len > 0 {
-            push_value(&mut encoded, &mut bit_pos, code, len as i32);
+            let len = len as u32;
+            // Shift code into the high bits of the accumulator, just below existing bits
+            accum |= (code as u64) << (64 - accum_bits - len);
+            accum_bits += len;
+
+            // Flush complete u32s
+            while accum_bits >= 32 {
+                let word = (accum >> 32) as u32;
+                encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
+                out_idx += 4;
+                accum <<= 32;
+                accum_bits -= 32;
+            }
         }
     }
 
-    let mut result = code_table_bytes;
+    // Flush remaining bits
+    if accum_bits > 0 {
+        let word = (accum >> 32) as u32;
+        encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
+    }
+
+    // Combine code table and encoded data into a single buffer.
+    // Reserve exact capacity to avoid reallocation.
+    let mut result = Vec::with_capacity(code_table_bytes.len() + encoded.len());
+    result.extend_from_slice(&code_table_bytes);
     result.extend_from_slice(&encoded);
 
     Some(result)

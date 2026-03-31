@@ -261,24 +261,23 @@ fn encode_huffman_flt_slice<T: LercDataType>(
         _ => unreachable!(),
     }
 
-    // Step 3: Decompose into byte planes
-    let mut byte_planes: Vec<Vec<u8>> = vec![vec![0u8; num_pixels]; unit_size];
-    for pixel in 0..num_pixels {
-        for b in 0..unit_size {
-            byte_planes[b][pixel] = predicted_buffer[pixel * unit_size + b];
-        }
-    }
-
-    // Step 4: For each byte plane, find best delta level and compress
-    let mut result = Vec::new();
+    // Step 3 & 4: Decompose into byte planes and compress each one.
+    // Process one byte plane at a time to reuse the extraction buffer and
+    // reduce peak memory usage (avoids allocating all byte planes at once).
+    // Pre-allocate result with a conservative estimate (header + compressed planes).
+    let mut result = Vec::with_capacity(1 + unit_size * (6 + num_pixels));
 
     // Write predictor code
     result.push(predictor_code);
 
-    // Use actual compression at each delta level for all byte planes to find
-    // the optimal delta level. This matches C++ behavior.
-    for (byte_index, plane) in byte_planes[..unit_size].iter().enumerate() {
-        let (best_level, compressed) = compress_byte_plane_precise(plane, width);
+    let mut plane_buf = vec![0u8; num_pixels];
+    for byte_index in 0..unit_size {
+        // Extract this byte plane from the interleaved buffer
+        for pixel in 0..num_pixels {
+            plane_buf[pixel] = predicted_buffer[pixel * unit_size + byte_index];
+        }
+
+        let (best_level, compressed) = compress_byte_plane_precise(&plane_buf, width);
 
         // Write byte plane header
         result.push(byte_index as u8);
@@ -291,7 +290,7 @@ fn encode_huffman_flt_slice<T: LercDataType>(
 }
 
 /// Select the best predictor by sampling rows/columns and measuring entropy.
-/// Uses sampling for large images to avoid copying the entire buffer.
+/// Uses sampling for large images to avoid processing every row.
 fn select_predictor(
     unit_buffer: &[u8],
     width: usize,
@@ -305,9 +304,12 @@ fn select_predictor(
 
     let stride = width * unit_size;
 
-    // Use all rows for predictor selection (matching C++ thoroughness).
-    // This is affordable because the FPL path already processes the full buffer.
-    let sample_step = 1;
+    // Sample every other row for images with >= 64 rows. For smaller images
+    // use all rows. Sampling 50% is sufficient because the entropy computation
+    // is comparing predictors relative to each other, not computing exact values.
+    // Note: step > 2 is unsafe for sin-wave patterns where cross-row prediction
+    // matters and under-sampling misses the pattern structure.
+    let sample_step = if height >= 64 { 2 } else { 1 };
 
     let sampled_rows: Vec<usize> = (0..height).step_by(sample_step.max(1)).collect();
     let sampled_pixel_count: usize = sampled_rows.len() * width;
@@ -422,10 +424,19 @@ fn compute_entropy_from_histo(histo: &[u32; 256], total: usize) -> f64 {
 /// Returns (best_level, compressed_data).
 ///
 /// Tries actual compression at each delta level (0 through 5) and picks
-/// whichever produces the smallest output. Uses early-exit when two
-/// successive levels produce worse results.
+/// whichever produces the smallest output. Optimizations:
+/// - Pre-computes histogram at each level and passes it to compress_buffer
+///   to avoid redundant histogram computation inside the compressor.
+/// - Uses Huffman size estimation inside compress_buffer to skip the
+///   expensive full encode when the estimate exceeds the current best.
+/// - Early-exits when 2 successive levels produce worse results.
 fn compress_byte_plane_precise(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
-    let compressed_0 = compression::compress_buffer(plane);
+    // Level 0: compress the raw plane
+    let mut histo = [0i32; 256];
+    for &b in plane {
+        histo[b as usize] += 1;
+    }
+    let compressed_0 = compression::compress_buffer_with_histo(plane, Some(&histo));
     let mut best_level = 0u8;
     let mut best_compressed = compressed_0;
     let mut worse_count = 0u8;
@@ -434,7 +445,13 @@ fn compress_byte_plane_precise(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
     for level in 1..=5u8 {
         predictor::apply_sequence(&mut delta_plane, width, 1);
 
-        let compressed = compression::compress_buffer(&delta_plane);
+        // Build histogram for this delta level and reuse it.
+        histo = [0i32; 256];
+        for &b in &delta_plane {
+            histo[b as usize] += 1;
+        }
+
+        let compressed = compression::compress_buffer_with_histo(&delta_plane, Some(&histo));
         if compressed.len() < best_compressed.len() {
             best_compressed = compressed;
             best_level = level;

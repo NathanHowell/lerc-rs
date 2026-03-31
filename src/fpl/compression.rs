@@ -310,14 +310,14 @@ fn encode_packbits(data: &[u8]) -> Vec<u8> {
 
         i += 1;
 
-        if repeat_count == 0 && b.is_some() {
+        if let (0, Some(byte_val)) = (repeat_count, b) {
             // Literal byte
             if literal_start.is_none() {
                 literal_start = Some(buf.len());
                 buf.push(0); // placeholder for header
             }
 
-            buf.push(b.unwrap());
+            buf.push(byte_val);
             literal_count += 1;
 
             if literal_count == 128 {

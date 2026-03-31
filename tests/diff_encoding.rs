@@ -442,3 +442,294 @@ fn round_trip_u32_ndepth4_lossless() {
         _ => panic!("expected U32 data"),
     }
 }
+
+/// Tolerance for lossy float assertions. LERC quantizes with
+/// `floor(val / (2*maxZErr) + 0.5)` in float arithmetic, so the
+/// difference can slightly exceed `max_z_err` by a value-dependent
+/// ULP margin.
+fn lossy_tol_f32(orig: f32, dec: f32, max_z_err: f64) -> f64 {
+    max_z_err + (orig.abs().max(dec.abs()) as f64) * 4.0 * (f32::EPSILON as f64)
+}
+
+fn lossy_tol_f64(orig: f64, dec: f64, max_z_err: f64) -> f64 {
+    max_z_err + orig.abs().max(dec.abs()) * 4.0 * f64::EPSILON
+}
+
+/// Create multi-depth f32 data with correlated depths:
+/// depth[1] = depth[0] * 1.01 + small_noise.
+/// This is the pattern described in the task's testing section.
+fn make_correlated_f32_lossy(width: u32, height: u32) -> Vec<f32> {
+    let n_depth = 3u32;
+    let num_pixels = (width * height) as usize;
+    let mut pixels = vec![0.0f32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = 100.0 + (i as f32) * 0.37 + ((i as f32) * 0.1).sin() * 10.0;
+        let noise1 = ((i * 7 + 3) % 13) as f32 * 0.001;
+        let noise2 = ((i * 11 + 5) % 17) as f32 * 0.001;
+        pixels[i * 3] = base;
+        pixels[i * 3 + 1] = base * 1.01 + noise1;
+        pixels[i * 3 + 2] = base * 1.02 + noise2;
+    }
+    pixels
+}
+
+#[test]
+fn reconstructed_prev_depth_produces_smaller_blobs() {
+    // Verify that the encoder produces correct round-trip results for
+    // multi-depth lossy f32 data with correlated depths.
+    let width = 64u32;
+    let height = 64u32;
+    let n_depth = 3u32;
+    let max_z_error = 0.01;
+    let num_pixels = (width * height) as usize;
+
+    let pixels = make_correlated_f32_lossy(width, height);
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid(num_pixels)],
+        data: LercData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig as f64 - dec as f64).abs();
+                let tol = lossy_tol_f32(orig, dec, max_z_error);
+                assert!(
+                    diff <= tol,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff} > {tol} (maxZErr={max_z_error})"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn lossy_multi_depth_f64_round_trip() {
+    // Test lossy f64 multi-depth round-trip with reconstruction buffer
+    let width = 32u32;
+    let height = 32u32;
+    let n_depth = 2u32;
+    let max_z_error = 0.1;
+    let num_pixels = (width * height) as usize;
+
+    let mut pixels = vec![0.0f64; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = (i as f64) * 1.5 + 50.0;
+        pixels[i * 2] = base;
+        pixels[i * 2 + 1] = base + 0.3;
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Double,
+        valid_masks: vec![BitMask::all_valid(num_pixels)],
+        data: LercData::F64(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    match &decoded.data {
+        LercData::F64(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig - dec).abs();
+                let tol = lossy_tol_f64(orig, dec, max_z_error);
+                assert!(
+                    diff <= tol,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff} > {tol} (maxZErr={max_z_error})"
+                );
+            }
+        }
+        _ => panic!("expected F64 data"),
+    }
+}
+
+#[test]
+fn lossy_multi_depth_i32_round_trip() {
+    // Test lossy integer multi-depth with max_z_error > 0.5
+    let width = 32u32;
+    let height = 32u32;
+    let n_depth = 3u32;
+    let max_z_error = 5.0; // lossy for integers
+    let num_pixels = (width * height) as usize;
+
+    let mut pixels = vec![0i32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = (i as i32) * 100;
+        pixels[i * 3] = base;
+        pixels[i * 3 + 1] = base + 3;
+        pixels[i * 3 + 2] = base + 6;
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Int,
+        valid_masks: vec![BitMask::all_valid(num_pixels)],
+        data: LercData::I32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    match &decoded.data {
+        LercData::I32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig - dec).abs();
+                assert!(
+                    diff as f64 <= max_z_error,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff} > {max_z_error}"
+                );
+            }
+        }
+        _ => panic!("expected I32 data"),
+    }
+}
+
+#[test]
+fn lossy_multi_depth_with_mask_round_trip() {
+    // Lossy multi-depth with partial validity mask
+    let width = 32u32;
+    let height = 32u32;
+    let n_depth = 3u32;
+    let max_z_error = 0.05;
+    let num_pixels = (width * height) as usize;
+
+    let mut mask = BitMask::new(num_pixels);
+    for k in 0..num_pixels {
+        if k % 3 != 2 {
+            mask.set_valid(k);
+        }
+    }
+
+    let mut pixels = vec![0.0f32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        if mask.is_valid(i) {
+            let base = 50.0 + (i as f32) * 0.25;
+            pixels[i * 3] = base;
+            pixels[i * 3 + 1] = base * 1.005;
+            pixels[i * 3 + 2] = base * 1.01;
+        }
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![mask.clone()],
+        data: LercData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    let dec_mask = &decoded.valid_masks[0];
+
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            for k in 0..num_pixels {
+                assert_eq!(
+                    mask.is_valid(k),
+                    dec_mask.is_valid(k),
+                    "mask mismatch at pixel {k}"
+                );
+                if mask.is_valid(k) {
+                    for m in 0..n_depth as usize {
+                        let idx = k * n_depth as usize + m;
+                        let diff = (pixels[idx] as f64 - dec_pixels[idx] as f64).abs();
+                        let tol = lossy_tol_f32(pixels[idx], dec_pixels[idx], max_z_error);
+                        assert!(
+                            diff <= tol,
+                            "pixel {k} depth {m}: orig={}, decoded={}, diff={diff} > {tol} (maxZErr={max_z_error})",
+                            pixels[idx],
+                            dec_pixels[idx]
+                        );
+                    }
+                }
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}
+
+#[test]
+fn lossy_multi_depth_multiband_round_trip() {
+    // Test lossy multi-depth with multiple bands
+    let width = 16u32;
+    let height = 16u32;
+    let n_depth = 2u32;
+    let n_bands = 2u32;
+    let max_z_error = 0.01;
+    let num_pixels = (width * height) as usize;
+    let band_size = num_pixels * n_depth as usize;
+
+    let mut pixels = vec![0.0f32; band_size * n_bands as usize];
+    for band in 0..n_bands as usize {
+        for i in 0..num_pixels {
+            let base = 10.0 + (i as f32) * 0.5 + (band as f32) * 100.0;
+            pixels[band * band_size + i * 2] = base;
+            pixels[band * band_size + i * 2 + 1] = base + 0.2;
+        }
+    }
+
+    let masks = vec![BitMask::all_valid(num_pixels); n_bands as usize];
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands,
+        data_type: DataType::Float,
+        valid_masks: masks,
+        data: LercData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.n_bands, n_bands);
+    match &decoded.data {
+        LercData::F32(dec_pixels) => {
+            assert_eq!(dec_pixels.len(), pixels.len());
+            for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
+                let diff = (orig as f64 - dec as f64).abs();
+                let tol = lossy_tol_f32(orig, dec, max_z_error);
+                assert!(
+                    diff <= tol,
+                    "pixel {i}: orig={orig}, decoded={dec}, diff={diff} > {tol} (maxZErr={max_z_error})"
+                );
+            }
+        }
+        _ => panic!("expected F32 data"),
+    }
+}

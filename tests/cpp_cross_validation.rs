@@ -776,3 +776,155 @@ fn rust_encode_cpp_decode_all_zeros_u8() {
         cpp::decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
+
+// ===========================================================================
+// Multi-depth lossy cross-validation
+// ===========================================================================
+
+#[test]
+fn rust_encode_cpp_decode_multi_depth_f32_lossy() {
+    let (width, height) = (64u32, 64u32);
+    let n_depth = 3u32;
+    let max_z_err = 0.01;
+    let num_pixels = (width * height) as usize;
+
+    // Correlated multi-depth data: depth[1] ~ depth[0] * 1.01
+    let mut data = vec![0.0f32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = 100.0 + (i as f32) * 0.37 + ((i as f32) * 0.1).sin() * 10.0;
+        let noise1 = ((i * 7 + 3) % 13) as f32 * 0.001;
+        let noise2 = ((i * 11 + 5) % 17) as f32 * 0.001;
+        data[i * 3] = base;
+        data[i * 3 + 1] = base * 1.01 + noise1;
+        data[i * 3 + 2] = base * 1.02 + noise2;
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid(num_pixels)],
+        data: LercData::F32(data.clone()),
+        no_data_value: None,
+    };
+
+    let blob = lerc::encode(&image, max_z_err).unwrap();
+
+    // C++ decoder should accept our blob
+    let (decoded, _): (Vec<f32>, _) = cpp::decode(
+        &blob,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        n_depth as i32,
+        1,
+    );
+
+    assert_eq!(decoded.len(), data.len());
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_f32_close(o, d, max_z_err, format_args!("multi-depth lossy pixel {i}"));
+    }
+}
+
+#[test]
+fn cpp_encode_rust_decode_multi_depth_f32_lossy() {
+    let (width, height) = (64u32, 64u32);
+    let n_depth = 3i32;
+    let max_z_err = 0.01;
+    let num_pixels = (width * height) as usize;
+
+    let mut data = vec![0.0f32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = 100.0 + (i as f32) * 0.37 + ((i as f32) * 0.1).sin() * 10.0;
+        data[i * 3] = base;
+        data[i * 3 + 1] = base * 1.01;
+        data[i * 3 + 2] = base * 1.02;
+    }
+
+    let blob = cpp::encode(
+        &data,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        n_depth,
+        1,
+        None,
+        max_z_err,
+    );
+
+    let image = lerc::decode(&blob).unwrap();
+    assert_eq!(image.n_depth, n_depth as u32);
+    let decoded = image.as_typed::<f32>().unwrap();
+
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_f32_close(o, d, max_z_err, format_args!("cpp multi-depth lossy pixel {i}"));
+    }
+}
+
+#[test]
+fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
+    // Rust encode -> C++ decode -> C++ encode -> Rust decode
+    let (width, height) = (32u32, 32u32);
+    let n_depth = 3u32;
+    let max_z_err = 0.05;
+    let num_pixels = (width * height) as usize;
+
+    let mut data = vec![0.0f32; num_pixels * n_depth as usize];
+    for i in 0..num_pixels {
+        let base = 50.0 + (i as f32) * 0.5;
+        data[i * 3] = base;
+        data[i * 3 + 1] = base + 1.0;
+        data[i * 3 + 2] = base + 2.0;
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid(num_pixels)],
+        data: LercData::F32(data.clone()),
+        no_data_value: None,
+    };
+
+    // Rust encode
+    let rust_blob = lerc::encode(&image, max_z_err).unwrap();
+
+    // C++ decode
+    let (cpp_decoded, _): (Vec<f32>, _) = cpp::decode(
+        &rust_blob,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        n_depth as i32,
+        1,
+    );
+
+    // C++ re-encode
+    let cpp_blob = cpp::encode(
+        &cpp_decoded,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        n_depth as i32,
+        1,
+        None,
+        max_z_err,
+    );
+
+    // Rust decode
+    let final_image = lerc::decode(&cpp_blob).unwrap();
+    let final_decoded = final_image.as_typed::<f32>().unwrap();
+
+    for (i, (&o, &d)) in data.iter().zip(final_decoded.iter()).enumerate() {
+        assert_f32_close(
+            o,
+            d,
+            2.0 * max_z_err,
+            format_args!("roundtrip multi-depth pixel {i}"),
+        );
+    }
+}

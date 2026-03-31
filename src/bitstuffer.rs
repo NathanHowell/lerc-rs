@@ -97,6 +97,7 @@ fn bit_stuff_into(out: &mut [u8], data: &[u32], num_bits: u32) {
 }
 
 /// Bit-unstuff values from a buffer (v3+ format: LSB-first packing).
+/// Uses a 64-bit accumulator to avoid branching in the inner loop.
 fn bit_unstuff(
     data: &[u8],
     pos: &mut usize,
@@ -118,40 +119,43 @@ fn bit_unstuff(
         });
     }
 
-    // Copy into aligned u32 buffer
-    let mut src = vec![0u32; num_uints];
     let bytes = &data[*pos..*pos + num_bytes_used];
-    // Copy in chunks of 4, handling the last partial chunk
-    for (i, word) in src.iter_mut().enumerate() {
-        let start = i * 4;
-        if start + 4 <= bytes.len() {
-            *word = u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap());
-        } else {
-            let mut tmp = [0u8; 4];
-            tmp[..bytes.len() - start].copy_from_slice(&bytes[start..]);
-            *word = u32::from_le_bytes(tmp);
-        }
-    }
-
     let mut result = vec![0u32; num_elements as usize];
-    let mut bit_pos: i32 = 0;
-    let mut src_idx = 0;
-    let nb = 32 - num_bits as i32;
+    let mask = (1u64 << num_bits) - 1;
+    let num_bits_usize = num_bits as usize;
+
+    // Use a 64-bit accumulator: read bytes as needed, shift and mask.
+    // This avoids the branch per element that the u32-word approach requires.
+    let mut accum: u64 = 0;
+    let mut bits_in_accum: usize = 0;
+    let mut byte_idx: usize = 0;
 
     for dst in result.iter_mut() {
-        if nb - bit_pos >= 0 {
-            *dst = (src[src_idx] << (nb - bit_pos)) >> nb;
-            bit_pos += num_bits as i32;
-            if bit_pos == 32 {
-                src_idx += 1;
-                bit_pos = 0;
+        // Refill the accumulator when we need more bits.
+        // We can always read enough to have at least num_bits available.
+        while bits_in_accum < num_bits_usize {
+            // Read up to 4 bytes at a time for efficiency
+            if byte_idx + 4 <= bytes.len() {
+                let word = u32::from_le_bytes([
+                    bytes[byte_idx],
+                    bytes[byte_idx + 1],
+                    bytes[byte_idx + 2],
+                    bytes[byte_idx + 3],
+                ]);
+                accum |= (word as u64) << bits_in_accum;
+                bits_in_accum += 32;
+                byte_idx += 4;
+            } else if byte_idx < bytes.len() {
+                accum |= (bytes[byte_idx] as u64) << bits_in_accum;
+                bits_in_accum += 8;
+                byte_idx += 1;
+            } else {
+                break;
             }
-        } else {
-            *dst = src[src_idx] >> bit_pos as u32;
-            src_idx += 1;
-            *dst |= (src[src_idx] << (64 - num_bits as i32 - bit_pos)) >> nb;
-            bit_pos -= nb;
         }
+        *dst = (accum & mask) as u32;
+        accum >>= num_bits_usize;
+        bits_in_accum -= num_bits_usize;
     }
 
     *pos += num_bytes_used;

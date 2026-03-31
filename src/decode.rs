@@ -236,9 +236,13 @@ fn decode_one_band<T: LercDataType>(
     // Read mask
     let mask = read_mask(blob, &mut pos, &hd, prev_mask)?;
 
-    // Zero the output
-    for v in output.iter_mut() {
-        *v = T::default();
+    // Zero the output for images with invalid pixels. For fully valid images,
+    // every element will be overwritten by the decode path, so skip zeroing.
+    let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
+    if !all_valid {
+        for v in output.iter_mut() {
+            *v = T::default();
+        }
     }
 
     if hd.num_valid_pixel == 0 {

@@ -403,25 +403,89 @@ fn read_tile<T: LercDataType>(
 
     let all_valid = buffer_vec.len() == max_element_count;
 
-    for i in i0..i1 {
-        let mut k = i * n_cols + j0;
-        let mut m = k * n_depth + i_depth;
-        for _j in j0..j1 {
-            let valid = if all_valid { true } else { mask.is_valid(k) };
-            if valid {
-                let quant = buffer_vec[src_idx] as f64;
-                src_idx += 1;
+    // Check once per tile whether clamping is needed: if the maximum possible
+    // dequantized value cannot exceed z_max, we can skip the min() entirely.
+    // max_quant is the largest quantized value in the buffer.
+    let needs_clamp = if !b_diff_enc {
+        // For non-diff: z = offset + quant * inv_scale, max when quant is largest
+        let max_quant = buffer_vec.iter().copied().max().unwrap_or(0) as f64;
+        offset + max_quant * inv_scale > z_max
+    } else {
+        // For diff encoding, always clamp (conservative; diff encoding is rare)
+        true
+    };
 
-                if !b_diff_enc {
-                    let z = offset + quant * inv_scale;
+    if all_valid && !b_diff_enc && n_depth == 1 {
+        // Fast path: all pixels valid, no diff encoding, contiguous output (nDepth=1).
+        // This allows the compiler to vectorize the inner loop.
+        if needs_clamp {
+            for i in i0..i1 {
+                let row_start = i * n_cols + j0;
+                let row_len = j1 - j0;
+                let out_slice = &mut output[row_start..row_start + row_len];
+                let src_slice = &buffer_vec[src_idx..src_idx + row_len];
+                for (dst, &q) in out_slice.iter_mut().zip(src_slice.iter()) {
+                    let z = offset + q as f64 * inv_scale;
+                    *dst = T::from_f64(z.min(z_max));
+                }
+                src_idx += row_len;
+            }
+        } else {
+            for i in i0..i1 {
+                let row_start = i * n_cols + j0;
+                let row_len = j1 - j0;
+                let out_slice = &mut output[row_start..row_start + row_len];
+                let src_slice = &buffer_vec[src_idx..src_idx + row_len];
+                for (dst, &q) in out_slice.iter_mut().zip(src_slice.iter()) {
+                    *dst = T::from_f64(offset + q as f64 * inv_scale);
+                }
+                src_idx += row_len;
+            }
+        }
+    } else if all_valid && !b_diff_enc {
+        // All valid, no diff, but n_depth > 1 (strided output)
+        if needs_clamp {
+            for i in i0..i1 {
+                let mut m = (i * n_cols + j0) * n_depth + i_depth;
+                for _ in j0..j1 {
+                    let z = offset + buffer_vec[src_idx] as f64 * inv_scale;
                     output[m] = T::from_f64(z.min(z_max));
-                } else {
-                    let z = offset + quant * inv_scale + output[m - 1].to_f64();
-                    output[m] = T::from_f64(z.min(z_max));
+                    src_idx += 1;
+                    m += n_depth;
                 }
             }
-            k += 1;
-            m += n_depth;
+        } else {
+            for i in i0..i1 {
+                let mut m = (i * n_cols + j0) * n_depth + i_depth;
+                for _ in j0..j1 {
+                    output[m] = T::from_f64(offset + buffer_vec[src_idx] as f64 * inv_scale);
+                    src_idx += 1;
+                    m += n_depth;
+                }
+            }
+        }
+    } else {
+        // General path: mask checks and/or diff encoding
+        for i in i0..i1 {
+            let mut k = i * n_cols + j0;
+            let mut m = k * n_depth + i_depth;
+            for _j in j0..j1 {
+                let valid = if all_valid { true } else { mask.is_valid(k) };
+                if valid {
+                    let quant = buffer_vec[src_idx] as f64;
+                    src_idx += 1;
+
+                    if !b_diff_enc {
+                        let z = offset + quant * inv_scale;
+                        output[m] = T::from_f64(z.min(z_max));
+                    } else {
+                        let z = offset + quant * inv_scale + output[m - 1].to_f64();
+                        output[m] = T::from_f64(z.min(z_max));
+                    }
+                }
+                k += 1;
+                m += n_depth;
+            }
         }
     }
 

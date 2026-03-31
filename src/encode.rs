@@ -577,9 +577,7 @@ fn is_high_entropy_u8<T: LercDataType>(
 
     let n_distinct = histo.iter().filter(|&&c| c > 0).count();
 
-    // If nearly all 256 values present and distribution is roughly uniform,
-    // Huffman can't compress much. Check: >= 248 distinct values and
-    // max bin frequency < 2x average.
+    // If fewer than 248 distinct values, Huffman may still help.
     if n_distinct < 248 {
         return false;
     }
@@ -587,8 +585,45 @@ fn is_high_entropy_u8<T: LercDataType>(
     let avg = total as f64 / 256.0;
     let max_count = *histo.iter().max().unwrap_or(&0) as f64;
 
-    // If the max bin is less than 2x average, distribution is fairly uniform
-    max_count < avg * 2.0
+    // If the distribution isn't roughly uniform, Huffman may help.
+    if max_count >= avg * 2.0 {
+        return false;
+    }
+
+    // Direct histogram is uniform, but delta-encoding might still compress well.
+    // Quick check: compute a delta histogram on a sample of rows.
+    let mut delta_histo = [0u32; 256];
+    let sample_rows = 8.min(height);
+    let row_step = height / sample_rows;
+    let mut delta_total = 0u32;
+
+    for row_idx in 0..sample_rows {
+        let i = row_idx * row_step;
+        let mut prev_val: i32 = 0;
+        for j in 0..width {
+            let k = i * width + j;
+            if all_valid || mask.is_valid(k) {
+                let val = data[k * n_depth].to_f64() as i32;
+                let delta = if j > 0 { val.wrapping_sub(prev_val) } else { val };
+                delta_histo[(delta + offset) as u8 as usize] += 1;
+                delta_total += 1;
+                prev_val = val;
+            }
+        }
+    }
+
+    if delta_total == 0 {
+        return true;
+    }
+
+    // If delta histogram has few distinct values, delta-Huffman will compress well.
+    let delta_distinct = delta_histo.iter().filter(|&&c| c > 0).count();
+    if delta_distinct < 64 {
+        return false; // Don't skip — delta-Huffman will likely win
+    }
+
+    // Both direct and delta are high entropy — safe to skip Huffman
+    true
 }
 
 fn encode_one_band<T: LercDataType>(

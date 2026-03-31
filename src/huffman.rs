@@ -738,6 +738,50 @@ pub fn encode_huffman_with_codec(codec: &HuffmanCodec, data: &[u8]) -> Option<Ve
     encode_huffman_with_codec_histo(codec, data, None)
 }
 
+/// Pack a code table slice into a `[u64; 256]` array where each entry is
+/// `(len as u64) << 32 | code as u64`. This allows a single load per symbol
+/// lookup instead of two loads from a tuple struct.
+fn pack_code_table_256(ct: &[CodeEntry]) -> [u64; 256] {
+    let mut packed = [0u64; 256];
+    let n = ct.len().min(256);
+    for i in 0..n {
+        let (len, code) = ct[i];
+        packed[i] = (len as u64) << 32 | code as u64;
+    }
+    packed
+}
+
+/// Accumulate one Huffman code into the u64 bit accumulator and flush a u32
+/// word to `out` when 32 or more bits have been collected.
+///
+/// This is factored out to share the logic between the unrolled main loop and
+/// the remainder loop, keeping the code DRY while letting the compiler inline
+/// it at both call sites.
+#[inline(always)]
+fn accum_and_flush(
+    packed: u64,
+    accum: &mut u64,
+    accum_bits: &mut u32,
+    out: &mut [u8],
+    out_idx: &mut usize,
+) {
+    let len = (packed >> 32) as u32;
+    let code = packed as u32;
+    // Use wrapping_shl to avoid panic on the (rare) len==0 case where the
+    // shift amount equals 64. The OR with 0 is a no-op so correctness is
+    // preserved.
+    *accum |= (code as u64).wrapping_shl(64 - *accum_bits - len);
+    *accum_bits += len;
+
+    if *accum_bits >= 32 {
+        let word = (*accum >> 32) as u32;
+        out[*out_idx..*out_idx + 4].copy_from_slice(&word.to_le_bytes());
+        *out_idx += 4;
+        *accum <<= 32;
+        *accum_bits -= 32;
+    }
+}
+
 /// Encode data using a pre-built HuffmanCodec, optionally reusing a histogram.
 pub fn encode_huffman_with_codec_histo(
     codec: &HuffmanCodec,
@@ -748,19 +792,23 @@ pub fn encode_huffman_with_codec_histo(
 
     // Compute total bits. If we have a histogram, use it (O(256)) instead
     // of scanning all data bytes (O(n)).
+    let ct = codec.code_table();
     let total_bits: u64 = if let Some(h) = histo {
         h.iter()
             .enumerate()
-            .map(|(i, &count)| count as u64 * codec.code_table()[i].0 as u64)
+            .map(|(i, &count)| count as u64 * ct[i].0 as u64)
             .sum()
     } else {
         data.iter()
-            .map(|&b| codec.code_table()[b as usize].0 as u64)
+            .map(|&b| ct[b as usize].0 as u64)
             .sum()
     };
 
     let num_uints = (total_bits.div_ceil(8).div_ceil(4) + 1) as usize;
     let mut encoded = vec![0u8; num_uints * 4];
+
+    // Pack the code table into a single-load u64 array for cache-friendly access.
+    let packed_ct = pack_code_table_256(ct);
 
     // Use a u64 accumulator to batch writes. We accumulate bits in the upper
     // portion and flush complete u32s to the output buffer.
@@ -768,26 +816,30 @@ pub fn encode_huffman_with_codec_histo(
     let mut accum_bits: u32 = 0; // number of valid bits in accumulator (MSB-aligned)
     let mut out_idx: usize = 0; // byte index into encoded
 
-    // Cache the code table reference outside the loop.
-    let ct = codec.code_table();
+    // Process 4 bytes at a time. Typical Huffman codes for byte data are 4-12
+    // bits, so 4 codes add at most ~48 bits. With a 64-bit accumulator that
+    // starts with <32 valid bits, we need at most one flush per code (already
+    // handled inside accum_and_flush). Unrolling reduces loop overhead and
+    // branch mispredictions.
+    let chunks = data.chunks_exact(4);
+    let remainder = chunks.remainder();
 
-    for &b in data {
-        let (len, code) = ct[b as usize];
-        if len > 0 {
-            let len = len as u32;
-            // Shift code into the high bits of the accumulator, just below existing bits
-            accum |= (code as u64) << (64 - accum_bits - len);
-            accum_bits += len;
+    for chunk in chunks {
+        let p0 = packed_ct[chunk[0] as usize];
+        let p1 = packed_ct[chunk[1] as usize];
+        let p2 = packed_ct[chunk[2] as usize];
+        let p3 = packed_ct[chunk[3] as usize];
 
-            // Flush complete u32s
-            while accum_bits >= 32 {
-                let word = (accum >> 32) as u32;
-                encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
-                out_idx += 4;
-                accum <<= 32;
-                accum_bits -= 32;
-            }
-        }
+        accum_and_flush(p0, &mut accum, &mut accum_bits, &mut encoded, &mut out_idx);
+        accum_and_flush(p1, &mut accum, &mut accum_bits, &mut encoded, &mut out_idx);
+        accum_and_flush(p2, &mut accum, &mut accum_bits, &mut encoded, &mut out_idx);
+        accum_and_flush(p3, &mut accum, &mut accum_bits, &mut encoded, &mut out_idx);
+    }
+
+    // Handle remaining bytes (0-3)
+    for &b in remainder {
+        let p = packed_ct[b as usize];
+        accum_and_flush(p, &mut accum, &mut accum_bits, &mut encoded, &mut out_idx);
     }
 
     // Flush remaining bits

@@ -1128,37 +1128,6 @@ fn compute_histo_for_huffman<T: LercDataType>(
     (histo, delta_histo)
 }
 
-/// MSB-first bit push (for Huffman data encoding).
-fn push_value(buf: &mut [u8], bit_pos: &mut i32, value: u32, len: i32) {
-    let uint_idx = (*bit_pos / 32) as usize;
-    let local_bit = *bit_pos & 31;
-
-    if 32 - local_bit >= len {
-        if local_bit == 0 {
-            buf[uint_idx * 4..uint_idx * 4 + 4].fill(0);
-        }
-        let mut temp = u32::from_le_bytes(
-            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
-        );
-        temp |= value << (32 - local_bit - len);
-        buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
-        *bit_pos += len;
-    } else {
-        let overflow = local_bit + len - 32;
-        let mut temp = u32::from_le_bytes(
-            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
-        );
-        temp |= value >> overflow;
-        buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
-
-        let next_idx = uint_idx + 1;
-        let temp2 = value << (32 - overflow);
-        buf[next_idx * 4..next_idx * 4 + 4].copy_from_slice(&temp2.to_le_bytes());
-
-        *bit_pos += len;
-    }
-}
-
 /// Try Huffman encoding for 8-bit integer data (u8/i8).
 /// Returns Some(bytes) with the mode flag + Huffman data if beneficial, or None.
 fn try_encode_huffman_int<T: LercDataType>(
@@ -1285,7 +1254,13 @@ fn try_encode_huffman_int<T: LercDataType>(
     let num_uints_data = total_bits.div_ceil(32) as usize;
     let num_uints_total = num_uints_data + 1; // +1 for decode read-ahead padding
     let mut encoded = vec![0u8; num_uints_total * 4];
-    let mut bit_pos = 0i32;
+
+    // Use a u64 accumulator (MSB-aligned) instead of per-symbol push_value
+    // calls. This avoids repeated u32 reads/writes from the output buffer and
+    // is the same pattern used in the FPL Huffman encoder.
+    let mut accum: u64 = 0;
+    let mut accum_bits: u32 = 0;
+    let mut out_idx: usize = 0;
 
     // Encode data
     match mode {
@@ -1310,7 +1285,17 @@ fn try_encode_huffman_int<T: LercDataType>(
                             let delta = val.wrapping_sub(predictor);
                             let bin = (delta + offset) as u8 as usize;
                             let (len, code) = code_table[bin];
-                            push_value(&mut encoded, &mut bit_pos, code, len as i32);
+                            let len = len as u32;
+                            accum |= (code as u64) << (64 - accum_bits - len);
+                            accum_bits += len;
+                            if accum_bits >= 32 {
+                                let word = (accum >> 32) as u32;
+                                encoded[out_idx..out_idx + 4]
+                                    .copy_from_slice(&word.to_le_bytes());
+                                out_idx += 4;
+                                accum <<= 32;
+                                accum_bits -= 32;
+                            }
                             prev_val = val;
                         }
                     }
@@ -1326,7 +1311,17 @@ fn try_encode_huffman_int<T: LercDataType>(
                             let val = data[k * n_depth + m].to_f64() as i32;
                             let bin = (val + offset) as usize;
                             let (len, code) = code_table[bin];
-                            push_value(&mut encoded, &mut bit_pos, code, len as i32);
+                            let len = len as u32;
+                            accum |= (code as u64) << (64 - accum_bits - len);
+                            accum_bits += len;
+                            if accum_bits >= 32 {
+                                let word = (accum >> 32) as u32;
+                                encoded[out_idx..out_idx + 4]
+                                    .copy_from_slice(&word.to_le_bytes());
+                                out_idx += 4;
+                                accum <<= 32;
+                                accum_bits -= 32;
+                            }
                         }
                     }
                 }
@@ -1334,12 +1329,16 @@ fn try_encode_huffman_int<T: LercDataType>(
         }
     }
 
-    // Compute final size with padding: (bitPos > 0 ? 1 : 0) + 1 extra uint32s
-    let num_uints_final = if bit_pos > 0 {
-        (bit_pos as usize / 32) + 1 + 1
-    } else {
-        (bit_pos as usize / 32) + 1
-    };
+    // Flush remaining bits
+    if accum_bits > 0 {
+        let word = (accum >> 32) as u32;
+        encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
+        out_idx += 4;
+    }
+
+    // Compute final size with padding: round up to next u32 boundary + 1 extra
+    // u32 for decode read-ahead
+    let num_uints_final = (out_idx / 4) + 1; // +1 for decode read-ahead padding
     encoded.truncate(num_uints_final * 4);
 
     buf.extend_from_slice(&encoded);

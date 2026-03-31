@@ -125,13 +125,13 @@ fn decode_huffman_flt_slice<T: LercDataType>(
 
     // Reverse float transform and write to output
     if is_double {
+        // C++ does NOT apply bit reorganization for doubles (no undoFloatTransform).
+        // Just reinterpret the raw LE bytes as f64.
         for pixel in 0..num_pixels {
             let offset = pixel * unit_size;
             let mut bytes = [0u8; 8];
             bytes.copy_from_slice(&unit_buffer[offset..offset + 8]);
-            let bits = u64::from_le_bytes(bytes);
-            let restored = undo_double_transform(bits);
-            let val = f64::from_bits(restored);
+            let val = f64::from_le_bytes(bytes);
             let m = pixel * n_depth + i_depth;
             output[m] = T::from_f64(val);
         }
@@ -162,6 +162,8 @@ fn undo_float_transform(a: u32) -> u32 {
 
 /// Reverse the double bit reorganization: [mantissa(52) | sign(1) | exponent(11)] -> IEEE 754
 /// Layout: mantissa in bits 0-51, sign in bit 52, exponent in bits 53-63.
+/// Note: not used in production since C++ does NOT apply this transform for doubles.
+#[cfg(test)]
 fn undo_double_transform(a: u64) -> u64 {
     let mantissa = a & 0x000FFFFFFFFFFFFF;
     let sign = (a >> 52) & 1;
@@ -181,7 +183,10 @@ pub(crate) fn float_transform(a: u32) -> u32 {
 
 /// Apply the double bit reorganization for encoding.
 /// Rearranges IEEE 754 bits to [mantissa(52) | sign(1) | exponent(11)].
-pub(crate) fn double_transform(a: u64) -> u64 {
+/// Note: the C++ reference does NOT apply this transform for doubles, so it is
+/// not used in the FPL encode/decode paths. Kept for testing.
+#[cfg(test)]
+fn double_transform(a: u64) -> u64 {
     let mantissa = a & 0x000FFFFFFFFFFFFF;
     let exponent = (a >> 52) & 0x7FF;
     let sign = (a >> 63) & 1;
@@ -223,12 +228,12 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     let mut unit_buffer = vec![0u8; num_pixels * unit_size];
 
     if is_double {
+        // C++ does NOT apply bit reorganization for doubles (no doFloatTransform).
+        // Just copy the raw LE bytes.
         for pixel in 0..num_pixels {
             let m = pixel * n_depth + i_depth;
             let val = input[m].to_f64();
-            let bits = f64::to_bits(val);
-            let transformed = double_transform(bits);
-            let bytes = transformed.to_le_bytes();
+            let bytes = val.to_le_bytes();
             unit_buffer[pixel * unit_size..pixel * unit_size + unit_size]
                 .copy_from_slice(&bytes);
         }

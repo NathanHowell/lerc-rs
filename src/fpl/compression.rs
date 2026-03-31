@@ -40,8 +40,8 @@ fn decode_rle(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
         return Err(LercError::InvalidData("FPL RLE too short".into()));
     }
 
-    let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-    let byte_val = data[4];
+    let byte_val = data[0];
+    let count = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
 
     if count != expected_size {
         return Err(LercError::InvalidData("FPL RLE count mismatch".into()));
@@ -51,24 +51,27 @@ fn decode_rle(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
 }
 
 fn decode_packbits(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
+    // Matches C++ fpl_EsriHuffman decodePackBits format:
+    //   b <= 127: literal of (b + 1) bytes
+    //   b > 127:  run of (b - 126) identical bytes
     let mut out = Vec::with_capacity(expected_size);
     let mut pos = 0;
 
     while pos < data.len() && out.len() < expected_size {
-        let header = data[pos] as i8;
+        let b = data[pos] as u32;
         pos += 1;
 
-        if header >= 0 {
-            // Literal: copy next (header + 1) bytes
-            let count = (header as usize) + 1;
+        if b <= 127 {
+            // Literal: copy next (b + 1) bytes
+            let count = (b + 1) as usize;
             if pos + count > data.len() {
                 return Err(LercError::InvalidData("FPL PackBits overflow".into()));
             }
             out.extend_from_slice(&data[pos..pos + count]);
             pos += count;
-        } else if header != -128 {
-            // Run: repeat next byte (-header + 1) times
-            let count = (-header as usize) + 1;
+        } else {
+            // Run: repeat next byte (b - 126) times
+            let count = (b - 126) as usize;
             if pos >= data.len() {
                 return Err(LercError::InvalidData("FPL PackBits missing byte".into()));
             }
@@ -76,7 +79,6 @@ fn decode_packbits(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
             pos += 1;
             out.resize(out.len() + count, byte_val);
         }
-        // header == -128 is a no-op
     }
 
     if out.len() != expected_size {
@@ -158,8 +160,8 @@ pub(super) fn compress_buffer_with_histo(data: &[u8], precomputed_histo: Option<
     if distinct == 1 {
         let mut buf = Vec::with_capacity(6);
         buf.push(COMPRESS_RLE);
-        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
         buf.push(sole_value);
+        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
         return buf;
     }
 
@@ -268,8 +270,8 @@ fn encode_rle(data: &[u8]) -> Option<Vec<u8>> {
     if data.iter().all(|&b| b == first) {
         let mut buf = Vec::with_capacity(6);
         buf.push(COMPRESS_RLE);
-        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
         buf.push(first);
+        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
         Some(buf)
     } else {
         None
@@ -277,51 +279,65 @@ fn encode_rle(data: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn encode_packbits(data: &[u8]) -> Vec<u8> {
-    // Worst case: every byte is a literal, needing 1 header byte per 128 bytes
-    // plus the data itself. Pre-allocate to avoid repeated growing.
-    let mut buf = Vec::with_capacity(1 + data.len() + data.len() / 128 + 2);
+    // Matches C++ fpl_EsriHuffman encodePackBits format:
+    //   Literal header: (count - 1), range 0..=127, followed by count data bytes
+    //   Run header: (127 + repeat_count), range 128..=255, followed by 1 data byte
+    //     where repeat_count = total_run_length - 1 (1..=128)
+    //     so total run length = 2..=129
+    //
+    // The C++ encoder detects runs of 2+ identical bytes (repeat_count >= 1).
+    let mut buf = Vec::with_capacity(1 + data.len() * 2 + 1);
     buf.push(COMPRESS_PACKBITS);
 
     let len = data.len();
     let mut i = 0;
+    let mut literal_start: Option<usize> = None;
+    let mut literal_count: usize = 0;
 
-    while i < len {
-        // Check for a run of at least 3 identical bytes
-        let mut run_len = 1;
-        while i + run_len < len && data[i + run_len] == data[i] && run_len < 128 {
-            run_len += 1;
+    while i <= len {
+        let b = if i == len { None } else { Some(data[i]) };
+
+        let mut repeat_count: usize = 0;
+
+        if let Some(bv) = b {
+            while i + repeat_count < len - 1
+                && data[i + repeat_count + 1] == bv
+                && repeat_count < 128
+            {
+                repeat_count += 1;
+            }
         }
 
-        if run_len >= 3 {
-            // Write run: header = -(run_len - 1), then one byte
-            buf.push((-(run_len as isize - 1)) as i8 as u8);
-            buf.push(data[i]);
-            i += run_len;
+        i += 1;
+
+        if repeat_count == 0 && b.is_some() {
+            // Literal byte
+            if literal_start.is_none() {
+                literal_start = Some(buf.len());
+                buf.push(0); // placeholder for header
+            }
+
+            buf.push(b.unwrap());
+            literal_count += 1;
+
+            if literal_count == 128 {
+                buf[literal_start.unwrap()] = (literal_count - 1) as u8;
+                literal_count = 0;
+                literal_start = None;
+            }
         } else {
-            // Literal sequence
-            let start = i;
-            let mut lit_len = 0;
-
-            while i + lit_len < len && lit_len < 128 {
-                // Check if a run of 3+ starts here
-                if i + lit_len + 2 < len
-                    && data[i + lit_len] == data[i + lit_len + 1]
-                    && data[i + lit_len] == data[i + lit_len + 2]
-                {
-                    break;
-                }
-                lit_len += 1;
+            // Flush pending literals
+            if literal_count > 0 {
+                buf[literal_start.unwrap()] = (literal_count - 1) as u8;
+                literal_start = None;
+                literal_count = 0;
             }
 
-            if lit_len == 0 {
-                // If we couldn't form a literal (edge case: run of exactly 2),
-                // just emit them as literals
-                lit_len = run_len.min(128);
+            if repeat_count > 0 {
+                buf.push((127 + repeat_count) as u8);
+                buf.push(b.unwrap());
+                i += repeat_count; // skip the repeated bytes (already counted by repeat_count)
             }
-
-            buf.push((lit_len as u8).wrapping_sub(1));
-            buf.extend_from_slice(&data[start..start + lit_len]);
-            i = start + lit_len;
         }
     }
 

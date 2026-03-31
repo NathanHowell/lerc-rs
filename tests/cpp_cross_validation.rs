@@ -928,3 +928,152 @@ fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
         );
     }
 }
+
+// ===========================================================================
+// FPL path cross-validation (maxZErr=0 triggers FPL for float/double)
+// ===========================================================================
+
+#[test]
+fn rust_encode_cpp_decode_f32_lossless_fpl() {
+    let (width, height) = (64, 48);
+    let data = make_gradient_f32(width, height);
+
+    // maxZErr=0 triggers the FPL (floating-point lossless) path
+    let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
+
+    let (info, _) = cpp::get_blob_info(&blob);
+    assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
+    assert_eq!(info[INFO_N_COLS], width);
+    assert_eq!(info[INFO_N_ROWS], height);
+
+    let (decoded, valid_bytes): (Vec<f32>, _) =
+        cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+
+    assert!(valid_bytes.iter().all(|&v| v == 1));
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_eq!(o.to_bits(), d.to_bits(), "pixel {i}: {o} vs {d}");
+    }
+}
+
+#[test]
+fn cpp_encode_rust_decode_f32_lossless_fpl() {
+    let (width, height) = (64, 48);
+    let data = make_gradient_f32(width, height);
+
+    // Use cpp::encode (not encode_for_version with v5) to get the actual FPL path
+    let blob = cpp::encode(
+        &data,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
+
+    let image = lerc::decode(&blob).unwrap();
+    assert_eq!(image.width, width as u32);
+    assert_eq!(image.height, height as u32);
+    assert_eq!(image.data_type, DataType::Float);
+
+    let decoded = image.as_typed::<f32>().unwrap();
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_eq!(o.to_bits(), d.to_bits(), "pixel {i}: {o} vs {d}");
+    }
+}
+
+#[test]
+fn rust_encode_cpp_decode_f64_lossless_fpl() {
+    let (width, height) = (32, 32);
+    let data = make_gradient_f64(width, height);
+
+    let blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
+
+    let (info, _) = cpp::get_blob_info(&blob);
+    assert_eq!(info[INFO_DATA_TYPE], DT_DOUBLE);
+
+    let (decoded, valid_bytes): (Vec<f64>, _) =
+        cpp::decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
+
+    assert!(valid_bytes.iter().all(|&v| v == 1));
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_eq!(o.to_bits(), d.to_bits(), "pixel {i}: {o} vs {d}");
+    }
+}
+
+#[test]
+fn cpp_encode_rust_decode_f64_lossless_fpl() {
+    let (width, height) = (32, 32);
+    let data = make_gradient_f64(width, height);
+
+    let blob = cpp::encode(
+        &data,
+        DT_DOUBLE,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
+
+    let image = lerc::decode(&blob).unwrap();
+    assert_eq!(image.data_type, DataType::Double);
+
+    let decoded = image.as_typed::<f64>().unwrap();
+    for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+        assert_eq!(o.to_bits(), d.to_bits(), "pixel {i}: {o} vs {d}");
+    }
+}
+
+#[test]
+fn fpl_cross_validation_constant_byte_plane() {
+    // Data crafted so all values share the same exponent byte, which triggers
+    // RLE encoding on that byte plane. This specifically exercises the RLE
+    // byte-order fix (value before count, matching C++ format).
+    let (width, height) = (64, 64);
+
+    // All values are in [1.0, 2.0), so they share the same IEEE 754 exponent
+    // byte (0x3F for the high byte). This guarantees at least one byte plane
+    // is constant and will be RLE-encoded.
+    let data: Vec<f32> = (0..(width * height) as usize)
+        .map(|i| 1.0 + (i as f32) / ((width * height) as f32))
+        .collect();
+
+    // Rust encode -> C++ decode
+    let rust_blob = lerc::encode_typed(width, height, &data, 0.0).unwrap();
+    let (cpp_decoded, _): (Vec<f32>, _) =
+        cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
+
+    for (i, (&o, &d)) in data.iter().zip(cpp_decoded.iter()).enumerate() {
+        assert_eq!(
+            o.to_bits(),
+            d.to_bits(),
+            "rust->cpp constant-plane pixel {i}: {o} vs {d}"
+        );
+    }
+
+    // C++ encode -> Rust decode
+    let cpp_blob = cpp::encode(
+        &data,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
+
+    let image = lerc::decode(&cpp_blob).unwrap();
+    let rust_decoded = image.as_typed::<f32>().unwrap();
+
+    for (i, (&o, &d)) in data.iter().zip(rust_decoded.iter()).enumerate() {
+        assert_eq!(
+            o.to_bits(),
+            d.to_bits(),
+            "cpp->rust constant-plane pixel {i}: {o} vs {d}"
+        );
+    }
+}

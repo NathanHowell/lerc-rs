@@ -12,18 +12,20 @@ Supports encoding and decoding of LERC2 (v2–v6) and decoding of legacy LERC1, 
 - **Lossless and lossy** — configurable `max_z_error` per encode
 - **Complete codec** — Huffman coding, float-point lossless (FPL) with byte-plane predictors, tiled micro-block encoding, bit-plane compression, diff encoding for multi-depth, validity masks, NoData
 - **Byte-for-byte identical** output to the C++ reference at the same settings
-- **Faster than C++** on encode paths, parity on decode
+- **Competitive with C++** reference implementation on encode and decode
 
 ## Performance
 
-512×512 pixels, Apple M-series, `--release`:
+Preliminary benchmarks on a single synthetic dataset (512×512, Apple M-series, `--release`). Performance will vary with data characteristics; these numbers are indicative, not comprehensive.
 
-| Path | Rust | C++ reference | vs C++ |
-|------|------|---------------|--------|
-| encode f32 lossy (maxZErr=0.01) | 1.9 ms | 3.1 ms | **1.6× faster** |
-| encode f32 lossless (FPL) | 8.3 ms | 17 ms | **2× faster** |
-| encode u8 lossless (Huffman) | 2.3 ms | 2.7 ms | **1.2× faster** |
-| decode f32 lossy | 0.77 ms | 0.76 ms | parity |
+| Path | Rust | C++ reference |
+|------|------|---------------|
+| encode f32 lossy (maxZErr=0.01) | 1.9 ms | 3.1 ms |
+| encode f32 lossless (FPL) | 8.3 ms | 17 ms |
+| encode u8 lossless (Huffman) | 2.3 ms | 2.7 ms |
+| decode f32 lossy | 0.77 ms | 0.76 ms |
+
+Compression output is byte-for-byte identical to the C++ reference at the same settings. Run `cargo bench --bench codec` to reproduce (requires a C++ toolchain for the reference comparison).
 
 ## Usage
 

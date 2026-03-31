@@ -287,7 +287,8 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     Ok(result)
 }
 
-/// Select the best predictor by trying all three and measuring entropy.
+/// Select the best predictor by sampling rows/columns and measuring entropy.
+/// Uses sampling for large images to avoid copying the entire buffer.
 fn select_predictor(
     unit_buffer: &[u8],
     width: usize,
@@ -299,49 +300,110 @@ fn select_predictor(
         return 0;
     }
 
-    let mut best_code = 0u8;
-    let mut best_entropy = compute_interleaved_entropy(unit_buffer, unit_size);
+    let num_pixels = width * height;
+    let stride = width * unit_size;
 
-    // Try predictor 1 (DELTA1)
+    // For small images (under ~8KB of sample data), use full-buffer entropy.
+    // For larger images, sample every Nth row to keep sample size around 8KB.
+    let sample_step = if num_pixels * unit_size <= 8192 {
+        1
+    } else {
+        // Target ~8KB of sample data
+        let target_rows = 8192 / (width * unit_size).max(1);
+        (height / target_rows.max(1)).max(1)
+    };
+
+    let sampled_rows: Vec<usize> = (0..height).step_by(sample_step.max(1)).collect();
+    let sampled_pixel_count: usize = sampled_rows.len() * width;
+
+    // Predictor 0 (NONE): raw entropy on sampled rows
+    let mut best_code = 0u8;
+    let mut best_entropy = {
+        let mut total = 0.0;
+        for b in 0..unit_size {
+            let mut histo = [0u32; 256];
+            for &row in &sampled_rows {
+                let row_start = row * stride;
+                for col in 0..width {
+                    histo[unit_buffer[row_start + col * unit_size + b] as usize] += 1;
+                }
+            }
+            total += compute_entropy_from_histo(&histo, sampled_pixel_count);
+        }
+        total
+    };
+
+    // Predictor 1 (DELTA1): row-wise delta on sampled rows.
+    // Simulates apply_byte_order without allocating: delta[col] = buf[col] - buf[col-1]
     {
-        let mut buf = unit_buffer.to_vec();
-        predictor::apply_byte_order(&mut buf, width, height, unit_size);
-        let entropy = compute_interleaved_entropy(&buf, unit_size);
-        if entropy < best_entropy {
-            best_entropy = entropy;
+        let mut histo_total = 0.0;
+        for b in 0..unit_size {
+            let mut histo = [0u32; 256];
+            for &row in &sampled_rows {
+                let row_start = row * stride;
+                // First pixel: unchanged
+                histo[unit_buffer[row_start + b] as usize] += 1;
+                // Remaining pixels: delta
+                for col in 1..width {
+                    let cur = unit_buffer[row_start + col * unit_size + b];
+                    let prev = unit_buffer[row_start + (col - 1) * unit_size + b];
+                    histo[cur.wrapping_sub(prev) as usize] += 1;
+                }
+            }
+            histo_total += compute_entropy_from_histo(&histo, sampled_pixel_count);
+        }
+        if histo_total < best_entropy {
+            best_entropy = histo_total;
             best_code = 1;
         }
     }
 
-    // Try predictor 2 (ROWS_COLS)
+    // Predictor 2 (ROWS_COLS): row deltas first, then column deltas.
+    // Simulates apply_cross_bytes without allocating.
+    // row_delta[row][col] = buf[row][col] - buf[row][col-1]  (col>0)
+    // cross_delta[row][col] = row_delta[row][col] - row_delta[row-1][col]  (row>0)
     {
-        let mut buf = unit_buffer.to_vec();
-        predictor::apply_cross_bytes(&mut buf, width, height, unit_size);
-        let entropy = compute_interleaved_entropy(&buf, unit_size);
-        if entropy < best_entropy {
+        let mut histo_total = 0.0;
+        for b in 0..unit_size {
+            let mut histo = [0u32; 256];
+            for (si, &row) in sampled_rows.iter().enumerate() {
+                let row_start = row * stride;
+                if si == 0 {
+                    // First sampled row: only row deltas
+                    histo[unit_buffer[row_start + b] as usize] += 1;
+                    for col in 1..width {
+                        let cur = unit_buffer[row_start + col * unit_size + b];
+                        let prev = unit_buffer[row_start + (col - 1) * unit_size + b];
+                        histo[cur.wrapping_sub(prev) as usize] += 1;
+                    }
+                } else {
+                    let prev_row = sampled_rows[si - 1];
+                    let prev_row_start = prev_row * stride;
+                    // First column: column delta only
+                    let cur_val = unit_buffer[row_start + b];
+                    let above_val = unit_buffer[prev_row_start + b];
+                    histo[cur_val.wrapping_sub(above_val) as usize] += 1;
+                    // Remaining columns: row delta then column delta
+                    for col in 1..width {
+                        let cur = unit_buffer[row_start + col * unit_size + b];
+                        let cur_prev = unit_buffer[row_start + (col - 1) * unit_size + b];
+                        let row_delta = cur.wrapping_sub(cur_prev);
+                        let above = unit_buffer[prev_row_start + col * unit_size + b];
+                        let above_prev =
+                            unit_buffer[prev_row_start + (col - 1) * unit_size + b];
+                        let above_row_delta = above.wrapping_sub(above_prev);
+                        histo[row_delta.wrapping_sub(above_row_delta) as usize] += 1;
+                    }
+                }
+            }
+            histo_total += compute_entropy_from_histo(&histo, sampled_pixel_count);
+        }
+        if histo_total < best_entropy {
             best_code = 2;
         }
     }
 
     best_code
-}
-
-/// Compute the total entropy of all byte planes from an interleaved buffer.
-fn compute_interleaved_entropy(data: &[u8], unit_size: usize) -> f64 {
-    let num_pixels = data.len() / unit_size;
-    if num_pixels == 0 {
-        return 0.0;
-    }
-
-    let mut total = 0.0;
-    for b in 0..unit_size {
-        let mut histo = [0u32; 256];
-        for pixel in 0..num_pixels {
-            histo[data[pixel * unit_size + b] as usize] += 1;
-        }
-        total += compute_entropy_from_histo(&histo, num_pixels);
-    }
-    total
 }
 
 /// Compute entropy in bits from a histogram.
@@ -360,27 +422,66 @@ fn compute_entropy_from_histo(histo: &[u32; 256], total: usize) -> f64 {
     entropy * n // total bits for this plane
 }
 
+/// Compute entropy in bits per byte for a byte slice using a histogram.
+fn compute_entropy_bpb(data: &[u8]) -> f64 {
+    let mut histo = [0u32; 256];
+    for &b in data {
+        histo[b as usize] += 1;
+    }
+    let n = data.len() as f64;
+    let mut entropy = 0.0;
+    for &count in &histo {
+        if count > 0 {
+            let p = count as f64 / n;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
 /// Compress a single byte plane with the best delta level.
 /// Returns (best_level, compressed_data).
+///
+/// Uses a two-phase approach:
+/// Phase 1: Compute entropy at each delta level (cheap, O(n) per level)
+///          to find the best level, with early exit.
+/// Phase 2: Apply the winning delta level and compress once.
 #[allow(clippy::needless_range_loop)]
 fn compress_byte_plane(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
+    // Phase 1: Find best delta level using entropy estimation.
     let mut best_level = 0u8;
-    let mut best_compressed = compression::compress_buffer(plane);
+    let mut best_entropy = compute_entropy_bpb(plane);
+    let mut worse_count = 0u8;
 
-    // Try delta levels 1 through 5
     let mut delta_plane = plane.to_vec();
     for level in 1..=5u8 {
-        // Apply one more level of delta
         predictor::apply_sequence(&mut delta_plane, width, 1);
 
-        let compressed = compression::compress_buffer(&delta_plane);
-        if compressed.len() < best_compressed.len() {
-            best_compressed = compressed;
+        let entropy = compute_entropy_bpb(&delta_plane);
+        if entropy < best_entropy {
+            best_entropy = entropy;
             best_level = level;
+            worse_count = 0;
+        } else {
+            worse_count += 1;
+            if worse_count >= 2 {
+                break;
+            }
         }
     }
 
-    (best_level, best_compressed)
+    // Phase 2: Apply the winning delta level and compress.
+    if best_level == 0 {
+        let compressed = compression::compress_buffer(plane);
+        (0, compressed)
+    } else {
+        let mut result = plane.to_vec();
+        for _ in 0..best_level {
+            predictor::apply_sequence(&mut result, width, 1);
+        }
+        let compressed = compression::compress_buffer(&result);
+        (best_level, compressed)
+    }
 }
 
 #[cfg(test)]

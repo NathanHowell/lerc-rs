@@ -692,17 +692,8 @@ fn compute_num_bytes_needed_simple(num_elem: u32, max_elem: u32) -> u32 {
     1 + num_bytes_uint + ((num_elem * num_bits + 7) >> 3)
 }
 
-/// Encode data using Huffman coding. Returns the encoded bytes.
-pub fn encode_huffman(
-    data: &[u8],
-    histo: &[i32],
-    histo_size: usize,
-) -> Option<(HuffmanCodec, Vec<u8>)> {
-    let mut codec = HuffmanCodec::new();
-    if !codec.compute_codes(&histo[..histo_size]) {
-        return None;
-    }
-
+/// Encode data using a pre-built HuffmanCodec. Returns the encoded bytes.
+pub fn encode_huffman_with_codec(codec: &HuffmanCodec, data: &[u8]) -> Option<Vec<u8>> {
     let code_table_bytes = codec.write_code_table(6).ok()?;
 
     // Encode data using MSB-first PushValue
@@ -725,6 +716,21 @@ pub fn encode_huffman(
     let mut result = code_table_bytes;
     result.extend_from_slice(&encoded);
 
+    Some(result)
+}
+
+/// Encode data using Huffman coding. Returns the encoded bytes.
+pub fn encode_huffman(
+    data: &[u8],
+    histo: &[i32],
+    histo_size: usize,
+) -> Option<(HuffmanCodec, Vec<u8>)> {
+    let mut codec = HuffmanCodec::new();
+    if !codec.compute_codes(&histo[..histo_size]) {
+        return None;
+    }
+
+    let result = encode_huffman_with_codec(&codec, data)?;
     Some((codec, result))
 }
 

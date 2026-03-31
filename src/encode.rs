@@ -557,15 +557,27 @@ fn is_high_entropy_u8<T: LercDataType>(
     let mut histo = [0u32; 256];
     let mut total = 0u32;
 
-    for i in 0..height {
-        for j in 0..width {
-            let k = i * width + j;
-            if all_valid || mask.is_valid(k) {
-                for m in 0..n_depth {
-                    let val = data[k * n_depth + m].to_f64() as i32;
-                    let bin = (val + offset) as usize;
-                    histo[bin] += 1;
-                    total += 1;
+    // Fast path for u8, all-valid, single-depth: avoid to_f64 and mask checks
+    if T::DATA_TYPE == DataType::Byte && all_valid && n_depth == 1 {
+        debug_assert_eq!(offset, 0);
+        let u8_data: &[u8] = unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
+        };
+        for &val in u8_data {
+            histo[val as usize] += 1;
+        }
+        total = u8_data.len() as u32;
+    } else {
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if all_valid || mask.is_valid(k) {
+                    for m in 0..n_depth {
+                        let val = data[k * n_depth + m].to_f64() as i32;
+                        let bin = (val + offset) as usize;
+                        histo[bin] += 1;
+                        total += 1;
+                    }
                 }
             }
         }
@@ -597,17 +609,35 @@ fn is_high_entropy_u8<T: LercDataType>(
     let row_step = height / sample_rows;
     let mut delta_total = 0u32;
 
-    for row_idx in 0..sample_rows {
-        let i = row_idx * row_step;
-        let mut prev_val: i32 = 0;
-        for j in 0..width {
-            let k = i * width + j;
-            if all_valid || mask.is_valid(k) {
-                let val = data[k * n_depth].to_f64() as i32;
+    if T::DATA_TYPE == DataType::Byte && all_valid && n_depth == 1 {
+        let u8_data: &[u8] = unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
+        };
+        for row_idx in 0..sample_rows {
+            let i = row_idx * row_step;
+            let row_start = i * width;
+            let mut prev_val: u8 = 0;
+            for j in 0..width {
+                let val = u8_data[row_start + j];
                 let delta = if j > 0 { val.wrapping_sub(prev_val) } else { val };
-                delta_histo[(delta + offset) as u8 as usize] += 1;
+                delta_histo[delta as usize] += 1;
                 delta_total += 1;
                 prev_val = val;
+            }
+        }
+    } else {
+        for row_idx in 0..sample_rows {
+            let i = row_idx * row_step;
+            let mut prev_val: i32 = 0;
+            for j in 0..width {
+                let k = i * width + j;
+                if all_valid || mask.is_valid(k) {
+                    let val = data[k * n_depth].to_f64() as i32;
+                    let delta = if j > 0 { val.wrapping_sub(prev_val) } else { val };
+                    delta_histo[(delta + offset) as u8 as usize] += 1;
+                    delta_total += 1;
+                    prev_val = val;
+                }
             }
         }
     }
@@ -644,23 +674,35 @@ fn encode_one_band<T: LercDataType>(
     let mut overall_min = f64::MAX;
     let mut overall_max = f64::MIN;
 
-    for i in 0..height {
-        for j in 0..width {
-            let k = i * width + j;
-            if mask.is_valid(k) {
-                for m in 0..n_depth {
-                    let val = data[k * n_depth + m].to_f64();
-                    if val < z_min_vec[m] {
-                        z_min_vec[m] = val;
-                    }
-                    if val > z_max_vec[m] {
-                        z_max_vec[m] = val;
-                    }
-                    if val < overall_min {
-                        overall_min = val;
-                    }
-                    if val > overall_max {
-                        overall_max = val;
+    let all_valid = num_valid == width * height;
+    if all_valid && n_depth == 1 {
+        // Fast path: single depth, all valid — scan without mask checks or depth loops
+        for &val in data.iter() {
+            let v = val.to_f64();
+            if v < overall_min { overall_min = v; }
+            if v > overall_max { overall_max = v; }
+        }
+        z_min_vec[0] = overall_min;
+        z_max_vec[0] = overall_max;
+    } else {
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if mask.is_valid(k) {
+                    for m in 0..n_depth {
+                        let val = data[k * n_depth + m].to_f64();
+                        if val < z_min_vec[m] {
+                            z_min_vec[m] = val;
+                        }
+                        if val > z_max_vec[m] {
+                            z_max_vec[m] = val;
+                        }
+                        if val < overall_min {
+                            overall_min = val;
+                        }
+                        if val > overall_max {
+                            overall_max = val;
+                        }
                     }
                 }
             }
@@ -886,6 +928,222 @@ fn encode_one_band<T: LercDataType>(
     Ok(blob)
 }
 
+/// Pick representative tile positions for sampling at a given block size.
+fn sample_tile_positions(
+    n_rows: usize,
+    n_cols: usize,
+    mb_size: usize,
+) -> Vec<(usize, usize, usize, usize)> {
+    let num_tv = n_rows.div_ceil(mb_size);
+    let num_th = n_cols.div_ceil(mb_size);
+
+    let mut positions = vec![
+        (0, 0),
+        (0, num_th.saturating_sub(1)),
+        (num_tv.saturating_sub(1), 0),
+        (num_tv.saturating_sub(1), num_th.saturating_sub(1)),
+        (num_tv / 2, num_th / 2),
+        (0, num_th / 2),
+        (num_tv / 2, 0),
+        (num_tv.saturating_sub(1), num_th / 2),
+    ];
+
+    positions.sort();
+    positions.dedup();
+
+    positions
+        .into_iter()
+        .map(|(it, jt)| {
+            let i0 = it * mb_size;
+            let i1 = (i0 + mb_size).min(n_rows);
+            let j0 = jt * mb_size;
+            let j1 = (j0 + mb_size).min(n_cols);
+            (i0, i1, j0, j1)
+        })
+        .collect()
+}
+
+/// Fast block size selection for u8 lossless, all-valid, single-depth images.
+fn select_block_size_u8_fast(data: &[u8], hd: &HeaderInfo) -> i32 {
+    let n_rows = hd.n_rows as usize;
+    let n_cols = hd.n_cols as usize;
+    let version = hd.version;
+    let pattern: u8 = if version >= 5 { 14 } else { 15 };
+    let mut quant_buf = [0u32; 256];
+
+    let mut size8 = 0usize;
+    let mut buf8 = Vec::with_capacity(512);
+    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
+        buf8.clear();
+        let integrity = ((j0 as u8 >> 3) & pattern) << 2;
+        encode_single_u8_tile(&mut buf8, data, n_cols, i0, i1, j0, j1, integrity, &mut quant_buf);
+        size8 += buf8.len();
+    }
+
+    let mut size16 = 0usize;
+    let mut buf16 = Vec::with_capacity(512);
+    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
+        buf16.clear();
+        let integrity = ((j0 as u8 >> 3) & pattern) << 2;
+        encode_single_u8_tile(&mut buf16, data, n_cols, i0, i1, j0, j1, integrity, &mut quant_buf);
+        size16 += buf16.len();
+    }
+
+    if size16 < size8 { 16 } else { 8 }
+}
+
+/// Encode a single u8 tile (used by select_block_size_u8_fast and encode_tiles_u8_fast).
+///
+/// Combines min/max scan, quantization, histogram building, LUT decision, and encoding
+/// into minimal passes over the data.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn encode_single_u8_tile(
+    buf: &mut Vec<u8>,
+    data: &[u8],
+    n_cols: usize,
+    i0: usize,
+    i1: usize,
+    j0: usize,
+    j1: usize,
+    integrity: u8,
+    quant_buf: &mut [u32; 256],
+) {
+    let tile_w = j1 - j0;
+    let num_valid = (i1 - i0) * tile_w;
+
+    // Single pass: compute min, max, and copy values into quant_buf (as-is, not yet quantized)
+    let mut z_min: u8 = 255;
+    let mut z_max: u8 = 0;
+    let mut idx = 0;
+    for i in i0..i1 {
+        let row_start = i * n_cols + j0;
+        for &val in &data[row_start..row_start + tile_w] {
+            if val < z_min { z_min = val; }
+            if val > z_max { z_max = val; }
+            // Store raw value; we'll subtract z_min below if needed
+            quant_buf[idx] = val as u32;
+            idx += 1;
+        }
+    }
+
+    if z_min == 0 && z_max == 0 {
+        buf.push(2 | integrity);
+        return;
+    }
+
+    if z_min == z_max {
+        buf.push(3 | integrity);
+        buf.push(z_min);
+        return;
+    }
+
+    // Quantize in-place: subtract z_min
+    let max_quant = (z_max - z_min) as u32;
+    let quant_data = &mut quant_buf[..num_valid];
+    let z_min_u32 = z_min as u32;
+    for v in quant_data.iter_mut() {
+        *v -= z_min_u32;
+    }
+
+    buf.push(1 | integrity);
+    buf.push(z_min);
+
+    let num_bits = crate::bitstuffer::num_bits_needed(max_quant);
+    let num_elem = num_valid as u32;
+
+    // Quick heuristic: if the value range is large relative to the tile size,
+    // LUT can't help (not enough duplicates to save bits). Skip the histogram.
+    // For a tile of N values with max_quant >= N/2, the maximum possible number
+    // of distinct values is N, and n_bits_lut >= log2(N/2) which is close to
+    // num_bits, so LUT overhead eats any savings.
+    let try_lut = max_quant < num_elem / 2;
+
+    if !try_lut {
+        // Simple encoding (most common for high-entropy data)
+        crate::bitstuffer::encode_simple_into(buf, quant_data, max_quant);
+    } else {
+        // Build histogram and check if LUT helps
+        let mut counts = [0u16; 256];
+        for &v in quant_data.iter() {
+            counts[v as usize] += 1;
+        }
+
+        // Count distinct values (only up to max_quant)
+        let mut n_distinct = 0u32;
+        for &c in &counts[..=max_quant as usize] {
+            if c > 0 {
+                n_distinct += 1;
+            }
+        }
+
+        // Check if LUT is beneficial
+        let use_lut = if (2..=255).contains(&n_distinct) {
+            let n_lut = n_distinct - 1;
+            let mut n_bits_lut = 0u32;
+            while (n_lut >> n_bits_lut) != 0 { n_bits_lut += 1; }
+            let n_bytes = crate::bitstuffer::num_bytes_uint(num_elem);
+            let num_bytes_simple = 1 + n_bytes as u32 + ((num_elem * num_bits + 7) >> 3);
+            let num_bytes_lut = 1 + n_bytes as u32 + 1
+                + ((n_lut * num_bits + 7) >> 3)
+                + ((num_elem * n_bits_lut + 7) >> 3);
+            num_bytes_lut < num_bytes_simple
+        } else {
+            false
+        };
+
+        if !use_lut {
+            crate::bitstuffer::encode_simple_into(buf, quant_data, max_quant);
+        } else {
+            // Build LUT mapping and encode using stack-allocated arrays
+            let n_lut = n_distinct - 1;
+            let mut n_bits_lut = 0u32;
+            while (n_lut >> n_bits_lut) != 0 { n_bits_lut += 1; }
+
+            let mut value_to_index = [0u8; 256];
+            let mut lut_values = [0u32; 255];
+            let mut lut_count = 0u32;
+            let mut lut_idx = 0u8;
+            for v in 0..=max_quant as usize {
+                if counts[v] > 0 {
+                    value_to_index[v] = lut_idx;
+                    if lut_idx > 0 {
+                        lut_values[lut_count as usize] = v as u32;
+                        lut_count += 1;
+                    }
+                    lut_idx += 1;
+                }
+            }
+
+            // Build index array on the stack
+            let mut index_arr = [0u32; 256];
+            for (i, &val) in quant_data.iter().enumerate() {
+                index_arr[i] = value_to_index[val as usize] as u32;
+            }
+            let index_data = &index_arr[..num_valid];
+            let lut_data = &lut_values[..lut_count as usize];
+
+            // Write LUT header and bit-stuffed data directly
+            let n = crate::bitstuffer::num_bytes_uint(num_elem);
+            let bits67 = if n == 4 { 0u8 } else { (3 - n) as u8 };
+            let mut header_byte = num_bits as u8;
+            header_byte |= bits67 << 6;
+            header_byte |= 1 << 5; // LUT mode
+
+            buf.push(header_byte);
+            crate::bitstuffer::encode_uint_pub(buf, num_elem, n);
+            buf.push((lut_count + 1) as u8);
+
+            if num_bits > 0 {
+                crate::bitstuffer::bit_stuff_append(buf, lut_data, num_bits);
+            }
+            if n_bits_lut > 0 {
+                crate::bitstuffer::bit_stuff_append(buf, index_data, n_bits_lut);
+            }
+        }
+    }
+}
+
 /// Try encoding a sample of tiles at both block sizes 8 and 16, return whichever
 /// produces smaller output. Instead of encoding ALL tiles twice, we sample a
 /// small number of representative tiles to make the decision.
@@ -899,6 +1157,16 @@ fn select_block_size<T: LercDataType>(
     let n_rows = hd.n_rows as usize;
     let n_cols = hd.n_cols as usize;
     let n_depth = hd.n_depth as usize;
+
+    // Fast path for u8 lossless, all-valid, single-depth
+    let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
+    if T::DATA_TYPE == DataType::Byte && hd.max_z_error == 0.5 && all_valid && n_depth == 1 {
+        debug_assert_eq!(T::BYTES, 1);
+        let u8_data: &[u8] = unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
+        };
+        return Ok(select_block_size_u8_fast(u8_data, hd));
+    }
 
     // For very small images, just try both fully
     if n_rows <= 16 && n_cols <= 16 {
@@ -927,43 +1195,6 @@ fn select_block_size<T: LercDataType>(
     };
     let max_z_error = hd.max_z_error;
 
-    // Pick representative tile positions for each block size.
-    // We sample tiles at corners, center, and a few mid-edge positions.
-    let sample_tiles_for_size = |mb_size: usize| -> Vec<(usize, usize, usize, usize)> {
-        let num_tv = n_rows.div_ceil(mb_size);
-        let num_th = n_cols.div_ceil(mb_size);
-
-        // Collect unique (it, jt) pairs
-        let mut positions = vec![
-            // Corners
-            (0, 0),
-            (0, num_th.saturating_sub(1)),
-            (num_tv.saturating_sub(1), 0),
-            (num_tv.saturating_sub(1), num_th.saturating_sub(1)),
-            // Center
-            (num_tv / 2, num_th / 2),
-            // Mid-edges
-            (0, num_th / 2),
-            (num_tv / 2, 0),
-            (num_tv.saturating_sub(1), num_th / 2),
-        ];
-
-        // Deduplicate
-        positions.sort();
-        positions.dedup();
-
-        positions
-            .into_iter()
-            .map(|(it, jt)| {
-                let i0 = it * mb_size;
-                let i1 = (i0 + mb_size).min(n_rows);
-                let j0 = jt * mb_size;
-                let j1 = (j0 + mb_size).min(n_cols);
-                (i0, i1, j0, j1)
-            })
-            .collect()
-    };
-
     let mut scratch = ScratchBuffers::new();
 
     // Encode sampled tiles at block size 8
@@ -973,7 +1204,7 @@ fn select_block_size<T: LercDataType>(
         h.micro_block_size = 8;
         h
     };
-    for &(i0, i1, j0, j1) in &sample_tiles_for_size(8) {
+    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
         for i_depth in 0..n_depth {
             size8 += encode_tile_to_count::<T>(
                 data,
@@ -1000,7 +1231,7 @@ fn select_block_size<T: LercDataType>(
         h.micro_block_size = 16;
         h
     };
-    for &(i0, i1, j0, j1) in &sample_tiles_for_size(16) {
+    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
         for i_depth in 0..n_depth {
             size16 += encode_tile_to_count::<T>(
                 data,
@@ -1399,6 +1630,24 @@ fn encode_tiles<T: LercDataType>(
     let n_cols = header.n_cols as usize;
     let max_z_error = header.max_z_error;
 
+    // Fast path: u8 lossless, all-valid, single depth.
+    // This avoids f64 conversions, uses stack-allocated arrays, and merges
+    // quantization + LUT decision + encoding in a single pass per tile.
+    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+    if T::DATA_TYPE == DataType::Byte && max_z_error == 0.5 && all_valid && n_depth == 1 {
+        // T is u8 (verified by DATA_TYPE == Byte and T::BYTES == 1).
+        // Safe reinterpret: u8 has size 1, alignment 1, same as T when T=u8.
+        debug_assert_eq!(T::BYTES, 1);
+        debug_assert_eq!(core::mem::size_of::<T>(), 1);
+        debug_assert_eq!(core::mem::align_of::<T>(), 1);
+        let u8_data: &[u8] = unsafe {
+            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
+        };
+        let mut quant_buf = [0u32; 256]; // max tile size is 16x16=256
+        encode_tiles_u8_fast(blob, u8_data, header, &mut quant_buf);
+        return Ok(());
+    }
+
     let num_tiles_vert = n_rows.div_ceil(mb_size);
     let num_tiles_hori = n_cols.div_ceil(mb_size);
 
@@ -1458,6 +1707,42 @@ fn encode_tiles<T: LercDataType>(
     }
 
     Ok(())
+}
+
+/// Specialized tile encoding for u8 lossless, all-valid, single-depth images.
+/// Avoids all f64 conversions and Vec allocations in the inner loop.
+fn encode_tiles_u8_fast(
+    blob: &mut Vec<u8>,
+    data: &[u8],
+    header: &HeaderInfo,
+    quant_buf: &mut [u32; 256],
+) {
+    let mb_size = header.micro_block_size as usize;
+    let n_rows = header.n_rows as usize;
+    let n_cols = header.n_cols as usize;
+    let version = header.version;
+
+    let num_tiles_vert = n_rows.div_ceil(mb_size);
+    let num_tiles_hori = n_cols.div_ceil(mb_size);
+
+    // Pre-allocate: worst case is ~1 byte overhead per tile + data bytes.
+    // For high-entropy u8, output is roughly the same size as input.
+    blob.reserve(data.len() + num_tiles_vert * num_tiles_hori * 4);
+
+    let pattern: u8 = if version >= 5 { 14 } else { 15 };
+
+    for i_tile in 0..num_tiles_vert {
+        let i0 = i_tile * mb_size;
+        let i1 = (i0 + mb_size).min(n_rows);
+
+        for j_tile in 0..num_tiles_hori {
+            let j0 = j_tile * mb_size;
+            let j1 = (j0 + mb_size).min(n_cols);
+
+            let integrity = ((j0 as u8 >> 3) & pattern) << 2;
+            encode_single_u8_tile(blob, data, n_cols, i0, i1, j0, j1, integrity, quant_buf);
+        }
+    }
 }
 
 /// Encode a single tile block (one depth slice of one micro-block).
@@ -1894,17 +2179,16 @@ fn encode_tile_inner<T: LercDataType>(
 
     // Try LUT vs simple encoding
     let encoded_start = buf.len();
-    if let Some(lut_info) = crate::bitstuffer::should_use_lut(quant_scratch, max_quant) {
-        let lut_bits67 = bits67;
-        buf.push(1 | lut_bits67 | diff_flag | integrity);
-        tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
-        let stuffed = crate::bitstuffer::encode_lut(&lut_info, num_valid as u32);
-        buf.extend_from_slice(&stuffed);
+    buf.push(1 | bits67 | diff_flag | integrity);
+    tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
+
+    // Use fast path for small tiles with small values (common for u8 data)
+    if num_valid <= 256 && max_quant < 256 {
+        crate::bitstuffer::encode_small_tile_into(buf, quant_scratch, max_quant);
+    } else if let Some(lut_info) = crate::bitstuffer::should_use_lut(quant_scratch, max_quant) {
+        crate::bitstuffer::encode_lut_into(buf, &lut_info, num_valid as u32);
     } else {
-        buf.push(1 | bits67 | diff_flag | integrity);
-        tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
-        let stuffed = crate::bitstuffer::encode_simple(quant_scratch);
-        buf.extend_from_slice(&stuffed);
+        crate::bitstuffer::encode_simple_into(buf, quant_scratch, max_quant);
     }
 
     // Check if raw binary would be smaller (only for non-diff mode)

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use crate::error::{LercError, Result};
 
-fn num_bytes_uint(k: u32) -> usize {
+pub fn num_bytes_uint(k: u32) -> usize {
     if k < 256 {
         1
     } else if k < (1 << 16) {
@@ -26,6 +26,27 @@ fn encode_uint(buf: &mut Vec<u8>, k: u32, num_bytes: usize) {
         4 => buf.extend_from_slice(&k.to_le_bytes()),
         _ => unreachable!(),
     }
+}
+
+/// Public wrapper for encode_uint.
+#[inline]
+pub fn encode_uint_pub(buf: &mut Vec<u8>, k: u32, num_bytes: usize) {
+    encode_uint(buf, k, num_bytes);
+}
+
+/// Append bit-stuffed data directly to `buf`.
+#[inline]
+pub fn bit_stuff_append(buf: &mut Vec<u8>, data: &[u32], num_bits: u32) {
+    if num_bits == 0 || data.is_empty() {
+        return;
+    }
+    let num_elements = data.len() as u32;
+    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
+    let num_bytes_used =
+        (num_uints * 4) - num_tail_bytes_not_needed(num_elements, num_bits) as usize;
+    let start = buf.len();
+    buf.resize(start + num_bytes_used, 0);
+    bit_stuff_into(&mut buf[start..], data, num_bits);
 }
 
 fn decode_uint(data: &[u8], pos: &mut usize, num_bytes: usize) -> Result<u32> {
@@ -64,6 +85,7 @@ fn bit_stuff(data: &[u32], num_bits: u32) -> Vec<u8> {
 
 /// Bit-stuff values into an already-allocated byte slice using a 64-bit accumulator.
 /// The output slice must be at least as large as the bit-stuffed data.
+#[inline]
 fn bit_stuff_into(out: &mut [u8], data: &[u32], num_bits: u32) {
     if num_bits == 0 || data.is_empty() {
         return;
@@ -267,22 +289,38 @@ pub fn encode_simple(data: &[u32]) -> Vec<u8> {
     buf
 }
 
-/// Pre-computed LUT encoding info from `should_use_lut`, avoiding recomputation in `encode_lut`.
-pub struct LutInfo {
-    /// Distinct values excluding the minimum (which maps to index 0)
-    pub lut_vec: Vec<u32>,
-    /// Per-element LUT index
-    pub index_vec: Vec<u32>,
-    /// Number of bits needed for the max value in lut_vec
-    pub num_bits: u32,
-    /// Number of bits needed for lut indices
-    pub n_bits_lut: u32,
+/// Encode an array of unsigned ints using simple mode, appending directly to `buf`.
+#[inline]
+pub fn encode_simple_into(buf: &mut Vec<u8>, data: &[u32], max_elem: u32) {
+    if data.is_empty() {
+        return;
+    }
+
+    let num_bits = num_bits_needed(max_elem);
+    let num_elements = data.len() as u32;
+    let n = num_bytes_uint(num_elements);
+    let bits67 = if n == 4 { 0u8 } else { (3 - n) as u8 };
+
+    let mut header_byte = num_bits as u8;
+    header_byte |= bits67 << 6;
+
+    buf.push(header_byte);
+    encode_uint(buf, num_elements, n);
+
+    if num_bits > 0 {
+        let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
+        let num_bytes_used =
+            (num_uints * 4) - num_tail_bytes_not_needed(num_elements, num_bits) as usize;
+        let start = buf.len();
+        buf.resize(start + num_bytes_used, 0);
+        bit_stuff_into(&mut buf[start..], data, num_bits);
+    }
 }
 
-/// Encode an array of unsigned ints using LUT mode from pre-computed info.
-pub fn encode_lut(info: &LutInfo, num_elem: u32) -> Vec<u8> {
+/// Encode an array of unsigned ints using LUT mode, appending directly to `buf`.
+pub fn encode_lut_into(buf: &mut Vec<u8>, info: &LutInfo, num_elem: u32) {
     if num_elem == 0 {
-        return Vec::new();
+        return;
     }
 
     let n = num_bytes_uint(num_elem);
@@ -292,7 +330,6 @@ pub fn encode_lut(info: &LutInfo, num_elem: u32) -> Vec<u8> {
     header_byte |= bits67 << 6;
     header_byte |= 1 << 5; // bit 5 = 1 for LUT mode
 
-    // Pre-compute output size for a single allocation
     let n_lut = info.lut_vec.len() as u32;
     let lut_bytes = if info.num_bits > 0 {
         let num_uints = (n_lut as u64 * info.num_bits as u64).div_ceil(32) as usize;
@@ -306,24 +343,158 @@ pub fn encode_lut(info: &LutInfo, num_elem: u32) -> Vec<u8> {
     } else {
         0
     };
-    let total_size = 1 + n + 1 + lut_bytes + idx_bytes;
 
-    let mut buf = Vec::with_capacity(total_size);
+    buf.reserve(1 + n + 1 + lut_bytes + idx_bytes);
     buf.push(header_byte);
-    encode_uint(&mut buf, num_elem, n);
-    buf.push((n_lut + 1) as u8); // size including the 0
+    encode_uint(buf, num_elem, n);
+    buf.push((n_lut + 1) as u8);
 
     if info.num_bits > 0 {
-        let stuffed_lut = bit_stuff(&info.lut_vec, info.num_bits);
-        buf.extend_from_slice(&stuffed_lut);
+        let start = buf.len();
+        buf.resize(start + lut_bytes, 0);
+        bit_stuff_into(&mut buf[start..], &info.lut_vec, info.num_bits);
     }
 
     if info.n_bits_lut > 0 {
-        let stuffed_idx = bit_stuff(&info.index_vec, info.n_bits_lut);
-        buf.extend_from_slice(&stuffed_idx);
+        let start = buf.len();
+        buf.resize(start + idx_bytes, 0);
+        bit_stuff_into(&mut buf[start..], &info.index_vec, info.n_bits_lut);
+    }
+}
+
+/// Fast-path for encoding small tiles (up to 256 elements) with values in [0, 255].
+/// Combines LUT decision + encoding in a single pass with stack-allocated arrays.
+/// Writes directly to `buf`. Returns the max quantized value for caller's use.
+///
+/// The `quant_data` slice contains quantized u32 values where max_elem < 256.
+/// `max_elem` is the maximum value in quant_data.
+pub fn encode_small_tile_into(buf: &mut Vec<u8>, quant_data: &[u32], max_elem: u32) {
+    debug_assert!(max_elem < 256);
+    debug_assert!(quant_data.len() <= 256);
+
+    if quant_data.is_empty() {
+        return;
     }
 
-    buf
+    let num_elem = quant_data.len() as u32;
+    let num_bits = num_bits_needed(max_elem);
+
+    // Build histogram using stack-allocated array
+    let mut counts = [0u16; 256];
+    for &val in quant_data {
+        counts[val as usize] += 1;
+    }
+
+    // Count distinct values
+    let mut n_distinct = 0u32;
+    for &c in &counts[..=max_elem as usize] {
+        if c > 0 {
+            n_distinct += 1;
+        }
+    }
+
+    // Quick LUT vs simple size comparison
+    let use_lut = if (2..=255).contains(&n_distinct) {
+        let n_lut = n_distinct - 1;
+        let mut n_bits_lut = 0u32;
+        while (n_lut >> n_bits_lut) != 0 {
+            n_bits_lut += 1;
+        }
+        let num_bytes_simple =
+            1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+        let num_bytes_lut =
+            1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
+                + ((num_elem * n_bits_lut + 7) >> 3);
+        num_bytes_lut < num_bytes_simple
+    } else {
+        false
+    };
+
+    if !use_lut {
+        // Simple encoding: write directly
+        encode_simple_into(buf, quant_data, max_elem);
+        return;
+    }
+
+    // LUT encoding with stack-allocated mapping
+    let n_lut = n_distinct - 1;
+    let mut n_bits_lut = 0u32;
+    while (n_lut >> n_bits_lut) != 0 {
+        n_bits_lut += 1;
+    }
+
+    // Build value-to-index mapping and lut_vec on the stack
+    let mut value_to_index = [0u8; 256];
+    let mut lut_values = [0u32; 255]; // max 255 LUT entries (excluding the min value)
+    let mut lut_count = 0u32;
+    let mut idx = 0u8;
+    for v in 0..=max_elem as usize {
+        if counts[v] > 0 {
+            value_to_index[v] = idx;
+            if idx > 0 {
+                lut_values[lut_count as usize] = v as u32;
+                lut_count += 1;
+            }
+            idx += 1;
+        }
+    }
+
+    // Build index array on the stack (max 256 elements for small tiles)
+    let mut index_arr = [0u32; 256];
+    for (i, &val) in quant_data.iter().enumerate() {
+        index_arr[i] = value_to_index[val as usize] as u32;
+    }
+    let index_data = &index_arr[..quant_data.len()];
+    let lut_data = &lut_values[..lut_count as usize];
+
+    // Write LUT-encoded data directly to buf
+    let n = num_bytes_uint(num_elem);
+    let bits67 = if n == 4 { 0u8 } else { (3 - n) as u8 };
+    let mut header_byte = num_bits as u8;
+    header_byte |= bits67 << 6;
+    header_byte |= 1 << 5; // LUT mode
+
+    let lut_bytes = if num_bits > 0 {
+        let num_uints = (lut_count as u64 * num_bits as u64).div_ceil(32) as usize;
+        (num_uints * 4) - num_tail_bytes_not_needed(lut_count, num_bits) as usize
+    } else {
+        0
+    };
+    let idx_bytes = if n_bits_lut > 0 {
+        let num_uints = (num_elem as u64 * n_bits_lut as u64).div_ceil(32) as usize;
+        (num_uints * 4) - num_tail_bytes_not_needed(num_elem, n_bits_lut) as usize
+    } else {
+        0
+    };
+
+    buf.reserve(1 + n + 1 + lut_bytes + idx_bytes);
+    buf.push(header_byte);
+    encode_uint(buf, num_elem, n);
+    buf.push((lut_count + 1) as u8);
+
+    if num_bits > 0 {
+        let start = buf.len();
+        buf.resize(start + lut_bytes, 0);
+        bit_stuff_into(&mut buf[start..], lut_data, num_bits);
+    }
+
+    if n_bits_lut > 0 {
+        let start = buf.len();
+        buf.resize(start + idx_bytes, 0);
+        bit_stuff_into(&mut buf[start..], index_data, n_bits_lut);
+    }
+}
+
+/// Pre-computed LUT encoding info from `should_use_lut`, avoiding recomputation in `encode_lut_into`.
+pub struct LutInfo {
+    /// Distinct values excluding the minimum (which maps to index 0)
+    pub lut_vec: Vec<u32>,
+    /// Per-element LUT index
+    pub index_vec: Vec<u32>,
+    /// Number of bits needed for the max value in lut_vec
+    pub num_bits: u32,
+    /// Number of bits needed for lut indices
+    pub n_bits_lut: u32,
 }
 
 /// Decode a bit-stuffed array (auto-detects simple vs LUT mode).
@@ -431,7 +602,7 @@ pub fn num_bits_needed(max_elem: u32) -> u32 {
 /// approach that avoids sorting entirely. For larger domains, uses a bitset to count
 /// distinct values first, then builds the LUT via counting sort when possible.
 ///
-/// Returns `Some(LutInfo)` with pre-computed LUT data ready for `encode_lut`,
+/// Returns `Some(LutInfo)` with pre-computed LUT data ready for `encode_lut_into`,
 /// or `None` if simple encoding would be smaller.
 pub fn should_use_lut(data: &[u32], max_elem: u32) -> Option<LutInfo> {
     if data.len() < 2 {
@@ -694,7 +865,8 @@ mod tests {
         let max_elem = *data.iter().max().unwrap();
         let info = should_use_lut(&data, max_elem).expect("should use LUT");
 
-        let encoded = encode_lut(&info, data.len() as u32);
+        let mut encoded = Vec::new();
+        encode_lut_into(&mut encoded, &info, data.len() as u32);
         let mut pos = 0;
         let decoded = decode(&encoded, &mut pos, 100, 6).unwrap();
         assert_eq!(decoded, data);

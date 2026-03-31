@@ -202,6 +202,39 @@ pub(super) fn compress_buffer_with_histo(data: &[u8], precomputed_histo: Option<
     best.unwrap_or_else(|| encode_raw(data))
 }
 
+/// Estimate the compressed size (in bytes) of a buffer without actually
+/// compressing it. This matches the C++ `getEntropySize` function: it samples
+/// every PRIME_MULT-th byte (stride 7), builds a histogram from those samples,
+/// and computes the Shannon entropy to approximate the compressed size.
+pub(super) fn estimate_compressed_size(data: &[u8]) -> usize {
+    const PRIME_MULT: usize = 7;
+
+    let mut table = [0u32; 256];
+    let mut total_count = 0u32;
+
+    let mut i = 0;
+    while i < data.len() {
+        table[data[i] as usize] += 1;
+        total_count += 1;
+        i += PRIME_MULT;
+    }
+
+    if total_count == 0 {
+        return 0;
+    }
+
+    let mut total_bits = 0.0f64;
+    for &count in &table {
+        if count > 0 {
+            let p = total_count as f64 / count as f64;
+            let bits = p.log2();
+            total_bits += bits * count as f64;
+        }
+    }
+
+    ((total_bits + 7.0) / 8.0) as usize
+}
+
 /// Compute entropy in bits per byte from a histogram.
 fn compute_entropy_bits_per_byte(histo: &[i32; 256], total: usize) -> f64 {
     if total == 0 {

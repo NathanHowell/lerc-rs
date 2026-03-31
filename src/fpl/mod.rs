@@ -235,8 +235,8 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     } else {
         for pixel in 0..num_pixels {
             let m = pixel * n_depth + i_depth;
-            let val = input[m].to_f64() as f32;
-            let bits = f32::to_bits(val);
+            // For f32, read bits directly without f64 round-trip
+            let bits = input[m].to_bits_u64() as u32;
             let transformed = float_transform(bits);
             let bytes = transformed.to_le_bytes();
             unit_buffer[pixel * unit_size..pixel * unit_size + unit_size]
@@ -261,6 +261,17 @@ fn encode_huffman_flt_slice<T: LercDataType>(
         _ => unreachable!(),
     }
 
+    // Compute max byte delta based on predictor, matching C++
+    // `Predictor::getMaxByteDelta(p) = MAX_DELTA - getIntDelta(p)`
+    const MAX_DELTA: u8 = 5;
+    let predictor_int_delta = match predictor_code {
+        0 => 0u8, // NONE
+        1 => 1,   // DELTA1
+        2 => 2,   // ROWS_COLS
+        _ => unreachable!(),
+    };
+    let max_byte_delta = MAX_DELTA - predictor_int_delta;
+
     // Step 3 & 4: Decompose into byte planes and compress each one.
     // Process one byte plane at a time to reuse the extraction buffer and
     // reduce peak memory usage (avoids allocating all byte planes at once).
@@ -277,7 +288,7 @@ fn encode_huffman_flt_slice<T: LercDataType>(
             plane_buf[pixel] = predicted_buffer[pixel * unit_size + byte_index];
         }
 
-        let (best_level, compressed) = compress_byte_plane_precise(&plane_buf, width);
+        let (best_level, compressed) = compress_byte_plane(&plane_buf, max_byte_delta);
 
         // Write byte plane header
         result.push(byte_index as u8);
@@ -289,8 +300,120 @@ fn encode_huffman_flt_slice<T: LercDataType>(
     Ok(result)
 }
 
-/// Select the best predictor by sampling rows/columns and measuring entropy.
-/// Uses sampling for large images to avoid processing every row.
+/// A test block used for sampling-based predictor selection and level search.
+/// Matches the C++ `TestBlock` struct.
+struct TestBlock {
+    top: usize,
+    height: usize,
+}
+
+/// Generate evenly-spaced test blocks for predictor selection.
+/// Matches the C++ `generateListOfTestBlocks`.
+fn generate_test_blocks(width: usize, height: usize) -> Vec<TestBlock> {
+    let size = width * height;
+    if size == 0 {
+        return Vec::new();
+    }
+
+    const BLOCK_TARGET_SIZE: usize = 8 * 1024;
+
+    let t = (size as f64 / BLOCK_TARGET_SIZE as f64).round();
+    let mut count = (t + 1.0).sqrt().round() as usize;
+    // count is always >= 1
+
+    let mut block_height = BLOCK_TARGET_SIZE / width;
+    if block_height < 4 {
+        block_height = 4;
+    }
+
+    while count * block_height > height && count > 1 {
+        count -= 1;
+    }
+
+    let top_margin = (height as f64 - (count * block_height) as f64) / (2.0 * count as f64);
+    let delta = 2.0 * top_margin + block_height as f64;
+
+    let mut blocks = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut top = (top_margin + delta * i as f64) as isize;
+        let mut bh = block_height;
+        if top < 0 {
+            top = 0;
+        }
+        let top = top as usize;
+        if top + bh > height {
+            bh = height - top;
+        }
+        if bh > 0 {
+            blocks.push(TestBlock { top, height: bh });
+        }
+    }
+
+    blocks
+}
+
+/// Apply the prime-stride delta (stride=7) to a buffer, matching C++
+/// `setDerivativePrime`.
+fn set_derivative_prime(data: &mut [u8]) {
+    const PRIME_MULT: usize = 7;
+    if data.is_empty() {
+        return;
+    }
+    let mut off = data.len() - 1;
+    off = PRIME_MULT * (off / PRIME_MULT);
+
+    while off >= 1 {
+        data[off] = data[off].wrapping_sub(data[off - 1]);
+        if off < PRIME_MULT {
+            break;
+        }
+        off -= PRIME_MULT;
+    }
+}
+
+/// Compute the estimated compressed size for test blocks extracted from
+/// interleaved unit data. Matches the C++ `testBlocksSize`.
+fn test_blocks_size(
+    blocks: &[TestBlock],
+    data: &[u8],
+    raster_width: usize,
+    unit_size: usize,
+    test_first_byte_delta: bool,
+) -> usize {
+    let mut ret = 0usize;
+
+    for tb in blocks {
+        let start = unit_size * tb.top * raster_width;
+        let length = tb.height * raster_width;
+
+        let mut plane_buffer = vec![0u8; length];
+
+        for byte in 0..unit_size {
+            // Extract byte plane from interleaved data
+            let mut ptr_offset = start + byte;
+            for i in 0..length {
+                plane_buffer[i] = data[ptr_offset];
+                ptr_offset += unit_size;
+            }
+
+            let plane_encoded = compression::estimate_compressed_size(&plane_buffer);
+
+            if test_first_byte_delta {
+                let mut delta_buf = plane_buffer.clone();
+                set_derivative_prime(&mut delta_buf);
+                let plane_encoded2 = compression::estimate_compressed_size(&delta_buf);
+                ret += plane_encoded.min(plane_encoded2);
+            } else {
+                ret += plane_encoded;
+            }
+        }
+    }
+
+    ret
+}
+
+/// Select the best predictor by generating test blocks and measuring estimated
+/// compressed sizes, matching C++ `selectInitialLinearOrCrossDelta`.
 fn select_predictor(
     unit_buffer: &[u8],
     width: usize,
@@ -302,168 +425,152 @@ fn select_predictor(
         return 0;
     }
 
-    let stride = width * unit_size;
+    let blocks = generate_test_blocks(width, height);
+    if blocks.is_empty() {
+        return 0;
+    }
 
-    // Sample every other row for images with >= 64 rows. For smaller images
-    // use all rows. Sampling 50% is sufficient because the entropy computation
-    // is comparing predictors relative to each other, not computing exact values.
-    // Note: step > 2 is unsafe for sin-wave patterns where cross-row prediction
-    // matters and under-sampling misses the pattern structure.
-    let sample_step = if height >= 64 { 2 } else { 1 };
+    let test_first_byte_delta = true;
+    let mut stats = [0usize; 3];
 
-    let sampled_rows: Vec<usize> = (0..height).step_by(sample_step.max(1)).collect();
-    let sampled_pixel_count: usize = sampled_rows.len() * width;
+    // Predictor 0 (NONE): test on a copy of the original data
+    let mut copy = unit_buffer.to_vec();
+    stats[0] = test_blocks_size(&blocks, &copy, width, unit_size, test_first_byte_delta);
 
-    // Predictor 0 (NONE): raw entropy on sampled rows
-    let mut best_code = 0u8;
-    let mut best_entropy = {
-        let mut total = 0.0;
-        for b in 0..unit_size {
-            let mut histo = [0u32; 256];
-            for &row in &sampled_rows {
-                let row_start = row * stride;
-                for col in 0..width {
-                    histo[unit_buffer[row_start + col * unit_size + b] as usize] += 1;
-                }
-            }
-            total += compute_entropy_from_histo(&histo, sampled_pixel_count);
-        }
-        total
+    // Predictor 1 (DELTA1): apply row-wise delta (phase 1 of setBlockDerivative)
+    predictor::apply_byte_order(&mut copy, width, height, unit_size);
+    stats[1] = test_blocks_size(&blocks, &copy, width, unit_size, test_first_byte_delta);
+
+    // Predictor 2 (ROWS_COLS): apply column delta on top of existing row delta
+    // (phase 2 of setCrossDerivative)
+    predictor::apply_cross_bytes_phase2(&mut copy, width, height, unit_size);
+    stats[2] = test_blocks_size(&blocks, &copy, width, unit_size, test_first_byte_delta);
+
+    // Pick the predictor with the smallest total
+    let min_index = if stats[0] <= stats[1] && stats[0] <= stats[2] {
+        0
+    } else if stats[1] <= stats[2] {
+        1
+    } else {
+        2
     };
 
-    // Predictor 1 (DELTA1): row-wise delta on sampled rows.
-    // Simulates apply_byte_order without allocating: delta[col] = buf[col] - buf[col-1]
-    {
-        let mut histo_total = 0.0;
-        for b in 0..unit_size {
-            let mut histo = [0u32; 256];
-            for &row in &sampled_rows {
-                let row_start = row * stride;
-                // First pixel: unchanged
-                histo[unit_buffer[row_start + b] as usize] += 1;
-                // Remaining pixels: delta
-                for col in 1..width {
-                    let cur = unit_buffer[row_start + col * unit_size + b];
-                    let prev = unit_buffer[row_start + (col - 1) * unit_size + b];
-                    histo[cur.wrapping_sub(prev) as usize] += 1;
-                }
-            }
-            histo_total += compute_entropy_from_histo(&histo, sampled_pixel_count);
-        }
-        if histo_total < best_entropy {
-            best_entropy = histo_total;
-            best_code = 1;
-        }
-    }
-
-    // Predictor 2 (ROWS_COLS): row deltas first, then column deltas.
-    // Simulates apply_cross_bytes without allocating.
-    // row_delta[row][col] = buf[row][col] - buf[row][col-1]  (col>0)
-    // cross_delta[row][col] = row_delta[row][col] - row_delta[row-1][col]  (row>0)
-    {
-        let mut histo_total = 0.0;
-        for b in 0..unit_size {
-            let mut histo = [0u32; 256];
-            for (si, &row) in sampled_rows.iter().enumerate() {
-                let row_start = row * stride;
-                if si == 0 {
-                    // First sampled row: only row deltas
-                    histo[unit_buffer[row_start + b] as usize] += 1;
-                    for col in 1..width {
-                        let cur = unit_buffer[row_start + col * unit_size + b];
-                        let prev = unit_buffer[row_start + (col - 1) * unit_size + b];
-                        histo[cur.wrapping_sub(prev) as usize] += 1;
-                    }
-                } else {
-                    let prev_row = sampled_rows[si - 1];
-                    let prev_row_start = prev_row * stride;
-                    // First column: column delta only
-                    let cur_val = unit_buffer[row_start + b];
-                    let above_val = unit_buffer[prev_row_start + b];
-                    histo[cur_val.wrapping_sub(above_val) as usize] += 1;
-                    // Remaining columns: row delta then column delta
-                    for col in 1..width {
-                        let cur = unit_buffer[row_start + col * unit_size + b];
-                        let cur_prev = unit_buffer[row_start + (col - 1) * unit_size + b];
-                        let row_delta = cur.wrapping_sub(cur_prev);
-                        let above = unit_buffer[prev_row_start + col * unit_size + b];
-                        let above_prev =
-                            unit_buffer[prev_row_start + (col - 1) * unit_size + b];
-                        let above_row_delta = above.wrapping_sub(above_prev);
-                        histo[row_delta.wrapping_sub(above_row_delta) as usize] += 1;
-                    }
-                }
-            }
-            histo_total += compute_entropy_from_histo(&histo, sampled_pixel_count);
-        }
-        if histo_total < best_entropy {
-            best_code = 2;
-        }
-    }
-
-    best_code
+    min_index as u8
 }
 
-/// Compute entropy in bits from a histogram.
-fn compute_entropy_from_histo(histo: &[u32; 256], total: usize) -> f64 {
-    if total == 0 {
-        return 0.0;
-    }
-    let n = total as f64;
-    let mut entropy = 0.0;
-    for &count in histo {
-        if count > 0 {
-            let p = count as f64 / n;
-            entropy -= p * p.log2();
-        }
-    }
-    entropy * n // total bits for this plane
+/// Find the best delta level for a byte plane using snippet-based sampling,
+/// then compress the full plane once at that level.
+/// Matches the C++ `getBestLevel2` + single full compress.
+fn compress_byte_plane(plane: &[u8], max_delta: u8) -> (u8, Vec<u8>) {
+    let best_level = get_best_level(plane, max_delta);
+
+    // Apply the winning delta level to a copy and compress once
+    let mut final_plane = plane.to_vec();
+    predictor::apply_sequence(&mut final_plane, 0, best_level);
+
+    let compressed = compression::compress_buffer(&final_plane);
+    (best_level, compressed)
 }
 
-/// Compress a single byte plane with the best delta level.
-/// Returns (best_level, compressed_data).
-///
-/// Tries actual compression at each delta level (0 through 5) and picks
-/// whichever produces the smallest output. Optimizations:
-/// - Pre-computes histogram at each level and passes it to compress_buffer
-///   to avoid redundant histogram computation inside the compressor.
-/// - Uses Huffman size estimation inside compress_buffer to skip the
-///   expensive full encode when the estimate exceeds the current best.
-/// - Early-exits when 2 successive levels produce worse results.
-fn compress_byte_plane_precise(plane: &[u8], width: usize) -> (u8, Vec<u8>) {
-    // Level 0: compress the raw plane
-    let mut histo = [0i32; 256];
-    for &b in plane {
-        histo[b as usize] += 1;
+/// Determine the best delta level using snippet-based sampling.
+/// Matches the C++ `getBestLevel2` exactly.
+fn get_best_level(plane: &[u8], max_delta: u8) -> u8 {
+    if max_delta == 0 {
+        return 0;
     }
-    let compressed_0 = compression::compress_buffer_with_histo(plane, Some(&histo));
-    let mut best_level = 0u8;
-    let mut best_compressed = compressed_0;
-    let mut worse_count = 0u8;
 
-    let mut delta_plane = plane.to_vec();
-    for level in 1..=5u8 {
-        predictor::apply_sequence(&mut delta_plane, width, 1);
+    let size = plane.len();
+    const TARGET_SAMPLE_SIZE: usize = 1024 * 8;
 
-        // Build histogram for this delta level and reuse it.
-        histo = [0i32; 256];
-        for &b in &delta_plane {
-            histo[b as usize] += 1;
+    let t = (size as f64 / TARGET_SAMPLE_SIZE as f64).round();
+    let mut count = (t + 1.0).sqrt().round() as isize;
+
+    while count as usize * TARGET_SAMPLE_SIZE > size && count > 0 {
+        count -= 1;
+    }
+
+    let count = count as usize;
+    if count == 0 {
+        // Plane too small for snippet sampling; fall back to testing full plane
+        return get_best_level_full(plane, max_delta);
+    }
+
+    let top_margin =
+        (size as f64 - (count * TARGET_SAMPLE_SIZE) as f64) / (2.0 * count as f64);
+    let delta = 2.0 * top_margin + TARGET_SAMPLE_SIZE as f64;
+
+    let mut snippets: Vec<(usize, usize)> = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut start = (top_margin + delta * i as f64) as isize;
+        let mut len = TARGET_SAMPLE_SIZE;
+        if start < 0 {
+            start = 0;
+        }
+        let start = start as usize;
+        if start + len > size {
+            len = size - start;
+        }
+        if len > 0 {
+            snippets.push((start, len));
+        }
+    }
+
+    // Work on a copy of the full plane (needed so snippet deltas accumulate correctly)
+    let mut copy = plane.to_vec();
+
+    let mut best_comp = 0usize;
+    let mut ret = 0u8;
+
+    for l in 0..=max_delta {
+        if l > 0 {
+            // Apply one additional delta level to only the snippet regions
+            for &(start, len) in &snippets {
+                let end = start + len;
+                for i in (start + l as usize..end).rev() {
+                    copy[i] = copy[i].wrapping_sub(copy[i - 1]);
+                }
+            }
         }
 
-        let compressed = compression::compress_buffer_with_histo(&delta_plane, Some(&histo));
-        if compressed.len() < best_compressed.len() {
-            best_compressed = compressed;
-            best_level = level;
-            worse_count = 0;
+        // Estimate compressed size of all snippets
+        let mut comp = 0usize;
+        for &(start, len) in &snippets {
+            comp += compression::estimate_compressed_size(&copy[start..start + len]);
+        }
+
+        if comp < best_comp || l == 0 {
+            best_comp = comp;
+            ret = l;
         } else {
-            worse_count += 1;
-            if worse_count >= 2 {
-                break;
-            }
+            break; // if deteriorating, stop
         }
     }
-    (best_level, best_compressed)
+
+    ret
+}
+
+/// Fallback for planes too small for snippet sampling: test each delta level
+/// with entropy estimation on the full plane.
+fn get_best_level_full(plane: &[u8], max_delta: u8) -> u8 {
+    let mut copy = plane.to_vec();
+    let mut best_comp = compression::estimate_compressed_size(&copy);
+    let mut ret = 0u8;
+
+    for l in 1..=max_delta {
+        // Apply one delta level
+        for i in (l as usize..copy.len()).rev() {
+            copy[i] = copy[i].wrapping_sub(copy[i - 1]);
+        }
+        let comp = compression::estimate_compressed_size(&copy);
+        if comp < best_comp {
+            best_comp = comp;
+            ret = l;
+        } else {
+            break;
+        }
+    }
+
+    ret
 }
 
 #[cfg(test)]
@@ -515,6 +622,58 @@ mod tests {
                 dec.to_bits()
             );
         }
+    }
+
+    #[test]
+    fn fpl_encode_decode_f32_ramp_multi_depth() {
+        // Directly test the depth=1 slice that fails
+        let width = 16;
+        let height = 16;
+        // Depth 1 slice: values = (pixel*3+1)*0.01 + 1.0
+        let input: Vec<f32> = (0..width * height)
+            .map(|pixel| ((pixel * 3 + 1) as f32) * 0.01 + 1.0)
+            .collect();
+
+        let is_double = false;
+        let encoded = encode_huffman_flt(&input, is_double, width, height, 1).unwrap();
+        let mut output = vec![0.0f32; width * height];
+        let mut pos = 0;
+        decode_huffman_flt(&encoded, &mut pos, is_double, width, height, 1, &mut output).unwrap();
+
+        for (i, (&orig, &dec)) in input.iter().zip(output.iter()).enumerate() {
+            assert_eq!(
+                orig.to_bits(),
+                dec.to_bits(),
+                "pixel {i}: orig={orig} (bits={:#010x}), decoded={dec} (bits={:#010x})",
+                orig.to_bits(),
+                dec.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn test_apply_restore_sequence_level2() {
+        // Test that apply_sequence and restore_sequence are inverses for level 2
+        let original: Vec<u8> = (0..256).map(|i| (i * 7 + 13) as u8).collect();
+        let mut data = original.clone();
+        predictor::apply_sequence(&mut data, 16, 2);
+        predictor::restore_sequence(&mut data, 16, 2);
+        assert_eq!(data, original, "apply_sequence/restore_sequence round-trip failed for level 2");
+    }
+
+    #[test]
+    fn test_compress_byte_plane_round_trip() {
+        // Test that compress_byte_plane produces data that can be restored
+        let width = 16;
+        let original: Vec<u8> = (0..256).map(|i| (i * 7 + 13) as u8).collect();
+        let (level, compressed) = compress_byte_plane(&original, 5);
+
+        // Decompress
+        let decompressed = compression::extract_buffer(&compressed, original.len()).unwrap();
+        // Restore
+        let mut restored = decompressed;
+        predictor::restore_sequence(&mut restored, width, level);
+        assert_eq!(restored, original, "compress_byte_plane round-trip failed");
     }
 
     #[test]

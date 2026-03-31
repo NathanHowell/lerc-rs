@@ -1,58 +1,30 @@
 use alloc::string::String;
-use core::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LercError {
+    #[error("invalid LERC magic bytes")]
     InvalidMagic,
+    #[error("unsupported LERC version: {0}")]
     UnsupportedVersion(i32),
+    #[error("checksum mismatch: expected {expected:#010x}, computed {computed:#010x}")]
     ChecksumMismatch { expected: u32, computed: u32 },
+    #[error("buffer too small: need {needed} bytes, have {available}")]
     BufferTooSmall { needed: usize, available: usize },
+    #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("invalid data type: {0}")]
     InvalidDataType(i32),
+    #[error("unsupported encoding: {0}")]
     UnsupportedEncoding(u8),
+    #[error("block integrity check failed")]
     IntegrityCheckFailed,
+    #[error("type mismatch: expected {expected:?}, actual {actual:?}")]
     TypeMismatch {
         expected: crate::types::DataType,
         actual: crate::types::DataType,
     },
-    OutputBufferTooSmall {
-        needed: usize,
-        available: usize,
-    },
+    #[error("output buffer too small: need {needed} elements, have {available}")]
+    OutputBufferTooSmall { needed: usize, available: usize },
 }
-
-impl fmt::Display for LercError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidMagic => write!(f, "invalid LERC magic bytes"),
-            Self::UnsupportedVersion(v) => write!(f, "unsupported LERC version: {v}"),
-            Self::ChecksumMismatch { expected, computed } => {
-                write!(
-                    f,
-                    "checksum mismatch: expected {expected:#010x}, computed {computed:#010x}"
-                )
-            }
-            Self::BufferTooSmall { needed, available } => {
-                write!(f, "buffer too small: need {needed} bytes, have {available}")
-            }
-            Self::InvalidData(msg) => write!(f, "invalid data: {msg}"),
-            Self::InvalidDataType(dt) => write!(f, "invalid data type: {dt}"),
-            Self::UnsupportedEncoding(enc) => write!(f, "unsupported encoding: {enc}"),
-            Self::IntegrityCheckFailed => write!(f, "block integrity check failed"),
-            Self::TypeMismatch { expected, actual } => {
-                write!(f, "type mismatch: expected {expected:?}, actual {actual:?}")
-            }
-            Self::OutputBufferTooSmall { needed, available } => {
-                write!(
-                    f,
-                    "output buffer too small: need {needed} elements, have {available}"
-                )
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for LercError {}
 
 pub type Result<T> = core::result::Result<T, LercError>;

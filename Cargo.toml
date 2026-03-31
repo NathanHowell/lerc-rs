@@ -22,3 +22,7 @@ lerc-cpp-ref = { path = "crates/lerc-cpp-ref" }
 [[bench]]
 name = "codec"
 harness = false
+
+[[bench]]
+name = "profile_encode"
+harness = false

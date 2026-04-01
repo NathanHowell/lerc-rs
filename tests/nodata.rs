@@ -1,3 +1,4 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
@@ -22,7 +23,7 @@ fn make_f32_ndepth3_with_nodata() -> (Vec<f32>, BitMask, f64) {
             pixels[base + 2] = (i * 10 + j + 200) as f32;
 
             // Mark some pixels as partially NoData (mixed valid/invalid per depth)
-            if k % 5 == 0 && k > 0 {
+            if k.is_multiple_of(5) && k > 0 {
                 // depth 2 is NoData, but depths 0 and 1 are valid
                 pixels[base + 2] = no_data;
             }
@@ -51,7 +52,7 @@ fn round_trip_f32_ndepth3_nodata() {
     };
 
     // Encode with lossy compression
-    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
 
     // Decode
     let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -71,7 +72,7 @@ fn round_trip_f32_ndepth3_nodata() {
                     let k = i * width as usize + j;
                     let base = k * n_depth as usize;
 
-                    if k % 5 == 0 && k > 0 {
+                    if k.is_multiple_of(5) && k > 0 {
                         // This pixel had NoData at depth 2
                         assert_eq!(
                             dec_pixels[base + 2],
@@ -133,7 +134,7 @@ fn round_trip_f32_ndepth3_nodata_lossless() {
     };
 
     // Encode lossless
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.no_data_value, Some(no_data_val));
@@ -197,7 +198,7 @@ fn round_trip_f64_ndepth2_nodata() {
         no_data_value: Some(no_data),
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.no_data_value, Some(no_data));
@@ -251,7 +252,7 @@ fn round_trip_i32_ndepth2_nodata() {
         no_data_value: Some(no_data as f64),
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
@@ -295,7 +296,7 @@ fn decode_info_reports_nodata() {
         no_data_value: Some(no_data_val),
     };
 
-    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
     let info = lerc::decode_info(&encoded).expect("decode_info failed");
 
     assert_eq!(
@@ -322,7 +323,7 @@ fn no_nodata_when_not_set() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let info = lerc::decode_info(&encoded).expect("decode_info failed");
     assert_eq!(
         info.no_data_value, None,
@@ -355,7 +356,7 @@ fn nodata_ndepth1_not_encoded() {
         no_data_value: Some(-9999.0),
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let info = lerc::decode_info(&encoded).expect("decode_info failed");
 
     // For nDepth == 1, noData should NOT be encoded in the blob
@@ -410,7 +411,7 @@ fn round_trip_multiband_nodata() {
         no_data_value: Some(no_data as f64),
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
@@ -464,7 +465,7 @@ fn unsigned_u16_nodata_round_trip() {
         no_data_value: Some(no_data as f64),
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
@@ -512,7 +513,7 @@ fn unsigned_u8_nodata_round_trip() {
         no_data_value: Some(no_data as f64),
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
 }

@@ -7,6 +7,7 @@
 //! - Byte-level header and structural validation of our encoder output
 //! - Deterministic encoding and self-consistency
 
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
@@ -393,7 +394,8 @@ fn california_round_trip_lossy() {
     let mask_orig = image.valid_masks[0].clone();
 
     // Re-encode with the same maxZError
-    let reencoded = lerc::encode(&image, max_z_error).expect("re-encode failed");
+    let reencoded =
+        lerc::encode(&image, Precision::MaxError(max_z_error)).expect("re-encode failed");
 
     // Decode the re-encoded blob
     let image2 = lerc::decode(&reencoded).expect("decode re-encoded failed");
@@ -443,7 +445,7 @@ fn bluemarble_round_trip_lossless() {
 
     // Re-encode lossless (maxZError = 0 for byte data means lossless;
     // for integer types 0.5 is also lossless)
-    let reencoded = lerc::encode(&image, 0.5).expect("re-encode failed");
+    let reencoded = lerc::encode(&image, Precision::Lossless).expect("re-encode failed");
 
     let image2 = lerc::decode(&reencoded).expect("decode re-encoded failed");
 
@@ -528,7 +530,7 @@ fn encoded_single_band_header_validation() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
     validate_header(&encoded, 6, height as i32, width as i32);
 
     let h = parse_header(&encoded);
@@ -565,7 +567,7 @@ fn encoded_multiband_three_concatenated_blobs() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
 
     // Walk through the concatenated blobs
     let mut offset = 0usize;
@@ -641,7 +643,7 @@ fn encoded_blob_size_matches_header() {
             data: LercData::F32(pixels),
             no_data_value: None,
         };
-        let enc = lerc::encode(&img, 0.0).unwrap();
+        let enc = lerc::encode(&img, Precision::Lossless).unwrap();
         let h = parse_header(&enc);
         assert_eq!(h.blob_size as usize, enc.len());
     }
@@ -659,7 +661,7 @@ fn encoded_blob_size_matches_header() {
             data: LercData::U8(pixels),
             no_data_value: None,
         };
-        let enc = lerc::encode(&img, 0.5).unwrap();
+        let enc = lerc::encode(&img, Precision::Lossless).unwrap();
         let h = parse_header(&enc);
         assert_eq!(h.blob_size as usize, enc.len());
     }
@@ -677,7 +679,7 @@ fn encoded_blob_size_matches_header() {
             data: LercData::I32(pixels),
             no_data_value: None,
         };
-        let enc = lerc::encode(&img, 0.5).unwrap();
+        let enc = lerc::encode(&img, Precision::Lossless).unwrap();
         let h = parse_header(&enc);
         assert_eq!(h.blob_size as usize, enc.len());
     }
@@ -695,7 +697,7 @@ fn encoded_blob_size_matches_header() {
             data: LercData::F64(pixels),
             no_data_value: None,
         };
-        let enc = lerc::encode(&img, 0.0).unwrap();
+        let enc = lerc::encode(&img, Precision::Lossless).unwrap();
         let h = parse_header(&enc);
         assert_eq!(h.blob_size as usize, enc.len());
     }
@@ -719,7 +721,7 @@ fn encoded_checksum_verified_manually() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.001).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
     let h = parse_header(&encoded);
 
     // Manually compute checksum over everything after the checksum field (offset 14)
@@ -834,12 +836,7 @@ fn encoded_data_type_codes_correct() {
     ];
 
     for (image, expected_dt) in cases {
-        let mze = if image.data_type.is_integer() {
-            0.5
-        } else {
-            0.0
-        };
-        let encoded = lerc::encode(&image, mze).expect("encode failed");
+        let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
         let h = parse_header(&encoded);
         assert_eq!(
             h.data_type, expected_dt,
@@ -876,8 +873,8 @@ fn deterministic_encoding_f32() {
         no_data_value: None,
     };
 
-    let encoded1 = lerc::encode(&image, 0.01).expect("first encode failed");
-    let encoded2 = lerc::encode(&image, 0.01).expect("second encode failed");
+    let encoded1 = lerc::encode(&image, Precision::MaxError(0.01)).expect("first encode failed");
+    let encoded2 = lerc::encode(&image, Precision::MaxError(0.01)).expect("second encode failed");
 
     assert_eq!(
         encoded1, encoded2,
@@ -905,8 +902,8 @@ fn deterministic_encoding_u8_multiband() {
         no_data_value: None,
     };
 
-    let encoded1 = lerc::encode(&image, 0.5).expect("first encode failed");
-    let encoded2 = lerc::encode(&image, 0.5).expect("second encode failed");
+    let encoded1 = lerc::encode(&image, Precision::Lossless).expect("first encode failed");
+    let encoded2 = lerc::encode(&image, Precision::Lossless).expect("second encode failed");
 
     assert_eq!(
         encoded1, encoded2,
@@ -947,8 +944,8 @@ fn deterministic_encoding_with_mask() {
         no_data_value: None,
     };
 
-    let encoded1 = lerc::encode(&image, 0.001).expect("first encode failed");
-    let encoded2 = lerc::encode(&image, 0.001).expect("second encode failed");
+    let encoded1 = lerc::encode(&image, Precision::MaxError(0.001)).expect("first encode failed");
+    let encoded2 = lerc::encode(&image, Precision::MaxError(0.001)).expect("second encode failed");
 
     assert_eq!(
         encoded1, encoded2,
@@ -976,7 +973,7 @@ fn self_consistency_all_invalid() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.width, width);
@@ -1011,7 +1008,7 @@ fn self_consistency_single_valid_pixel() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     let dec_mask = &decoded.valid_masks[0];
@@ -1054,7 +1051,7 @@ fn self_consistency_constant_image() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -1095,7 +1092,7 @@ fn self_consistency_i16_large_range() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -1132,7 +1129,7 @@ fn self_consistency_u32_sparse_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     let dec_mask = &decoded.valid_masks[0];

@@ -1,3 +1,4 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
@@ -35,7 +36,7 @@ fn round_trip_u16_ndepth3_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -83,7 +84,7 @@ fn round_trip_i32_ndepth3_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -126,7 +127,7 @@ fn round_trip_f32_ndepth3_lossy() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -174,7 +175,8 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         no_data_value: None,
     };
 
-    let encoded_correlated = lerc::encode(&image_correlated, 0.5).expect("encode correlated");
+    let encoded_correlated =
+        lerc::encode(&image_correlated, Precision::Lossless).expect("encode correlated");
 
     // Uncorrelated: each depth is independent random-ish data
     let mut uncorrelated = vec![0u16; num_pixels * n_depth as usize];
@@ -195,7 +197,8 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         no_data_value: None,
     };
 
-    let encoded_uncorrelated = lerc::encode(&image_uncorrelated, 0.5).expect("encode uncorrelated");
+    let encoded_uncorrelated =
+        lerc::encode(&image_uncorrelated, Precision::Lossless).expect("encode uncorrelated");
 
     // The correlated data should be noticeably smaller due to diff encoding
     assert!(
@@ -249,7 +252,7 @@ fn round_trip_u8_ndepth3_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -300,7 +303,7 @@ fn round_trip_ndepth3_with_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -356,7 +359,7 @@ fn round_trip_identical_depths() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -392,7 +395,7 @@ fn round_trip_f64_ndepth2_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -437,7 +440,7 @@ fn round_trip_u32_ndepth4_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -502,7 +505,7 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -549,7 +552,7 @@ fn lossy_multi_depth_f64_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -597,7 +600,7 @@ fn lossy_multi_depth_i32_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -653,7 +656,7 @@ fn lossy_multi_depth_with_mask_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -719,7 +722,7 @@ fn lossy_multi_depth_multiband_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);

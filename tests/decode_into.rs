@@ -1,10 +1,11 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
 /// Helper: encode an image, then decode with both `decode()` and `decode_*_into()`,
 /// and verify the results match.
 macro_rules! test_decode_into_matches {
-    ($name:ident, $dt:expr, $variant:ident, $into_fn:path, $ty:ty, $default:expr, $pixels:expr, $width:expr, $height:expr, $max_z_error:expr) => {
+    ($name:ident, $dt:expr, $variant:ident, $into_fn:path, $ty:ty, $default:expr, $pixels:expr, $width:expr, $height:expr, $precision:expr) => {
         #[test]
         fn $name() {
             let width: u32 = $width;
@@ -22,7 +23,7 @@ macro_rules! test_decode_into_matches {
                 no_data_value: None,
             };
 
-            let encoded = lerc::encode(&image, $max_z_error).expect("encode failed");
+            let encoded = lerc::encode(&image, $precision).expect("encode failed");
 
             // Decode with allocating API
             let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -60,7 +61,7 @@ test_decode_into_matches!(
     (0..64 * 64).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
     64,
     64,
-    0.5
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -75,7 +76,7 @@ test_decode_into_matches!(
         .collect::<Vec<i8>>(),
     64,
     64,
-    0.5
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -88,7 +89,7 @@ test_decode_into_matches!(
     (0..64 * 64).map(|i| i as i16 - 2000).collect::<Vec<i16>>(),
     64,
     64,
-    0.0
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -103,7 +104,7 @@ test_decode_into_matches!(
         .collect::<Vec<u16>>(),
     64,
     64,
-    0.0
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -116,7 +117,7 @@ test_decode_into_matches!(
     (0..32 * 32).map(|i| i * 100 - 50000).collect::<Vec<i32>>(),
     32,
     32,
-    0.0
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -129,7 +130,7 @@ test_decode_into_matches!(
     (0..32 * 32).map(|i| i as u32 * 7).collect::<Vec<u32>>(),
     32,
     32,
-    0.0
+    Precision::Lossless
 );
 
 test_decode_into_matches!(
@@ -142,7 +143,7 @@ test_decode_into_matches!(
     (0..64 * 64).map(|i| i as f32 * 0.1).collect::<Vec<f32>>(),
     64,
     64,
-    0.001
+    Precision::MaxError(0.001)
 );
 
 test_decode_into_matches!(
@@ -155,7 +156,7 @@ test_decode_into_matches!(
     (0..32 * 32).map(|i| i as f64 * 0.01).collect::<Vec<f64>>(),
     32,
     32,
-    0.0001
+    Precision::MaxError(0.0001)
 );
 
 #[test]
@@ -175,7 +176,7 @@ fn decode_into_buffer_too_small() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.001).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
 
     // Buffer is too small
     let mut output = vec![0.0f32; 10];
@@ -206,7 +207,7 @@ fn decode_into_type_mismatch() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.001).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
 
     // Try to decode f32 data into a u8 buffer
     let mut output = vec![0u8; (width * height) as usize];
@@ -237,7 +238,7 @@ fn decode_into_oversized_buffer_ok() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
 
     // Buffer is larger than needed -- should succeed
     let mut output = vec![0xFFu8; (width * height * 2) as usize];
@@ -281,7 +282,7 @@ fn decode_into_multiband() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
 
     // Decode with allocating API
     let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -333,7 +334,7 @@ fn decode_into_with_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.001).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {
@@ -375,7 +376,7 @@ fn decode_into_generic_api() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
 
     let mut output = vec![0u32; (width * height) as usize];
     let result = lerc::decode_into::<u32>(&encoded, &mut output).expect("decode_into failed");

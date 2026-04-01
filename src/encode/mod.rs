@@ -377,21 +377,19 @@ fn write_blob_payload<T: LercDataType>(
 
     if try_huffman_int {
         let skip_huffman = is_high_entropy_u8(encode_data, mask, hd);
-        if !skip_huffman {
-            if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd) {
-                let mut tiling_blob = Vec::new();
-                encode_tiles(
-                    &mut tiling_blob,
-                    encode_data,
-                    mask,
-                    hd,
-                    &stats.z_min_vec,
-                    &stats.z_max_vec,
-                )?;
-                if huffman_blob.len() < tiling_blob.len() {
-                    blob.extend_from_slice(&huffman_blob);
-                    return Ok(());
-                }
+        if !skip_huffman && let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd) {
+            let mut tiling_blob = Vec::new();
+            encode_tiles(
+                &mut tiling_blob,
+                encode_data,
+                mask,
+                hd,
+                &stats.z_min_vec,
+                &stats.z_max_vec,
+            )?;
+            if huffman_blob.len() < tiling_blob.len() {
+                blob.extend_from_slice(&huffman_blob);
+                return Ok(());
             }
         }
         blob.push(ImageEncodeMode::Tiling as u8);

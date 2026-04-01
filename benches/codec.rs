@@ -1,4 +1,5 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 use lerc_cpp_ref as cpp;
@@ -120,7 +121,7 @@ fn bench_encode_f32(c: &mut Criterion) {
             BenchmarkId::new("lossy_0.01/rust", size),
             &image,
             |b, img| {
-                b.iter(|| lerc::encode(img, 0.01).unwrap());
+                b.iter(|| lerc::encode(img, Precision::MaxError(0.01)).unwrap());
             },
         );
 
@@ -145,7 +146,7 @@ fn bench_encode_f32(c: &mut Criterion) {
 
         // Lossless (FPL)
         group.bench_with_input(BenchmarkId::new("lossless/rust", size), &image, |b, img| {
-            b.iter(|| lerc::encode(img, 0.0).unwrap());
+            b.iter(|| lerc::encode(img, Precision::Lossless).unwrap());
         });
 
         group.bench_with_input(BenchmarkId::new("lossless/cpp", size), &pixels, |b, px| {
@@ -188,7 +189,7 @@ fn bench_encode_u8(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(pixel_bytes));
         group.bench_with_input(BenchmarkId::new("lossless/rust", size), &image, |b, img| {
-            b.iter(|| lerc::encode(img, 0.5).unwrap());
+            b.iter(|| lerc::encode(img, Precision::Lossless).unwrap());
         });
 
         group.bench_with_input(BenchmarkId::new("lossless/cpp", size), &pixels, |b, px| {
@@ -229,7 +230,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
             data: LercData::F32(pixels.clone()),
             ..Default::default()
         };
-        let rust_blob = lerc::encode(&image, 0.01).unwrap();
+        let rust_blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
 
         // Encode with C++, then benchmark decode
         let cpp_blob = cpp::encode(
@@ -303,7 +304,7 @@ fn bench_decode_f64_lossless(c: &mut Criterion) {
             data: LercData::F64(pixels.clone()),
             ..Default::default()
         };
-        let rust_blob = lerc::encode(&image, 0.0).unwrap();
+        let rust_blob = lerc::encode(&image, Precision::Lossless).unwrap();
         let cpp_blob = cpp::encode(
             &pixels,
             cpp::DT_DOUBLE,

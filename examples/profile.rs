@@ -1,3 +1,4 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 use std::hint::black_box;
@@ -47,7 +48,7 @@ fn main() {
     if mode == "all" || mode == "encode-lossy" {
         let start = Instant::now();
         for _ in 0..iters {
-            black_box(lerc::encode(black_box(&image), 0.01).unwrap());
+            black_box(lerc::encode(black_box(&image), Precision::MaxError(0.01)).unwrap());
         }
         let elapsed = start.elapsed();
         eprintln!(
@@ -59,7 +60,7 @@ fn main() {
     if mode == "all" || mode == "encode-lossless" {
         let start = Instant::now();
         for _ in 0..iters {
-            black_box(lerc::encode(black_box(&image), 0.0).unwrap());
+            black_box(lerc::encode(black_box(&image), Precision::Lossless).unwrap());
         }
         let elapsed = start.elapsed();
         eprintln!(
@@ -71,7 +72,7 @@ fn main() {
     if mode == "all" || mode == "encode-u8" {
         let start = Instant::now();
         for _ in 0..iters {
-            black_box(lerc::encode(black_box(&u8_image), 0.5).unwrap());
+            black_box(lerc::encode(black_box(&u8_image), Precision::Lossless).unwrap());
         }
         let elapsed = start.elapsed();
         eprintln!(
@@ -81,7 +82,7 @@ fn main() {
     }
 
     if mode == "all" || mode == "decode" {
-        let blob = lerc::encode(&image, 0.01).unwrap();
+        let blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
         let start = Instant::now();
         for _ in 0..iters {
             black_box(lerc::decode(black_box(&blob)).unwrap());

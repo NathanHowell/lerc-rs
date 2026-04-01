@@ -1,4 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
@@ -27,7 +28,7 @@ fn bench_encode_512_lossy(c: &mut Criterion) {
     };
 
     c.bench_function("encode_f32_512_lossy", |b| {
-        b.iter(|| lerc::encode(&image, 0.01).unwrap());
+        b.iter(|| lerc::encode(&image, Precision::MaxError(0.01)).unwrap());
     });
 }
 
@@ -46,7 +47,7 @@ fn bench_encode_512_lossless(c: &mut Criterion) {
     };
 
     c.bench_function("encode_f32_512_lossless", |b| {
-        b.iter(|| lerc::encode(&image, 0.0).unwrap());
+        b.iter(|| lerc::encode(&image, Precision::Lossless).unwrap());
     });
 }
 
@@ -67,7 +68,7 @@ fn bench_encode_u8_512(c: &mut Criterion) {
     };
 
     c.bench_function("encode_u8_512_lossless", |b| {
-        b.iter(|| lerc::encode(&image, 0.5).unwrap());
+        b.iter(|| lerc::encode(&image, Precision::Lossless).unwrap());
     });
 }
 
@@ -84,7 +85,7 @@ fn bench_decode_512_lossy(c: &mut Criterion) {
         data: LercData::F32(pixels),
         ..Default::default()
     };
-    let blob = lerc::encode(&image, 0.01).unwrap();
+    let blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
 
     c.bench_function("decode_f32_512_lossy", |b| {
         b.iter(|| lerc::decode(&blob).unwrap());

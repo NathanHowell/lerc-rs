@@ -1,3 +1,4 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
 
@@ -94,7 +95,8 @@ fn bit_plane_compression_u16_noisy_low_bits() {
     };
 
     // Negative max_z_error triggers bit-plane compression
-    let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane failed");
+    let encoded =
+        lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with bit-plane failed");
 
     // The maxZError in the header should be > 0.5 (some bit planes were dropped)
     let header_mze = read_max_z_error(&encoded);
@@ -104,7 +106,8 @@ fn bit_plane_compression_u16_noisy_low_bits() {
     );
 
     // Compare with lossless encoding
-    let lossless_encoded = lerc::encode(&image, 0.5).expect("lossless encode failed");
+    let lossless_encoded =
+        lerc::encode(&image, Precision::Lossless).expect("lossless encode failed");
 
     // Bit-plane compressed should be smaller
     assert!(
@@ -149,7 +152,8 @@ fn bit_plane_compression_u32_noisy_low_bits() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane failed");
+    let encoded =
+        lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with bit-plane failed");
     let header_mze = read_max_z_error(&encoded);
     assert!(
         header_mze > 0.5,
@@ -191,7 +195,8 @@ fn bit_plane_compression_i16_noisy_low_bits() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane failed");
+    let encoded =
+        lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with bit-plane failed");
     let header_mze = read_max_z_error(&encoded);
     assert!(
         header_mze > 0.5,
@@ -233,7 +238,7 @@ fn positive_max_z_error_does_not_trigger_bit_plane() {
     };
 
     // With positive maxZError = 0.5 (lossless for integers), bit-plane should not activate
-    let encoded = lerc::encode(&image, 0.5).expect("encode lossless");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode lossless");
     let header_mze = read_max_z_error(&encoded);
     assert!(
         (header_mze - 0.5).abs() < 1e-10,
@@ -268,8 +273,9 @@ fn magic_value_777_triggers_bit_plane() {
         no_data_value: None,
     };
 
-    let encoded_777 = lerc::encode(&image, 777.0).expect("encode with magic 777");
-    let encoded_neg = lerc::encode(&image, -0.01).expect("encode with -0.01");
+    let encoded_777 =
+        lerc::encode(&image, Precision::MaxError(777.0)).expect("encode with magic 777");
+    let encoded_neg = lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with -0.01");
 
     // Both should produce the same maxZError in the header
     let mze_777 = read_max_z_error(&encoded_777);
@@ -301,7 +307,8 @@ fn bit_plane_fallback_to_lossless_for_clean_data() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, -0.01).expect("encode with negative mze");
+    let encoded =
+        lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with negative mze");
     let header_mze = read_max_z_error(&encoded);
 
     // Clean data should result in lossless (0.5 for integers)
@@ -338,8 +345,8 @@ fn bit_plane_compression_smaller_than_lossless() {
         no_data_value: None,
     };
 
-    let lossy = lerc::encode(&image, -0.01).expect("lossy encode");
-    let lossless = lerc::encode(&image, 0.5).expect("lossless encode");
+    let lossy = lerc::encode(&image, Precision::MaxError(-0.01)).expect("lossy encode");
+    let lossless = lerc::encode(&image, Precision::Lossless).expect("lossless encode");
 
     let lossy_mze = read_max_z_error(&lossy);
     if lossy_mze > 0.5 {
@@ -371,7 +378,7 @@ fn bit_plane_too_few_pixels_falls_back() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, -0.01).expect("encode with bit-plane");
+    let encoded = lerc::encode(&image, Precision::MaxError(-0.01)).expect("encode with bit-plane");
     let header_mze = read_max_z_error(&encoded);
 
     // With only 256 pixels, should fall back to lossless

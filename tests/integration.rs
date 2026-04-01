@@ -1,3 +1,4 @@
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage, LercInfo};
 
@@ -22,7 +23,7 @@ fn huffman_u8_compression_ratio() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let raw_size = (width * height) as usize;
 
     // Huffman-encoded output should be much smaller than raw pixel data
@@ -62,7 +63,7 @@ fn round_trip_i8_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -108,7 +109,7 @@ fn round_trip_u8_with_mask_huffman() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     let dec_mask = &decoded.valid_masks[0];
@@ -155,7 +156,7 @@ fn round_trip_u8_multiband_huffman() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -289,7 +290,7 @@ fn round_trip_u8_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.width, width);
@@ -322,7 +323,7 @@ fn round_trip_f32_lossy() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -360,7 +361,7 @@ fn round_trip_i32_lossless() {
     };
 
     // maxZError = 0.5 is lossless for integers
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -407,7 +408,7 @@ fn round_trip_with_partial_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     // Check mask is preserved
@@ -452,7 +453,7 @@ fn round_trip_f32_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.width, width);
@@ -499,7 +500,7 @@ fn round_trip_f32_lossless_varied_data() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -536,7 +537,7 @@ fn round_trip_f64_lossless() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.width, width);
@@ -583,7 +584,7 @@ fn round_trip_f64_lossless_varied() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -619,7 +620,7 @@ fn round_trip_f32_lossless_constant() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
@@ -650,7 +651,7 @@ fn round_trip_f32_lossless_multi_depth() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -709,7 +710,7 @@ fn block_size_selection_smooth_gradient_prefers_16() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.01).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
     let mbs = read_micro_block_size(&encoded);
     assert!(
         mbs == 8 || mbs == 16,
@@ -768,7 +769,7 @@ fn block_size_selection_noisy_data_prefers_8() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let mbs = read_micro_block_size(&encoded);
     assert_eq!(
         mbs, 8,
@@ -819,7 +820,7 @@ fn block_size_16_round_trip_f32_lossy() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
 
     // Regardless of which block size was chosen, verify round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -856,7 +857,7 @@ fn block_size_header_field_is_valid() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let mbs = read_micro_block_size(&encoded);
     assert!(
         mbs == 8 || mbs == 16,
@@ -911,7 +912,7 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     // The raised maxZError should be strictly greater than the original
@@ -969,11 +970,13 @@ fn try_raise_max_z_error_improves_compression() {
     };
 
     // Encode with TryRaiseMaxZError active (the default path)
-    let encoded_raised = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded_raised =
+        lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
 
     // To compare, encode with a maxZError that wouldn't benefit from raising.
     // Use exactly max_z_error = 0.05 which is already at the 0.1 data precision level.
-    let encoded_already_optimal = lerc::encode(&image, 0.05).expect("encode failed");
+    let encoded_already_optimal =
+        lerc::encode(&image, Precision::MaxError(0.05)).expect("encode failed");
 
     // The raised encoding should be smaller than the original maxZError encoding.
     // We verify this by also encoding at exact 0.001 with no raise (check header).
@@ -1035,7 +1038,7 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, 0.0).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     assert_eq!(
@@ -1086,7 +1089,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     // Full-precision f64 data should not have maxZError raised
@@ -1130,7 +1133,7 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
     };
 
     // For integers, maxZError=0.5 is lossless; the encoder clamps it.
-    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     assert_eq!(
@@ -1173,7 +1176,7 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     assert!(
@@ -1229,7 +1232,7 @@ fn try_raise_max_z_error_already_optimal() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     // The only candidates strictly coarser than 0.005 are 0.01, 0.025, 0.05, 0.25, 0.5.
@@ -1304,7 +1307,7 @@ fn try_raise_max_z_error_with_partial_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
     let header_mze = read_max_z_error(&encoded);
 
     // Should still raise for 2-decimal data

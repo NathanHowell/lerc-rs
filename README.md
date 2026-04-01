@@ -9,7 +9,7 @@ Supports encoding and decoding of LERC2 (v2–v6) and decoding of legacy LERC1, 
 - **Pure Rust** — no C/C++ dependencies, no unsafe code
 - **`no_std` + `alloc` compatible** — works on native and `wasm32-unknown-unknown`
 - **All data types** — `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `f32`, `f64`
-- **Lossless and lossy** — configurable `max_z_error` per encode
+- **Lossless and lossy** — configurable `Precision` per encode
 - **Complete codec** — Huffman coding, float-point lossless (FPL) with byte-plane predictors, tiled micro-block encoding, bit-plane compression, diff encoding for multi-depth, validity masks, NoData
 - **Byte-for-byte identical** output to the C++ reference at the same settings
 - **Competitive with C++** reference implementation on encode and decode
@@ -37,16 +37,16 @@ lerc-rs = "0.1"
 ### Encode
 
 ```rust
-use lerc::{encode_typed, decode_typed, LercDataType};
+use lerc::{encode_typed, decode_typed, Precision};
 use lerc::bitmask::BitMask;
 
 // Encode a 256×256 f32 raster with 0.01 precision
 let pixels: Vec<f32> = vec![0.0; 256 * 256]; // your data here
-let blob = lerc::encode_typed::<f32>(256, 256, &pixels, 0.01).unwrap();
+let blob = lerc::encode_typed(256, 256, &pixels, Precision::MaxError(0.01f32)).unwrap();
 
-// Lossless integer encoding (max_z_error = 0.5 for integers)
+// Lossless encoding (works for any type)
 let bytes: Vec<u8> = vec![0; 128 * 128];
-let blob = lerc::encode_typed::<u8>(128, 128, &bytes, 0.5).unwrap();
+let blob = lerc::encode_typed(128, 128, &bytes, Precision::Lossless).unwrap();
 ```
 
 ### Decode
@@ -72,13 +72,14 @@ let result = lerc::decode_f32_into(&blob, &mut output).unwrap();
 ### With validity mask
 
 ```rust
+use lerc::Precision;
 use lerc::bitmask::BitMask;
 
 let mut mask = BitMask::new(256 * 256);
 mask.set_valid(0); // mark specific pixels as valid
 // ... set more pixels valid ...
 
-let blob = lerc::encode_typed_masked::<f32>(256, 256, &pixels, &mask, 0.01).unwrap();
+let blob = lerc::encode_typed_masked(256, 256, &pixels, &mask, Precision::MaxError(0.01f32)).unwrap();
 ```
 
 ## Supported formats

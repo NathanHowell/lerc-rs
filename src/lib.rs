@@ -38,6 +38,15 @@ use alloc::vec::Vec;
 
 use bitmask::BitMask;
 
+/// Controls the precision/error tolerance for LERC encoding.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Precision<T> {
+    /// Lossless compression -- exact round-trip for all pixel values.
+    Lossless,
+    /// Lossy compression -- decoded values are within the given error of originals.
+    MaxError(T),
+}
+
 /// Metadata returned from a decode-into operation (no owned pixel data).
 #[derive(Debug, Clone)]
 pub struct DecodeResult {
@@ -117,7 +126,17 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
     decode::decode(data)
 }
 
-pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
+pub fn encode(image: &LercImage, precision: Precision<f64>) -> Result<Vec<u8>> {
+    let max_z_error = match precision {
+        Precision::Lossless => {
+            if image.data_type.is_integer() {
+                0.5
+            } else {
+                0.0
+            }
+        }
+        Precision::MaxError(val) => val,
+    };
     encode::encode(image, max_z_error)
 }
 
@@ -133,7 +152,7 @@ pub fn encode_typed<T: LercDataType>(
     width: u32,
     height: u32,
     data: &[T],
-    max_z_error: f64,
+    precision: Precision<T>,
 ) -> Result<Vec<u8>> {
     let expected = (width as usize) * (height as usize);
     if data.len() != expected {
@@ -142,6 +161,16 @@ pub fn encode_typed<T: LercDataType>(
             data.len()
         )));
     }
+    let max_z_error: f64 = match precision {
+        Precision::Lossless => {
+            if T::is_integer() {
+                0.5
+            } else {
+                0.0
+            }
+        }
+        Precision::MaxError(val) => val.to_f64(),
+    };
     let image = LercImage {
         width,
         height,
@@ -164,7 +193,7 @@ pub fn encode_typed_masked<T: LercDataType>(
     height: u32,
     data: &[T],
     mask: &BitMask,
-    max_z_error: f64,
+    precision: Precision<T>,
 ) -> Result<Vec<u8>> {
     let expected = (width as usize) * (height as usize);
     if data.len() != expected {
@@ -179,6 +208,16 @@ pub fn encode_typed_masked<T: LercDataType>(
             mask.num_pixels()
         )));
     }
+    let max_z_error: f64 = match precision {
+        Precision::Lossless => {
+            if T::is_integer() {
+                0.5
+            } else {
+                0.0
+            }
+        }
+        Precision::MaxError(val) => val.to_f64(),
+    };
     let image = LercImage {
         width,
         height,

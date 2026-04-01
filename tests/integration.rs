@@ -88,7 +88,13 @@ fn round_trip_u8_with_mask_huffman() {
 
     // Use repetitive data that benefits from Huffman
     let pixels: Vec<u8> = (0..width * height)
-        .map(|i| if mask.is_valid(i as usize) { (i % 4) as u8 } else { 0 })
+        .map(|i| {
+            if mask.is_valid(i as usize) {
+                (i % 4) as u8
+            } else {
+                0
+            }
+        })
         .collect();
 
     let image = LercImage {
@@ -109,7 +115,11 @@ fn round_trip_u8_with_mask_huffman() {
     match &decoded.data {
         LercData::U8(dec_pixels) => {
             for k in 0..(width * height) as usize {
-                assert_eq!(mask.is_valid(k), dec_mask.is_valid(k), "mask mismatch at {k}");
+                assert_eq!(
+                    mask.is_valid(k),
+                    dec_mask.is_valid(k),
+                    "mask mismatch at {k}"
+                );
                 if mask.is_valid(k) {
                     assert_eq!(
                         pixels[k], dec_pixels[k],
@@ -239,8 +249,7 @@ fn decode_bluemarble_byte() {
 
     match &image.data {
         LercData::U8(pixels) => {
-            let expected_len =
-                256 * 256 * image.n_depth as usize * image.n_bands as usize;
+            let expected_len = 256 * 256 * image.n_depth as usize * image.n_bands as usize;
             assert_eq!(pixels.len(), expected_len);
 
             // Byte values should be in [0, 255] (trivially true for u8)
@@ -336,7 +345,9 @@ fn round_trip_f32_lossy() {
 fn round_trip_i32_lossless() {
     let width = 16u32;
     let height = 16u32;
-    let pixels: Vec<i32> = (0..width * height).map(|i| i as i32 * 1000 - 100000).collect();
+    let pixels: Vec<i32> = (0..width * height)
+        .map(|i| i as i32 * 1000 - 100000)
+        .collect();
 
     let image = LercImage {
         width,
@@ -377,7 +388,13 @@ fn round_trip_with_partial_mask() {
     }
 
     let pixels: Vec<f32> = (0..width * height)
-        .map(|i| if mask.is_valid(i as usize) { i as f32 * 0.5 } else { 0.0 })
+        .map(|i| {
+            if mask.is_valid(i as usize) {
+                i as f32 * 0.5
+            } else {
+                0.0
+            }
+        })
         .collect();
 
     let image = LercImage {
@@ -754,7 +771,10 @@ fn block_size_selection_noisy_data_prefers_8() {
 
     let encoded = lerc::encode(&image, max_z_error).expect("encode failed");
     let mbs = read_micro_block_size(&encoded);
-    assert_eq!(mbs, 8, "block-structured noisy data should select block size 8, got {mbs}");
+    assert_eq!(
+        mbs, 8,
+        "block-structured noisy data should select block size 8, got {mbs}"
+    );
 
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -1050,7 +1070,8 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
     let pixels: Vec<f64> = (0..width * height)
         .map(|i| {
             // Use irrational-like fractions that won't land on any decimal grid.
-            let x = (i as f64 + 1.0) / 3.0 + (i as f64 + 0.5).sqrt() * std::f64::consts::FRAC_1_SQRT_2;
+            let x =
+                (i as f64 + 1.0) / 3.0 + (i as f64 + 0.5).sqrt() * std::f64::consts::FRAC_1_SQRT_2;
             x
         })
         .collect();

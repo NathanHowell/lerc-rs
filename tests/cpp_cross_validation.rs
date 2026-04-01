@@ -3,8 +3,10 @@
 
 use lerc::bitmask::BitMask;
 use lerc::{DataType, LercData, LercImage};
-use lerc_cpp_ref::{self as cpp, DT_CHAR, DT_DOUBLE, DT_FLOAT, DT_INT, DT_SHORT, DT_UCHAR, DT_UINT, DT_USHORT, INFO_DATA_TYPE, INFO_N_BANDS, INFO_N_COLS, INFO_N_ROWS, RANGE_MAX_Z_ERR_USED};
-
+use lerc_cpp_ref::{
+    self as cpp, DT_CHAR, DT_DOUBLE, DT_FLOAT, DT_INT, DT_SHORT, DT_UCHAR, DT_UINT, DT_USHORT,
+    INFO_DATA_TYPE, INFO_N_BANDS, INFO_N_COLS, INFO_N_ROWS, RANGE_MAX_Z_ERR_USED,
+};
 
 // ---------------------------------------------------------------------------
 // Assertion helpers
@@ -141,7 +143,12 @@ fn rust_encode_cpp_decode_f32_lossy() {
             cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
         for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
-            assert_f32_close(o, d, max_z_err, format_args!("maxZErr={max_z_err} pixel {i}"));
+            assert_f32_close(
+                o,
+                d,
+                max_z_err,
+                format_args!("maxZErr={max_z_err} pixel {i}"),
+            );
         }
     }
 }
@@ -206,8 +213,7 @@ fn rust_encode_cpp_decode_i8() {
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_CHAR);
 
-    let (decoded, _): (Vec<i8>, _) =
-        cpp::decode(&blob, DT_CHAR, width as i32, height as i32, 1, 1);
+    let (decoded, _): (Vec<i8>, _) = cpp::decode(&blob, DT_CHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -262,8 +268,7 @@ fn rust_encode_cpp_decode_i32() {
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_INT);
 
-    let (decoded, _): (Vec<i32>, _) =
-        cpp::decode(&blob, DT_INT, width as i32, height as i32, 1, 1);
+    let (decoded, _): (Vec<i32>, _) = cpp::decode(&blob, DT_INT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
 }
 
@@ -286,7 +291,12 @@ fn rust_encode_cpp_decode_with_mask() {
     for i in 0..n {
         assert_eq!(valid_bytes[i], dec_valid[i], "mask mismatch at pixel {i}");
         if valid_bytes[i] != 0 {
-            assert_f32_close(data[i], decoded[i], max_z_err, format_args!("valid pixel {i}"));
+            assert_f32_close(
+                data[i],
+                decoded[i],
+                max_z_err,
+                format_args!("valid pixel {i}"),
+            );
         }
     }
 }
@@ -301,8 +311,17 @@ fn cpp_encode_rust_decode_f32_lossless() {
     let (width, height) = (64, 48);
     let data = make_gradient_f32(width, height);
 
-    let blob =
-        cpp::encode_for_version(&data, 5, DT_FLOAT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode_for_version(
+        &data,
+        5,
+        DT_FLOAT,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.width, width);
@@ -336,7 +355,12 @@ fn cpp_encode_rust_decode_f32_lossy() {
         let decoded = image.as_typed::<f32>().unwrap();
 
         for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
-            assert_f32_close(o, d, max_z_err, format_args!("maxZErr={max_z_err} pixel {i}"));
+            assert_f32_close(
+                o,
+                d,
+                max_z_err,
+                format_args!("maxZErr={max_z_err} pixel {i}"),
+            );
         }
     }
 }
@@ -347,7 +371,15 @@ fn cpp_encode_rust_decode_f64_lossless() {
     let data = make_gradient_f64(width, height);
 
     let blob = cpp::encode_for_version(
-        &data, 5, DT_DOUBLE, width as i32, height as i32, 1, 1, None, 0.0,
+        &data,
+        5,
+        DT_DOUBLE,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
     );
 
     let image = lerc::decode(&blob).unwrap();
@@ -363,7 +395,16 @@ fn cpp_encode_rust_decode_u8() {
     let (width, height) = (64, 64);
     let data = make_ramp_u8(width, height);
 
-    let blob = cpp::encode(&data, DT_UCHAR, width as i32, height as i32, 1, 1, None, 0.5);
+    let blob = cpp::encode(
+        &data,
+        DT_UCHAR,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.5,
+    );
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Byte);
@@ -389,7 +430,16 @@ fn cpp_encode_rust_decode_i16() {
     let (width, height) = (64, 64);
     let data = make_ramp_i16(width, height);
 
-    let blob = cpp::encode(&data, DT_SHORT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(
+        &data,
+        DT_SHORT,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Short);
@@ -401,7 +451,16 @@ fn cpp_encode_rust_decode_u16() {
     let (width, height) = (64, 64);
     let data = make_ramp_u16(width, height);
 
-    let blob = cpp::encode(&data, DT_USHORT, width as i32, height as i32, 1, 1, None, 0.0);
+    let blob = cpp::encode(
+        &data,
+        DT_USHORT,
+        width as i32,
+        height as i32,
+        1,
+        1,
+        None,
+        0.0,
+    );
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::UShort);
@@ -460,7 +519,12 @@ fn cpp_encode_rust_decode_with_mask() {
         let rust_valid = rust_mask.is_valid(i);
         assert_eq!(cpp_valid, rust_valid, "mask mismatch at pixel {i}");
         if cpp_valid {
-            assert_f32_close(data[i], decoded[i], max_z_err, format_args!("valid pixel {i}"));
+            assert_f32_close(
+                data[i],
+                decoded[i],
+                max_z_err,
+                format_args!("valid pixel {i}"),
+            );
         }
     }
 }
@@ -482,9 +546,7 @@ fn rust_encode_cpp_decode_multiband_f32() {
     data.extend_from_slice(&band1);
     data.extend_from_slice(&band2);
 
-    let masks: Vec<_> = (0..n_bands)
-        .map(|_| BitMask::all_valid(ppb))
-        .collect();
+    let masks: Vec<_> = (0..n_bands).map(|_| BitMask::all_valid(ppb)).collect();
 
     let max_z_err = 0.01;
     let image = LercImage {
@@ -655,8 +717,7 @@ fn roundtrip_with_mask_f32() {
     let (mask, valid_bytes) = make_validity_mask(width, height);
     let max_z_err = 0.01;
 
-    let rust_blob =
-        lerc::encode_typed_masked(width, height, &original, &mask, max_z_err).unwrap();
+    let rust_blob = lerc::encode_typed_masked(width, height, &original, &mask, max_z_err).unwrap();
     let (cpp_decoded, cpp_valid): (Vec<f32>, _) =
         cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
@@ -859,7 +920,12 @@ fn cpp_encode_rust_decode_multi_depth_f32_lossy() {
     let decoded = image.as_typed::<f32>().unwrap();
 
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
-        assert_f32_close(o, d, max_z_err, format_args!("cpp multi-depth lossy pixel {i}"));
+        assert_f32_close(
+            o,
+            d,
+            max_z_err,
+            format_args!("cpp multi-depth lossy pixel {i}"),
+        );
     }
 }
 

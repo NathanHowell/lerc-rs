@@ -63,9 +63,7 @@ fn make_sin_f32(width: u32, height: u32) -> Vec<f32> {
 
 fn check_ratio(label: &str, rust_size: usize, cpp_size: usize, max_ratio: f64) {
     let ratio = rust_size as f64 / cpp_size as f64;
-    eprintln!(
-        "{label}: rust={rust_size} cpp={cpp_size} ratio={ratio:.4}",
-    );
+    eprintln!("{label}: rust={rust_size} cpp={cpp_size} ratio={ratio:.4}",);
     assert!(
         ratio <= max_ratio,
         "{label}: ratio {ratio:.4} exceeds maximum {max_ratio:.2} \
@@ -137,7 +135,12 @@ fn ratio_f32_lossless() {
         0.0,
     );
 
-    check_ratio("f32_lossless_gradient", rust_blob.len(), cpp_blob.len(), MAX_RATIO_FPL);
+    check_ratio(
+        "f32_lossless_gradient",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO_FPL,
+    );
 }
 
 #[test]
@@ -157,7 +160,12 @@ fn ratio_f32_lossless_sin() {
         0.0,
     );
 
-    check_ratio("f32_lossless_sin", rust_blob.len(), cpp_blob.len(), MAX_RATIO_FPL);
+    check_ratio(
+        "f32_lossless_sin",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO_FPL,
+    );
 }
 
 #[test]
@@ -177,7 +185,12 @@ fn ratio_f64_lossless() {
         0.0,
     );
 
-    check_ratio("f64_lossless_gradient", rust_blob.len(), cpp_blob.len(), MAX_RATIO_FPL);
+    check_ratio(
+        "f64_lossless_gradient",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO_FPL,
+    );
 }
 
 #[test]
@@ -207,18 +220,14 @@ fn ratio_reference_california() {
 
     // Also check lossless
     let rust_blob_ll = lerc::encode_typed(width, height, data, 0.0).unwrap();
-    let cpp_blob_ll = cpp::encode(
-        data,
-        DT_FLOAT,
-        width as i32,
-        height as i32,
-        1,
-        1,
-        None,
-        0.0,
-    );
+    let cpp_blob_ll = cpp::encode(data, DT_FLOAT, width as i32, height as i32, 1, 1, None, 0.0);
 
-    check_ratio("california_lossless", rust_blob_ll.len(), cpp_blob_ll.len(), MAX_RATIO_FPL);
+    check_ratio(
+        "california_lossless",
+        rust_blob_ll.len(),
+        cpp_blob_ll.len(),
+        MAX_RATIO_FPL,
+    );
 }
 
 #[test]
@@ -235,9 +244,7 @@ fn ratio_reference_bluemarble() {
     let ppb = (width * height) as usize;
 
     // Encode all bands with Rust
-    let masks: Vec<_> = (0..n_bands)
-        .map(|_| BitMask::all_valid(ppb))
-        .collect();
+    let masks: Vec<_> = (0..n_bands).map(|_| BitMask::all_valid(ppb)).collect();
     let img = LercImage {
         width,
         height,
@@ -262,5 +269,10 @@ fn ratio_reference_bluemarble() {
         0.5,
     );
 
-    check_ratio("bluemarble_u8_lossless", rust_blob.len(), cpp_blob.len(), 1.02);
+    check_ratio(
+        "bluemarble_u8_lossless",
+        rust_blob.len(),
+        cpp_blob.len(),
+        1.02,
+    );
 }

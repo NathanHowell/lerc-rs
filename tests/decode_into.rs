@@ -42,7 +42,10 @@ macro_rules! test_decode_into_matches {
             assert_eq!(result.n_bands, 1);
             assert_eq!(result.data_type, $dt);
             assert_eq!(result.valid_masks.len(), decoded.valid_masks.len());
-            assert_eq!(output, expected_pixels, "decode_into output differs from decode()");
+            assert_eq!(
+                output, expected_pixels,
+                "decode_into output differs from decode()"
+            );
         }
     };
 }
@@ -95,7 +98,9 @@ test_decode_into_matches!(
     lerc::decode_u16_into,
     u16,
     0u16,
-    (0..64 * 64).map(|i| (i % 65536) as u16).collect::<Vec<u16>>(),
+    (0..64 * 64)
+        .map(|i| (i % 65536) as u16)
+        .collect::<Vec<u16>>(),
     64,
     64,
     0.0
@@ -108,7 +113,9 @@ test_decode_into_matches!(
     lerc::decode_i32_into,
     i32,
     0i32,
-    (0..32 * 32).map(|i| i as i32 * 100 - 50000).collect::<Vec<i32>>(),
+    (0..32 * 32)
+        .map(|i| i as i32 * 100 - 50000)
+        .collect::<Vec<i32>>(),
     32,
     32,
     0.0
@@ -308,7 +315,13 @@ fn decode_into_with_mask() {
     }
 
     let pixels: Vec<f32> = (0..total)
-        .map(|i| if mask.is_valid(i) { i as f32 * 0.5 } else { 0.0 })
+        .map(|i| {
+            if mask.is_valid(i) {
+                i as f32 * 0.5
+            } else {
+                0.0
+            }
+        })
         .collect();
 
     let image = LercImage {

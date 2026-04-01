@@ -34,7 +34,11 @@ pub(super) fn encode_tile_inner<T: LercDataType>(
         src_data_type,
         b_diff_enc,
     } = *p;
-    let diff_flag: u8 = if b_diff_enc { tile_flags::DIFF_ENCODING } else { 0 };
+    let diff_flag: u8 = if b_diff_enc {
+        tile_flags::DIFF_ENCODING
+    } else {
+        0
+    };
 
     if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
         buf.push(TileCompressionMode::ConstZero as u8 | diff_flag | integrity);
@@ -217,7 +221,10 @@ mod tests {
         };
         encode_tile_inner::<u8>(&mut buf, &[], &mut quant_scratch, &p);
         assert_eq!(buf.len(), 1);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstZero as u8
+        );
     }
 
     #[test]
@@ -225,7 +232,10 @@ mod tests {
         let values = vec![0.0, 0.0, 0.0, 0.0];
         let (buf, _) = encode_tile_inner_u8(&values, 0.0, 0.0, false);
         assert_eq!(buf.len(), 1);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstZero as u8
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -327,7 +337,9 @@ mod tests {
         // Need range / (2*0.5) > max_val_to_quantize, so range > max_val_to_quantize
         let z_max = max_val_to_quantize + 100.0;
         let n = 4;
-        let values: Vec<f64> = (0..n).map(|i| z_min + (z_max - z_min) * i as f64 / (n - 1) as f64).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| z_min + (z_max - z_min) * i as f64 / (n - 1) as f64)
+            .collect();
         let (buf, _) = encode_tile_inner_f64(&values, z_min, z_max, max_z_error);
         assert_eq!(
             buf[0] & tile_flags::MODE_MASK,

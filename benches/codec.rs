@@ -41,10 +41,8 @@ fn make_valid_bytes(width: usize, height: usize) -> Vec<u8> {
 // Reference file data (pre-loaded)
 // ---------------------------------------------------------------------------
 
-static CALIFORNIA: &[u8] =
-    include_bytes!("../esri-lerc/testData/california_400_400_1_float.lerc2");
-static BLUEMARBLE: &[u8] =
-    include_bytes!("../esri-lerc/testData/bluemarble_256_256_3_byte.lerc2");
+static CALIFORNIA: &[u8] = include_bytes!("../esri-lerc/testData/california_400_400_1_float.lerc2");
+static BLUEMARBLE: &[u8] = include_bytes!("../esri-lerc/testData/bluemarble_256_256_3_byte.lerc2");
 
 // ---------------------------------------------------------------------------
 // Benchmarks
@@ -146,23 +144,24 @@ fn bench_encode_f32(c: &mut Criterion) {
         );
 
         // Lossless (FPL)
-        group.bench_with_input(
-            BenchmarkId::new("lossless/rust", size),
-            &image,
-            |b, img| {
-                b.iter(|| lerc::encode(img, 0.0).unwrap());
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("lossless/rust", size), &image, |b, img| {
+            b.iter(|| lerc::encode(img, 0.0).unwrap());
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("lossless/cpp", size),
-            &pixels,
-            |b, px| {
-                b.iter(|| {
-                    cpp::encode(px, cpp::DT_FLOAT, size as i32, size as i32, 1, 1, Some(&valid), 0.0)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("lossless/cpp", size), &pixels, |b, px| {
+            b.iter(|| {
+                cpp::encode(
+                    px,
+                    cpp::DT_FLOAT,
+                    size as i32,
+                    size as i32,
+                    1,
+                    1,
+                    Some(&valid),
+                    0.0,
+                )
+            });
+        });
     }
 
     group.finish();
@@ -188,23 +187,24 @@ fn bench_encode_u8(c: &mut Criterion) {
         };
 
         group.throughput(Throughput::Bytes(pixel_bytes));
-        group.bench_with_input(
-            BenchmarkId::new("lossless/rust", size),
-            &image,
-            |b, img| {
-                b.iter(|| lerc::encode(img, 0.5).unwrap());
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("lossless/rust", size), &image, |b, img| {
+            b.iter(|| lerc::encode(img, 0.5).unwrap());
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("lossless/cpp", size),
-            &pixels,
-            |b, px| {
-                b.iter(|| {
-                    cpp::encode(px, cpp::DT_UCHAR, size as i32, size as i32, 1, 1, Some(&valid), 0.5)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("lossless/cpp", size), &pixels, |b, px| {
+            b.iter(|| {
+                cpp::encode(
+                    px,
+                    cpp::DT_UCHAR,
+                    size as i32,
+                    size as i32,
+                    1,
+                    1,
+                    Some(&valid),
+                    0.5,
+                )
+            });
+        });
     }
 
     group.finish();
@@ -268,16 +268,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
             BenchmarkId::new("f32_lossy/rust_blob/cpp", size),
             &rust_blob,
             |b, blob| {
-                b.iter(|| {
-                    cpp::decode::<f32>(
-                        blob,
-                        cpp::DT_FLOAT,
-                        size as i32,
-                        size as i32,
-                        1,
-                        1,
-                    )
-                });
+                b.iter(|| cpp::decode::<f32>(blob, cpp::DT_FLOAT, size as i32, size as i32, 1, 1));
             },
         );
 
@@ -286,16 +277,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
             BenchmarkId::new("f32_lossy/cpp_blob/cpp", size),
             &cpp_blob,
             |b, blob| {
-                b.iter(|| {
-                    cpp::decode::<f32>(
-                        blob,
-                        cpp::DT_FLOAT,
-                        size as i32,
-                        size as i32,
-                        1,
-                        1,
-                    )
-                });
+                b.iter(|| cpp::decode::<f32>(blob, cpp::DT_FLOAT, size as i32, size as i32, 1, 1));
             },
         );
     }
@@ -355,16 +337,7 @@ fn bench_decode_f64_lossless(c: &mut Criterion) {
             BenchmarkId::new("cpp_blob/cpp", size),
             &cpp_blob,
             |b, blob| {
-                b.iter(|| {
-                    cpp::decode::<f64>(
-                        blob,
-                        cpp::DT_DOUBLE,
-                        size as i32,
-                        size as i32,
-                        1,
-                        1,
-                    )
-                });
+                b.iter(|| cpp::decode::<f64>(blob, cpp::DT_DOUBLE, size as i32, size as i32, 1, 1));
             },
         );
     }

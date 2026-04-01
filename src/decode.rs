@@ -184,11 +184,7 @@ fn decode_bands_into<T: LercDataType>(
 
 /// Remap noData sentinel values from the internal encoding value back to the
 /// original user-specified noData value. This mirrors the C++ `RemapNoData`.
-fn remap_no_data<T: LercDataType>(
-    output: &mut [T],
-    mask: &BitMask,
-    hd: &HeaderInfo,
-) {
+fn remap_no_data<T: LercDataType>(output: &mut [T], mask: &BitMask, hd: &HeaderInfo) {
     let n_cols = hd.n_cols as usize;
     let n_rows = hd.n_rows as usize;
     let n_depth = hd.n_depth as usize;
@@ -299,7 +295,9 @@ fn decode_one_band<T: LercDataType>(
             if (mode == ImageEncodeMode::DeltaDeltaHuffman && hd.version < 6)
                 || (mode == ImageEncodeMode::Huffman && hd.version < 4)
             {
-                return Err(LercError::InvalidData("image encode mode not supported in this version".into()));
+                return Err(LercError::InvalidData(
+                    "image encode mode not supported in this version".into(),
+                ));
             }
 
             if mode != ImageEncodeMode::Tiling {
@@ -314,9 +312,7 @@ fn decode_one_band<T: LercDataType>(
                             "invalid huffman mode for int".into(),
                         ));
                     }
-                } else if try_huffman_flt
-                    && mode == ImageEncodeMode::DeltaDeltaHuffman
-                {
+                } else if try_huffman_flt && mode == ImageEncodeMode::DeltaDeltaHuffman {
                     fpl::decode_huffman_flt(
                         blob,
                         &mut pos,
@@ -384,8 +380,7 @@ fn read_mask(
         });
     }
 
-    let mask_bytes =
-        rle::decompress(&data[*pos..*pos + num_bytes_mask as usize], mask_size)?;
+    let mask_bytes = rle::decompress(&data[*pos..*pos + num_bytes_mask as usize], mask_size)?;
     *pos += num_bytes_mask as usize;
 
     Ok(BitMask::from_bytes(mask_bytes, num_pixels))
@@ -943,9 +938,9 @@ mod tests {
         let mut output = vec![0u8; 4];
         read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output).unwrap();
         assert_eq!(output[0], 42); // valid pixel 0
-        assert_eq!(output[1], 0);  // invalid pixel 1 (untouched)
+        assert_eq!(output[1], 0); // invalid pixel 1 (untouched)
         assert_eq!(output[2], 99); // valid pixel 2
-        assert_eq!(output[3], 0);  // invalid pixel 3 (untouched)
+        assert_eq!(output[3], 0); // invalid pixel 3 (untouched)
         assert_eq!(pos, 2);
     }
 
@@ -1033,9 +1028,7 @@ mod tests {
         // for u8 enables Huffman). Small deltas compress well with Huffman.
         let width = 16;
         let height = 16;
-        let pixels: Vec<u8> = (0..width * height)
-            .map(|i| (i % 256) as u8)
-            .collect();
+        let pixels: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
         let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
         assert_eq!(decoded, pixels);
     }
@@ -1107,9 +1100,7 @@ mod tests {
         // Use all 256 values — covers full byte range
         let width = 16;
         let height = 16;
-        let pixels: Vec<u8> = (0..width * height)
-            .map(|i| (i % 256) as u8)
-            .collect();
+        let pixels: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
         let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
         assert_eq!(decoded, pixels);
     }
@@ -1353,10 +1344,7 @@ mod tests {
             n_depth: 1,
             n_bands: 2,
             data_type: DataType::Byte,
-            valid_masks: vec![
-                BitMask::all_valid(n),
-                BitMask::all_valid(n),
-            ],
+            valid_masks: vec![BitMask::all_valid(n), BitMask::all_valid(n)],
             data: crate::LercData::U8(all_pixels.clone()),
             no_data_value: None,
         };
@@ -1406,7 +1394,7 @@ mod tests {
             n_cols: 3,
             n_depth: 2,
             no_data_val: -9998.0,      // internal sentinel
-            no_data_val_orig: -9999.0,  // original user value
+            no_data_val_orig: -9999.0, // original user value
             ..Default::default()
         };
         let mut mask = BitMask::new(3);
@@ -1478,11 +1466,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Build a valid LERC2 blob with one_sweep=1, containing raw pixel data.
-    fn build_one_sweep_blob_u8(
-        width: u32,
-        height: u32,
-        pixels: &[u8],
-    ) -> Vec<u8> {
+    fn build_one_sweep_blob_u8(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
         let n = (width * height) as usize;
         assert_eq!(pixels.len(), n);
         let z_min = *pixels.iter().min().unwrap() as f64;
@@ -1550,11 +1534,7 @@ mod tests {
     }
 
     /// Build a valid LERC2 blob with one_sweep=1 for f32 data.
-    fn build_one_sweep_blob_f32(
-        width: u32,
-        height: u32,
-        pixels: &[f32],
-    ) -> Vec<u8> {
+    fn build_one_sweep_blob_f32(width: u32, height: u32, pixels: &[f32]) -> Vec<u8> {
         let n = (width * height) as usize;
         assert_eq!(pixels.len(), n);
         let z_min = pixels.iter().cloned().reduce(f32::min).unwrap() as f64;
@@ -1743,10 +1723,7 @@ fn decode_huffman<T: LercDataType>(
     let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
 
     // For 8-bit types, use wrapping integer arithmetic for reconstruction
-    let is_byte_type = matches!(
-        header.data_type,
-        DataType::Char | DataType::Byte
-    );
+    let is_byte_type = matches!(header.data_type, DataType::Char | DataType::Byte);
 
     if mode == ImageEncodeMode::DeltaHuffman {
         for i_depth in 0..n_depth {
@@ -1757,12 +1734,15 @@ fn decode_huffman<T: LercDataType>(
                     let m = k * n_depth + i_depth;
 
                     if all_valid || mask.is_valid(k) {
-                        let val =
-                            codec.decode_one_value(data, &mut byte_pos, &mut bit_pos, num_bits_lut)?;
+                        let val = codec.decode_one_value(
+                            data,
+                            &mut byte_pos,
+                            &mut bit_pos,
+                            num_bits_lut,
+                        )?;
                         let delta = val - offset;
 
-                        let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1))
-                        {
+                        let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
                             prev_val
                         } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
                             output[m - width * n_depth]
@@ -1817,4 +1797,3 @@ fn decode_huffman<T: LercDataType>(
 
     Ok(())
 }
-

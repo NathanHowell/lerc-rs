@@ -103,12 +103,7 @@ pub(super) fn restore_sequence(data: &mut [u8], _width: usize, level: u8) {
 /// Restore cross (2D) prediction on interleaved unit data.
 /// Uses field-separated arithmetic matching the C++ `restoreCrossBytesFloat` / `restoreCrossBytesDouble`.
 /// First restores column deltas, then row deltas.
-pub(super) fn restore_cross_bytes(
-    data: &mut [u8],
-    width: usize,
-    height: usize,
-    unit_size: usize,
-) {
+pub(super) fn restore_cross_bytes(data: &mut [u8], width: usize, height: usize, unit_size: usize) {
     match unit_size {
         4 => restore_cross_bytes_f32(data, width, height),
         8 => restore_cross_bytes_f64(data, width, height),
@@ -170,12 +165,7 @@ fn restore_cross_bytes_f64(data: &mut [u8], width: usize, height: usize) {
 
 /// Restore byte-order prediction (1D delta) on interleaved unit data.
 /// Uses field-separated arithmetic matching the C++ `restoreBlockSequenceFloat` / `restoreBlockSequenceDouble`.
-pub(super) fn restore_byte_order(
-    data: &mut [u8],
-    width: usize,
-    height: usize,
-    unit_size: usize,
-) {
+pub(super) fn restore_byte_order(data: &mut [u8], width: usize, height: usize, unit_size: usize) {
     match unit_size {
         4 => restore_byte_order_f32(data, width, height),
         8 => restore_byte_order_f64(data, width, height),
@@ -232,12 +222,7 @@ pub(super) fn apply_sequence(data: &mut [u8], _width: usize, level: u8) {
 /// Uses field-separated arithmetic matching the C++ `setCrossDerivativeFloat` / `setCrossDerivativeDouble`.
 /// First applies row deltas (right to left within each row),
 /// then applies column deltas (bottom to top within each column).
-pub(super) fn apply_cross_bytes(
-    data: &mut [u8],
-    width: usize,
-    height: usize,
-    unit_size: usize,
-) {
+pub(super) fn apply_cross_bytes(data: &mut [u8], width: usize, height: usize, unit_size: usize) {
     match unit_size {
         4 => apply_cross_bytes_f32(data, width, height),
         8 => apply_cross_bytes_f64(data, width, height),
@@ -344,12 +329,7 @@ fn apply_cross_bytes_phase2_f64(data: &mut [u8], width: usize, height: usize) {
 
 /// Apply forward byte-order prediction (1D delta) on interleaved unit data (inverse of restore_byte_order).
 /// Uses field-separated arithmetic matching the C++ `setRowsDerivativeFloat` / `setRowsDerivativeDouble`.
-pub(super) fn apply_byte_order(
-    data: &mut [u8],
-    width: usize,
-    height: usize,
-    unit_size: usize,
-) {
+pub(super) fn apply_byte_order(data: &mut [u8], width: usize, height: usize, unit_size: usize) {
     match unit_size {
         4 => apply_byte_order_f32(data, width, height),
         8 => apply_byte_order_f64(data, width, height),
@@ -508,15 +488,10 @@ mod tests {
         apply_cross_bytes_phase2(&mut data, width, height, 4);
 
         // Extract resulting f32 values
-        let result: Vec<u32> = (0..9)
-            .map(|i| read_u32_le(&data, i * 4))
-            .collect();
+        let result: Vec<u32> = (0..9).map(|i| read_u32_le(&data, i * 4)).collect();
 
         // Row 0 should be unchanged (no row above to subtract)
-        let row0_original: Vec<u32> = vec![1.0f32, 2.0, 3.0]
-            .iter()
-            .map(|f| f.to_bits())
-            .collect();
+        let row0_original: Vec<u32> = vec![1.0f32, 2.0, 3.0].iter().map(|f| f.to_bits()).collect();
         assert_eq!(&result[0..3], &row0_original[..]);
 
         // Row 1 and Row 2 should be modified by column deltas

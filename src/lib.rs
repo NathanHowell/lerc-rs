@@ -4,7 +4,7 @@
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::cast_lossless,
+    clippy::cast_lossless
 )]
 
 extern crate alloc;
@@ -12,8 +12,8 @@ extern crate alloc;
 pub mod error;
 pub mod types;
 
-pub(crate) mod bitstuffer;
 pub mod bitmask;
+pub(crate) mod bitstuffer;
 #[allow(dead_code)]
 pub(crate) mod checksum;
 #[allow(dead_code)]

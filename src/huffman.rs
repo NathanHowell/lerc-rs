@@ -174,10 +174,7 @@ impl HuffmanCodec {
         let mut sort_vec: Vec<(i32, u32)> = Vec::with_capacity(table_size as usize);
         for (i, entry) in self.code_table.iter().enumerate() {
             if entry.0 > 0 {
-                sort_vec.push((
-                    entry.0 as i32 * table_size as i32 - i as i32,
-                    i as u32,
-                ));
+                sort_vec.push((entry.0 as i32 * table_size as i32 - i as i32, i as u32));
             }
         }
 
@@ -272,8 +269,9 @@ impl HuffmanCodec {
 
     /// Write the code table to a byte buffer.
     pub fn write_code_table(&self, lerc2_version: i32) -> Result<Vec<u8>> {
-        let (i0, i1, _max_len) =
-            self.get_range().ok_or(LercError::InvalidData("empty code table".into()))?;
+        let (i0, i1, _max_len) = self
+            .get_range()
+            .ok_or(LercError::InvalidData("empty code table".into()))?;
 
         let size = self.code_table.len() as i32;
         let mut data_vec: Vec<u32> = Vec::with_capacity((i1 - i0) as usize);
@@ -329,8 +327,7 @@ impl HuffmanCodec {
         }
 
         // Decode code lengths
-        let data_vec =
-            bitstuffer::decode(data, pos, (i1 - i0) as usize, lerc2_version)?;
+        let data_vec = bitstuffer::decode(data, pos, (i1 - i0) as usize, lerc2_version)?;
 
         self.code_table = vec![(0u16, 0u32); size as usize];
         for i in i0..i1 {
@@ -383,13 +380,7 @@ impl HuffmanCodec {
     }
 
     /// Bit-unstuff codes using MSB-first format.
-    fn bit_unstuff_codes(
-        &mut self,
-        data: &[u8],
-        pos: &mut usize,
-        i0: i32,
-        i1: i32,
-    ) -> Result<()> {
+    fn bit_unstuff_codes(&mut self, data: &[u8], pos: &mut usize, i0: i32, i1: i32) -> Result<()> {
         let size = self.code_table.len() as i32;
         let start_pos = *pos;
         let mut bit_pos: i32 = 0;
@@ -410,9 +401,8 @@ impl HuffmanCodec {
                     });
                 }
 
-                let temp = u32::from_le_bytes(
-                    data[byte_offset..byte_offset + 4].try_into().unwrap(),
-                );
+                let temp =
+                    u32::from_le_bytes(data[byte_offset..byte_offset + 4].try_into().unwrap());
                 let local_bit = bit_pos & 31;
                 let mut code = (temp << local_bit) >> (32 - len);
 
@@ -432,7 +422,8 @@ impl HuffmanCodec {
                     );
                     let new_local_bit = (local_bit + len - 32) as u32;
                     code |= temp2 >> (32 - new_local_bit);
-                    bit_pos = (((byte_offset - start_pos) / 4 + 1) * 32 + new_local_bit as usize) as i32;
+                    bit_pos =
+                        (((byte_offset - start_pos) / 4 + 1) * 32 + new_local_bit as usize) as i32;
                 } else {
                     bit_pos += len;
                     if bit_pos & 31 == 0 && local_bit + len == 32 {
@@ -457,8 +448,9 @@ impl HuffmanCodec {
 
     /// Build the decode LUT and optional tree from the code table.
     pub fn build_tree_from_codes(&mut self) -> Result<i32> {
-        let (i0, i1, max_len) =
-            self.get_range().ok_or(LercError::InvalidData("empty code table".into()))?;
+        let (i0, i1, max_len) = self
+            .get_range()
+            .ok_or(LercError::InvalidData("empty code table".into()))?;
 
         let size = self.code_table.len() as i32;
         let need_tree = max_len > MAX_NUM_BITS_LUT;
@@ -560,9 +552,7 @@ impl HuffmanCodec {
             });
         }
 
-        let temp = u32::from_le_bytes(
-            data[*byte_pos..*byte_pos + 4].try_into().unwrap(),
-        );
+        let temp = u32::from_le_bytes(data[*byte_pos..*byte_pos + 4].try_into().unwrap());
         let mut val_tmp = (temp << *bit_pos) >> (32 - num_bits_lut);
 
         if 32 - *bit_pos < num_bits_lut {
@@ -572,9 +562,7 @@ impl HuffmanCodec {
                     available: data.len(),
                 });
             }
-            let temp2 = u32::from_le_bytes(
-                data[*byte_pos + 4..*byte_pos + 8].try_into().unwrap(),
-            );
+            let temp2 = u32::from_le_bytes(data[*byte_pos + 4..*byte_pos + 8].try_into().unwrap());
             val_tmp |= temp2 >> (64 - *bit_pos - num_bits_lut);
         }
 
@@ -611,9 +599,7 @@ impl HuffmanCodec {
                 });
             }
 
-            let temp = u32::from_le_bytes(
-                data[*byte_pos..*byte_pos + 4].try_into().unwrap(),
-            );
+            let temp = u32::from_le_bytes(data[*byte_pos..*byte_pos + 4].try_into().unwrap());
             let bit = (temp << *bit_pos) >> 31;
             *bit_pos += 1;
             if *bit_pos == 32 {
@@ -650,8 +636,7 @@ impl HuffmanCodec {
         // Code table size
         let mut num_bytes = 4 * 4i32; // header ints
         // BitStuffer2 for code lengths
-        num_bytes +=
-            compute_num_bytes_needed_simple((i1 - i0) as u32, max_len as u32) as i32;
+        num_bytes += compute_num_bytes_needed_simple((i1 - i0) as u32, max_len as u32) as i32;
         // Bit-stuffed codes
         let mut sum_code_bits = 0i32;
         for i in i0..i1 {
@@ -693,18 +678,14 @@ fn push_value(buf: &mut [u8], bit_pos: &mut i32, value: u32, len: i32) {
             // Clear the uint
             buf[uint_idx * 4..uint_idx * 4 + 4].fill(0);
         }
-        let mut temp = u32::from_le_bytes(
-            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
-        );
+        let mut temp = u32::from_le_bytes(buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap());
         temp |= value << (32 - local_bit - len);
         buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
         *bit_pos += len;
         // No need to advance; uint_idx will naturally update from bit_pos
     } else {
         let overflow = local_bit + len - 32;
-        let mut temp = u32::from_le_bytes(
-            buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap(),
-        );
+        let mut temp = u32::from_le_bytes(buf[uint_idx * 4..uint_idx * 4 + 4].try_into().unwrap());
         temp |= value >> overflow;
         buf[uint_idx * 4..uint_idx * 4 + 4].copy_from_slice(&temp.to_le_bytes());
 
@@ -799,9 +780,7 @@ pub fn encode_huffman_with_codec_histo(
             .map(|(i, &count)| count as u64 * ct[i].0 as u64)
             .sum()
     } else {
-        data.iter()
-            .map(|&b| ct[b as usize].0 as u64)
-            .sum()
+        data.iter().map(|&b| ct[b as usize].0 as u64).sum()
     };
 
     let num_uints = (total_bits.div_ceil(8).div_ceil(4) + 1) as usize;

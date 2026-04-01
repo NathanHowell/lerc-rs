@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use crate::bitstuffer;
 use crate::bitmask::BitMask;
+use crate::bitstuffer;
 use crate::error::{LercError, Result};
 use crate::header::HeaderInfo;
 use crate::types::{DataType, LercDataType, TileCompressionMode, TileRect, tile_flags};
@@ -267,7 +267,10 @@ pub(crate) fn read_tiles<T: LercDataType>(
                 } else {
                     header.z_max
                 };
-                let depth = DepthSlice { index: i_depth, z_max };
+                let depth = DepthSlice {
+                    index: i_depth,
+                    z_max,
+                };
                 read_tile(data_buf, pos, header, mask, output, rect, &depth)?;
             }
         }
@@ -325,7 +328,11 @@ fn read_tile<T: LercDataType>(
             let mut m = k * n_depth + i_depth;
             for _j in j0..j1 {
                 if mask.is_valid(k) {
-                    output[m] = if b_diff_enc { output[m - 1] } else { T::default() };
+                    output[m] = if b_diff_enc {
+                        output[m - 1]
+                    } else {
+                        T::default()
+                    };
                 }
                 k += 1;
                 m += n_depth;
@@ -855,17 +862,32 @@ mod tests {
         // tc=0 should always return the same type
         assert_eq!(get_data_type_used(DataType::Char, 0), Some(DataType::Char));
         assert_eq!(get_data_type_used(DataType::Byte, 0), Some(DataType::Byte));
-        assert_eq!(get_data_type_used(DataType::Short, 0), Some(DataType::Short));
-        assert_eq!(get_data_type_used(DataType::UShort, 0), Some(DataType::UShort));
+        assert_eq!(
+            get_data_type_used(DataType::Short, 0),
+            Some(DataType::Short)
+        );
+        assert_eq!(
+            get_data_type_used(DataType::UShort, 0),
+            Some(DataType::UShort)
+        );
         assert_eq!(get_data_type_used(DataType::Int, 0), Some(DataType::Int));
         assert_eq!(get_data_type_used(DataType::UInt, 0), Some(DataType::UInt));
-        assert_eq!(get_data_type_used(DataType::Float, 0), Some(DataType::Float));
-        assert_eq!(get_data_type_used(DataType::Double, 0), Some(DataType::Double));
+        assert_eq!(
+            get_data_type_used(DataType::Float, 0),
+            Some(DataType::Float)
+        );
+        assert_eq!(
+            get_data_type_used(DataType::Double, 0),
+            Some(DataType::Double)
+        );
     }
 
     #[test]
     fn get_data_type_used_float_reduction() {
-        assert_eq!(get_data_type_used(DataType::Float, 1), Some(DataType::Short));
+        assert_eq!(
+            get_data_type_used(DataType::Float, 1),
+            Some(DataType::Short)
+        );
         assert_eq!(get_data_type_used(DataType::Float, 2), Some(DataType::Byte));
         assert_eq!(get_data_type_used(DataType::Float, 3), None);
     }

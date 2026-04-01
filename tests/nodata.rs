@@ -74,9 +74,13 @@ fn round_trip_f32_ndepth3_nodata() {
                     if k % 5 == 0 && k > 0 {
                         // This pixel had NoData at depth 2
                         assert_eq!(
-                            dec_pixels[base + 2], no_data_val as f32,
+                            dec_pixels[base + 2],
+                            no_data_val as f32,
                             "pixel ({}, {}) depth 2 should be NoData ({}), got {}",
-                            i, j, no_data_val, dec_pixels[base + 2]
+                            i,
+                            j,
+                            no_data_val,
+                            dec_pixels[base + 2]
                         );
                     }
 
@@ -87,14 +91,20 @@ fn round_trip_f32_ndepth3_nodata() {
                         assert!(
                             (dec_pixels[base] - expected0).abs() <= 0.01,
                             "pixel ({}, {}) depth 0: expected ~{}, got {}",
-                            i, j, expected0, dec_pixels[base]
+                            i,
+                            j,
+                            expected0,
+                            dec_pixels[base]
                         );
                     }
                     if expected1 != no_data_val as f32 {
                         assert!(
                             (dec_pixels[base + 1] - expected1).abs() <= 0.01,
                             "pixel ({}, {}) depth 1: expected ~{}, got {}",
-                            i, j, expected1, dec_pixels[base + 1]
+                            i,
+                            j,
+                            expected1,
+                            dec_pixels[base + 1]
                         );
                     }
                 }
@@ -139,11 +149,7 @@ fn round_trip_f32_ndepth3_nodata_lossless() {
                         let orig = pixels[base + m];
                         let dec = dec_pixels[base + m];
                         if orig == no_data_val as f32 {
-                            assert_eq!(
-                                dec, orig,
-                                "NoData at ({},{},{}) should be exact",
-                                i, j, m
-                            );
+                            assert_eq!(dec, orig, "NoData at ({},{},{}) should be exact", i, j, m);
                         } else {
                             assert_eq!(
                                 dec, orig,
@@ -173,7 +179,11 @@ fn round_trip_f64_ndepth2_nodata() {
     for k in 0..num_pixels {
         let base = k * n_depth as usize;
         pixels[base] = (k as f64) * 1.5;
-        pixels[base + 1] = if k % 3 == 0 { no_data } else { (k as f64) * 2.5 };
+        pixels[base + 1] = if k % 3 == 0 {
+            no_data
+        } else {
+            (k as f64) * 2.5
+        };
     }
 
     let image = LercImage {
@@ -196,8 +206,17 @@ fn round_trip_f64_ndepth2_nodata() {
         LercData::F64(dec_pixels) => {
             for k in 0..num_pixels {
                 let base = k * n_depth as usize;
-                assert_eq!(dec_pixels[base], pixels[base], "depth 0 mismatch at pixel {}", k);
-                assert_eq!(dec_pixels[base + 1], pixels[base + 1], "depth 1 mismatch at pixel {}", k);
+                assert_eq!(
+                    dec_pixels[base], pixels[base],
+                    "depth 0 mismatch at pixel {}",
+                    k
+                );
+                assert_eq!(
+                    dec_pixels[base + 1],
+                    pixels[base + 1],
+                    "depth 1 mismatch at pixel {}",
+                    k
+                );
             }
         }
         _ => panic!("expected F64 data"),
@@ -241,8 +260,17 @@ fn round_trip_i32_ndepth2_nodata() {
         LercData::I32(dec_pixels) => {
             for k in 0..num_pixels {
                 let base = k * n_depth as usize;
-                assert_eq!(dec_pixels[base], pixels[base], "depth 0 mismatch at pixel {}", k);
-                assert_eq!(dec_pixels[base + 1], pixels[base + 1], "depth 1 mismatch at pixel {}", k);
+                assert_eq!(
+                    dec_pixels[base], pixels[base],
+                    "depth 0 mismatch at pixel {}",
+                    k
+                );
+                assert_eq!(
+                    dec_pixels[base + 1],
+                    pixels[base + 1],
+                    "depth 1 mismatch at pixel {}",
+                    k
+                );
             }
         }
         _ => panic!("expected I32 data"),
@@ -296,10 +324,16 @@ fn no_nodata_when_not_set() {
 
     let encoded = lerc::encode(&image, 0.0).expect("encode failed");
     let info = lerc::decode_info(&encoded).expect("decode_info failed");
-    assert_eq!(info.no_data_value, None, "no_data_value should be None when not set");
+    assert_eq!(
+        info.no_data_value, None,
+        "no_data_value should be None when not set"
+    );
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
-    assert_eq!(decoded.no_data_value, None, "decoded no_data_value should be None");
+    assert_eq!(
+        decoded.no_data_value, None,
+        "decoded no_data_value should be None"
+    );
 }
 
 #[test]
@@ -348,13 +382,21 @@ fn round_trip_multiband_nodata() {
     for k in 0..num_pixels {
         let base = k * n_depth as usize;
         pixels[base] = k as f32;
-        pixels[base + 1] = if k % 3 == 0 { no_data } else { (k as f32) + 100.0 };
+        pixels[base + 1] = if k % 3 == 0 {
+            no_data
+        } else {
+            (k as f32) + 100.0
+        };
     }
     // Band 1
     for k in 0..num_pixels {
         let base = band_size + k * n_depth as usize;
         pixels[base] = (k as f32) + 200.0;
-        pixels[base + 1] = if k % 4 == 0 { no_data } else { (k as f32) + 300.0 };
+        pixels[base + 1] = if k % 4 == 0 {
+            no_data
+        } else {
+            (k as f32) + 300.0
+        };
     }
 
     let image = LercImage {

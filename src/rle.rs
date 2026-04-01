@@ -34,10 +34,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
             let start = i;
             while i < len {
                 let mut next_run = 1usize;
-                while i + next_run < len
-                    && input[i + next_run] == input[i]
-                    && next_run < 32767
-                {
+                while i + next_run < len && input[i + next_run] == input[i] && next_run < 32767 {
                     next_run += 1;
                 }
                 if next_run >= MIN_RUN_EVEN {
@@ -96,12 +93,10 @@ pub fn decompress(input: &[u8], expected_size: usize) -> Result<Vec<u8>> {
     }
 
     if out.len() != expected_size {
-        return Err(LercError::InvalidData(
-            alloc::format!(
-                "RLE: expected {expected_size} bytes, got {}",
-                out.len()
-            ),
-        ));
+        return Err(LercError::InvalidData(alloc::format!(
+            "RLE: expected {expected_size} bytes, got {}",
+            out.len()
+        )));
     }
 
     Ok(out)

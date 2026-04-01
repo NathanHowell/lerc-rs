@@ -29,9 +29,9 @@ pub(super) fn extract_buffer(compressed: &[u8], expected_size: usize) -> Result<
         }
         HUFFMAN_PACKBITS => decode_packbits(data, expected_size),
         0x00 => decode_fpl_huffman(data, expected_size),
-        _ => Err(LercError::InvalidData(
-            alloc::format!("unknown FPL compression mode: {mode:#x}"),
-        )),
+        _ => Err(LercError::InvalidData(alloc::format!(
+            "unknown FPL compression mode: {mode:#x}"
+        ))),
     }
 }
 
@@ -126,7 +126,10 @@ pub(super) fn compress_buffer(data: &[u8]) -> Vec<u8> {
 /// Compress a byte plane using the best available method, optionally reusing a
 /// pre-computed histogram. Returns the compressed data (including the mode byte
 /// prefix).
-pub(super) fn compress_buffer_with_histo(data: &[u8], precomputed_histo: Option<&[i32; 256]>) -> Vec<u8> {
+pub(super) fn compress_buffer_with_histo(
+    data: &[u8],
+    precomputed_histo: Option<&[i32; 256]>,
+) -> Vec<u8> {
     if data.is_empty() {
         return encode_raw(data);
     }
@@ -177,8 +180,8 @@ pub(super) fn compress_buffer_with_histo(data: &[u8], precomputed_histo: Option<
     // PackBits helps when there are many runs of identical bytes. A rough heuristic:
     // if the most frequent value covers < 1% of the data and there are many distinct
     // values, or if entropy is high, PackBits is unlikely to help.
-    let skip_packbits = (distinct > 128 && (max_count as usize) < data.len() / 100)
-        || entropy_bits_per_byte > 6.0;
+    let skip_packbits =
+        (distinct > 128 && (max_count as usize) < data.len() / 100) || entropy_bits_per_byte > 6.0;
     if !skip_packbits {
         let packbits = encode_packbits(data);
         if packbits.len() < best_len {
@@ -252,7 +255,6 @@ fn compute_entropy_bits_per_byte(histo: &[i32; 256], total: usize) -> f64 {
     }
     entropy
 }
-
 
 fn encode_raw(data: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + data.len());

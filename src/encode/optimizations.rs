@@ -217,12 +217,11 @@ pub(super) fn try_bit_plane_compression<T: LercDataType>(
                 for i in 0..height - 1 {
                     for j in 0..width - 1 {
                         let k = i * width + j;
-                        let c = (band_data[k].to_f64() as u32)
-                            ^ (band_data[k + 1].to_f64() as u32);
+                        let c = (band_data[k].to_f64() as u32) ^ (band_data[k + 1].to_f64() as u32);
                         add_uint_to_counts(&mut cnt_diff_vec, c, max_shift);
                         cnt += 1;
-                        let c = (band_data[k].to_f64() as u32)
-                            ^ (band_data[k + width].to_f64() as u32);
+                        let c =
+                            (band_data[k].to_f64() as u32) ^ (band_data[k + width].to_f64() as u32);
                         add_uint_to_counts(&mut cnt_diff_vec, c, max_shift);
                         cnt += 1;
                     }
@@ -231,12 +230,11 @@ pub(super) fn try_bit_plane_compression<T: LercDataType>(
                 for i in 0..height - 1 {
                     for j in 0..width - 1 {
                         let k = i * width + j;
-                        let c = (band_data[k].to_f64() as i32)
-                            ^ (band_data[k + 1].to_f64() as i32);
+                        let c = (band_data[k].to_f64() as i32) ^ (band_data[k + 1].to_f64() as i32);
                         add_int_to_counts(&mut cnt_diff_vec, c, max_shift);
                         cnt += 1;
-                        let c = (band_data[k].to_f64() as i32)
-                            ^ (band_data[k + width].to_f64() as i32);
+                        let c =
+                            (band_data[k].to_f64() as i32) ^ (band_data[k + width].to_f64() as i32);
                         add_int_to_counts(&mut cnt_diff_vec, c, max_shift);
                         cnt += 1;
                     }
@@ -573,7 +571,10 @@ mod tests {
     fn uint_counts_zero() {
         let mut counts = vec![0i32; 8];
         add_uint_to_counts(&mut counts, 0, 8);
-        assert!(counts.iter().all(|&c| c == 0), "zero should contribute no bits");
+        assert!(
+            counts.iter().all(|&c| c == 0),
+            "zero should contribute no bits"
+        );
     }
 
     #[test]

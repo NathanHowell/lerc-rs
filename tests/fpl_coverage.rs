@@ -13,8 +13,7 @@ fn assert_fpl_used(blob: &[u8]) {
     let mut pos = header_size;
 
     // Read mask section: numBytesMask (4-byte LE i32). If 0, mask is all-valid.
-    let mask_num_bytes =
-        i32::from_le_bytes(blob[pos..pos + 4].try_into().unwrap());
+    let mask_num_bytes = i32::from_le_bytes(blob[pos..pos + 4].try_into().unwrap());
     pos += 4;
     if mask_num_bytes > 0 {
         pos += mask_num_bytes as usize;
@@ -23,8 +22,7 @@ fn assert_fpl_used(blob: &[u8]) {
     // Read per-depth min/max ranges (always present for v4+).
     // Layout: nDepth typed zMin values, then nDepth typed zMax values.
     // Read nDepth from header at offset 22.
-    let n_depth =
-        i32::from_le_bytes(blob[22..26].try_into().unwrap()) as usize;
+    let n_depth = i32::from_le_bytes(blob[22..26].try_into().unwrap()) as usize;
     // Read data type from header at offset 38.
     let dt_raw = i32::from_le_bytes(blob[38..42].try_into().unwrap());
     let type_size = match dt_raw {
@@ -78,7 +76,11 @@ fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} (bits={:#010x}), decoded={} (bits={:#010x})",
-            i, orig, orig.to_bits(), dec, dec.to_bits(),
+            i,
+            orig,
+            orig.to_bits(),
+            dec,
+            dec.to_bits(),
         );
     }
 }
@@ -102,7 +104,11 @@ fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} (bits={:#018x}), decoded={} (bits={:#018x})",
-            i, orig, orig.to_bits(), dec, dec.to_bits(),
+            i,
+            orig,
+            orig.to_bits(),
+            dec,
+            dec.to_bits(),
         );
     }
 }
@@ -120,7 +126,11 @@ fn round_trip_f32_lossless(width: u32, height: u32, pixels: &[f32]) {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} (bits={:#010x}), decoded={} (bits={:#010x})",
-            i, orig, orig.to_bits(), dec, dec.to_bits(),
+            i,
+            orig,
+            orig.to_bits(),
+            dec,
+            dec.to_bits(),
         );
     }
 }
@@ -137,7 +147,11 @@ fn round_trip_f64_lossless(width: u32, height: u32, pixels: &[f64]) {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} (bits={:#018x}), decoded={} (bits={:#018x})",
-            i, orig, orig.to_bits(), dec, dec.to_bits(),
+            i,
+            orig,
+            orig.to_bits(),
+            dec,
+            dec.to_bits(),
         );
     }
 }
@@ -264,13 +278,7 @@ fn fpl_f32_sparse() {
     let w = 32u32;
     let h = 32u32;
     let pixels: Vec<f32> = (0..w * h)
-        .map(|i| {
-            if i % 37 == 0 {
-                (i as f32) * 0.01
-            } else {
-                0.0
-            }
-        })
+        .map(|i| if i % 37 == 0 { (i as f32) * 0.01 } else { 0.0 })
         .collect();
     round_trip_f32_fpl(w, h, &pixels);
 }
@@ -293,13 +301,13 @@ fn fpl_f32_extreme_values() {
         -0.0,
         1.0,
         -1.0,
-        f32::MIN_POSITIVE,           // smallest positive normal
+        f32::MIN_POSITIVE, // smallest positive normal
         -f32::MIN_POSITIVE,
-        1.0e-38,                     // near subnormal boundary
-        1.0e38,                      // large
-        f32::from_bits(0x00000001),  // smallest subnormal
-        f32::from_bits(0x00400000),  // a subnormal
-        f32::from_bits(0x007FFFFF),  // largest subnormal
+        1.0e-38,                    // near subnormal boundary
+        1.0e38,                     // large
+        f32::from_bits(0x00000001), // smallest subnormal
+        f32::from_bits(0x00400000), // a subnormal
+        f32::from_bits(0x007FFFFF), // largest subnormal
         f32::EPSILON,
         std::f32::consts::PI,
         std::f32::consts::E,
@@ -320,10 +328,22 @@ fn fpl_f32_extreme_range() {
     let w = 4u32;
     let h = 4u32;
     let pixels = vec![
-        f32::MAX, f32::MIN, f32::MAX, f32::MIN,
-        1.0, -1.0, 0.0, f32::MIN_POSITIVE,
-        f32::MAX, f32::MIN, 1.0e38, -1.0e38,
-        f32::EPSILON, std::f32::consts::PI, std::f32::consts::E, 0.0,
+        f32::MAX,
+        f32::MIN,
+        f32::MAX,
+        f32::MIN,
+        1.0,
+        -1.0,
+        0.0,
+        f32::MIN_POSITIVE,
+        f32::MAX,
+        f32::MIN,
+        1.0e38,
+        -1.0e38,
+        f32::EPSILON,
+        std::f32::consts::PI,
+        std::f32::consts::E,
+        0.0,
     ];
     round_trip_f32_lossless(w, h, &pixels);
 }
@@ -412,7 +432,11 @@ fn fpl_f32_multi_depth() {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} (bits={:#010x}), decoded={} (bits={:#010x})",
-            i, orig, orig.to_bits(), dec, dec.to_bits(),
+            i,
+            orig,
+            orig.to_bits(),
+            dec,
+            dec.to_bits(),
         );
     }
 }
@@ -427,9 +451,7 @@ fn fpl_f32_predictor_none_candidate() {
     let w = 4u32;
     let h = 4u32;
     let pixels: Vec<f32> = (0..w * h)
-        .map(|i| {
-            f32::from_bits(0x3F800000 | ((i * 7919 + 104729) & 0x007FFFFF))
-        })
+        .map(|i| f32::from_bits(0x3F800000 | ((i * 7919 + 104729) & 0x007FFFFF)))
         .collect();
     round_trip_f32_fpl(w, h, &pixels);
 }
@@ -552,7 +574,9 @@ fn fpl_f64_multi_depth() {
             orig.to_bits(),
             dec.to_bits(),
             "pixel {}: orig={} decoded={}",
-            i, orig, dec,
+            i,
+            orig,
+            dec,
         );
     }
 }

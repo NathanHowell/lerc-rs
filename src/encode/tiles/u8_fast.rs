@@ -61,8 +61,12 @@ pub(super) fn encode_single_u8_tile(
     for i in i0..i1 {
         let row_start = i * n_cols + j0;
         for &val in &data[row_start..row_start + tile_w] {
-            if val < z_min { z_min = val; }
-            if val > z_max { z_max = val; }
+            if val < z_min {
+                z_min = val;
+            }
+            if val > z_max {
+                z_max = val;
+            }
             // Store raw value; we'll subtract z_min below if needed
             quant_buf[idx] = val as u32;
             idx += 1;
@@ -123,10 +127,14 @@ pub(super) fn encode_single_u8_tile(
         let use_lut = if (2..=255).contains(&n_distinct) {
             let n_lut = n_distinct - 1;
             let mut n_bits_lut = 0u32;
-            while (n_lut >> n_bits_lut) != 0 { n_bits_lut += 1; }
+            while (n_lut >> n_bits_lut) != 0 {
+                n_bits_lut += 1;
+            }
             let n_bytes = crate::bitstuffer::num_bytes_uint(num_elem);
             let num_bytes_simple = 1 + n_bytes as u32 + ((num_elem * num_bits + 7) >> 3);
-            let num_bytes_lut = 1 + n_bytes as u32 + 1
+            let num_bytes_lut = 1
+                + n_bytes as u32
+                + 1
                 + ((n_lut * num_bits + 7) >> 3)
                 + ((num_elem * n_bits_lut + 7) >> 3);
             num_bytes_lut < num_bytes_simple
@@ -140,7 +148,9 @@ pub(super) fn encode_single_u8_tile(
             // Build LUT mapping and encode using stack-allocated arrays
             let n_lut = n_distinct - 1;
             let mut n_bits_lut = 0u32;
-            while (n_lut >> n_bits_lut) != 0 { n_bits_lut += 1; }
+            while (n_lut >> n_bits_lut) != 0 {
+                n_bits_lut += 1;
+            }
 
             let mut value_to_index = [0u8; 256];
             let mut lut_values = [0u32; 255];
@@ -233,11 +243,7 @@ pub(super) fn encode_tile_to_count<T: LercDataType>(
 ) -> Result<usize> {
     let mut tmp = Vec::new();
     super::encode_tile(
-        &mut tmp,
-        ctx,
-        rect,
-        i_depth,
-        scratch,
+        &mut tmp, ctx, rect, i_depth, scratch,
         None, // No reconstruction buffer needed for size estimation
     )?;
     Ok(tmp.len())
@@ -246,8 +252,8 @@ pub(super) fn encode_tile_to_count<T: LercDataType>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
     use crate::types::tile_flags;
+    use alloc::vec;
 
     // -----------------------------------------------------------------------
     // encode_single_u8_tile
@@ -259,9 +265,24 @@ mod tests {
         let n_cols = 8;
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
-        encode_single_u8_tile(&mut buf, &data, n_cols, TileRect { i0: 0, i1: 8, j0: 0, j1: 8 }, 0, &mut quant_buf);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            n_cols,
+            TileRect {
+                i0: 0,
+                i1: 8,
+                j0: 0,
+                j1: 8,
+            },
+            0,
+            &mut quant_buf,
+        );
         assert_eq!(buf.len(), 1);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstZero as u8
+        );
     }
 
     #[test]
@@ -270,8 +291,23 @@ mod tests {
         let n_cols = 8;
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
-        encode_single_u8_tile(&mut buf, &data, n_cols, TileRect { i0: 0, i1: 8, j0: 0, j1: 8 }, 0, &mut quant_buf);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstOffset as u8);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            n_cols,
+            TileRect {
+                i0: 0,
+                i1: 8,
+                j0: 0,
+                j1: 8,
+            },
+            0,
+            &mut quant_buf,
+        );
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
         assert_eq!(buf[1], 42);
         assert_eq!(buf.len(), 2);
     }
@@ -286,8 +322,23 @@ mod tests {
         let n_cols = 4;
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
-        encode_single_u8_tile(&mut buf, &data, n_cols, TileRect { i0: 0, i1: 4, j0: 0, j1: 4 }, 0, &mut quant_buf);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::BitStuffed as u8);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            n_cols,
+            TileRect {
+                i0: 0,
+                i1: 4,
+                j0: 0,
+                j1: 4,
+            },
+            0,
+            &mut quant_buf,
+        );
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
         // Offset byte should be 0 (z_min = 0)
         assert_eq!(buf[1], 0);
         // Should be decodable via bitstuffer
@@ -309,8 +360,23 @@ mod tests {
         let n_cols = 4;
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
-        encode_single_u8_tile(&mut buf, &data, n_cols, TileRect { i0: 0, i1: 4, j0: 0, j1: 4 }, 0, &mut quant_buf);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::BitStuffed as u8);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            n_cols,
+            TileRect {
+                i0: 0,
+                i1: 4,
+                j0: 0,
+                j1: 4,
+            },
+            0,
+            &mut quant_buf,
+        );
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
         assert_eq!(buf[1], 100); // z_min = 100
     }
 
@@ -329,8 +395,23 @@ mod tests {
         }
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
-        encode_single_u8_tile(&mut buf, &data, n_cols, TileRect { i0: 2, i1: 4, j0: 4, j1: 8 }, 0, &mut quant_buf);
-        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstOffset as u8);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            n_cols,
+            TileRect {
+                i0: 2,
+                i1: 4,
+                j0: 4,
+                j1: 8,
+            },
+            0,
+            &mut quant_buf,
+        );
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
         assert_eq!(buf[1], 99);
     }
 
@@ -340,7 +421,19 @@ mod tests {
         let mut buf = Vec::new();
         let mut quant_buf = [0u32; 256];
         let integrity = 0b00001100u8;
-        encode_single_u8_tile(&mut buf, &data, 8, TileRect { i0: 0, i1: 8, j0: 0, j1: 8 }, integrity, &mut quant_buf);
+        encode_single_u8_tile(
+            &mut buf,
+            &data,
+            8,
+            TileRect {
+                i0: 0,
+                i1: 8,
+                j0: 0,
+                j1: 8,
+            },
+            integrity,
+            &mut quant_buf,
+        );
         assert_eq!(buf[0] & integrity, integrity);
     }
 }

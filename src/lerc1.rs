@@ -151,8 +151,7 @@ fn read_uint(cursor: &mut Cursor, num_bytes: usize) -> Result<u32> {
         1 => Ok(cursor.read_u8()? as u32),
         2 => {
             cursor.check(2)?;
-            let v =
-                u16::from_le_bytes(cursor.data[cursor.pos..cursor.pos + 2].try_into().unwrap());
+            let v = u16::from_le_bytes(cursor.data[cursor.pos..cursor.pos + 2].try_into().unwrap());
             cursor.pos += 2;
             Ok(v as u32)
         }
@@ -269,14 +268,14 @@ fn read_lerc1_header(cursor: &mut Cursor) -> Result<Lerc1Header> {
         return Err(LercError::UnsupportedVersion(version));
     }
     if type_id != LERC1_TYPE {
-        return Err(LercError::InvalidData(
-            alloc::format!("lerc1: unexpected type {type_id}, expected {LERC1_TYPE}"),
-        ));
+        return Err(LercError::InvalidData(alloc::format!(
+            "lerc1: unexpected type {type_id}, expected {LERC1_TYPE}"
+        )));
     }
     if width <= 0 || height <= 0 || width > 20000 || height > 20000 {
-        return Err(LercError::InvalidData(
-            alloc::format!("lerc1: invalid dimensions {width}x{height}"),
-        ));
+        return Err(LercError::InvalidData(alloc::format!(
+            "lerc1: invalid dimensions {width}x{height}"
+        )));
     }
 
     Ok(Lerc1Header {
@@ -450,8 +449,7 @@ fn read_z_tile(
                 for i in i0..i1 {
                     for j in j0..j1 {
                         let idx = i * width + j;
-                        let val =
-                            (offset as f64 + data_vec[src_idx] as f64 * inv_scale) as f32;
+                        let val = (offset as f64 + data_vec[src_idx] as f64 * inv_scale) as f32;
                         z[idx] = val.min(cfg.max_z_in_img);
                         src_idx += 1;
                     }
@@ -461,8 +459,7 @@ fn read_z_tile(
                     for j in j0..j1 {
                         let idx = i * width + j;
                         if cnt[idx] > 0.0 {
-                            let val = (offset as f64 + data_vec[src_idx] as f64 * inv_scale)
-                                as f32;
+                            let val = (offset as f64 + data_vec[src_idx] as f64 * inv_scale) as f32;
                             z[idx] = val.min(cfg.max_z_in_img);
                             src_idx += 1;
                         }
@@ -489,9 +486,7 @@ fn read_tiles_cnt(
     num_tiles_hori: i32,
 ) -> Result<()> {
     if num_tiles_vert <= 0 || num_tiles_hori <= 0 {
-        return Err(LercError::InvalidData(
-            "lerc1: invalid tile counts".into(),
-        ));
+        return Err(LercError::InvalidData("lerc1: invalid tile counts".into()));
     }
 
     for i_tile in 0..=num_tiles_vert {
@@ -535,9 +530,7 @@ fn read_tiles_z(
     let height = cfg.height;
 
     if num_tiles_vert <= 0 || num_tiles_hori <= 0 {
-        return Err(LercError::InvalidData(
-            "lerc1: invalid tile counts".into(),
-        ));
+        return Err(LercError::InvalidData("lerc1: invalid tile counts".into()));
     }
 
     for i_tile in 0..=num_tiles_vert {
@@ -562,7 +555,12 @@ fn read_tiles_z(
             }
             let j0 = j_tile as usize * (width / num_tiles_hori as usize);
 
-            let rect = TileRect { i0, i1: i0 + tile_h, j0, j1: j0 + tile_w };
+            let rect = TileRect {
+                i0,
+                i1: i0 + tile_h,
+                j0,
+                j1: j0 + tile_w,
+            };
             read_z_tile(cursor, cnt, z, cfg, rect)?;
         }
     }
@@ -1075,10 +1073,18 @@ mod tests {
         let mut z = vec![f32::NAN; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z, vec![0.0, 0.0, 0.0, 0.0]);
@@ -1094,10 +1100,18 @@ mod tests {
         let mut z = vec![f32::NAN; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 0.0);
@@ -1116,10 +1130,18 @@ mod tests {
         let mut z = vec![0.0f32; 6];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.5, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.5,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 3 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 3,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         for &val in &z {
@@ -1137,10 +1159,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 7.0);
@@ -1160,10 +1190,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z, vec![1.0, 2.0, 3.0, 4.0]);
@@ -1181,10 +1219,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 10.0);
@@ -1202,10 +1248,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.0,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         let result = read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect);
         assert!(result.is_err());
     }
@@ -1238,10 +1292,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.5, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.5,
+            max_z_in_img: 100.0,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         // inv_scale = 2 * 0.5 = 1.0
@@ -1264,10 +1326,18 @@ mod tests {
         let mut z = vec![0.0f32; 4];
 
         let cfg = Lerc1ZConfig {
-            width, height: 2,
-            max_z_error_in_file: 0.5, max_z_in_img: 11.5, decoder_can_ignore_mask: false,
+            width,
+            height: 2,
+            max_z_error_in_file: 0.5,
+            max_z_in_img: 11.5,
+            decoder_can_ignore_mask: false,
         };
-        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let rect = TileRect {
+            i0: 0,
+            i1: 2,
+            j0: 0,
+            j1: 2,
+        };
         read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 10.0);

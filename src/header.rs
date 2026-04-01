@@ -77,7 +77,6 @@ impl HeaderInfo {
         }
         size
     }
-
 }
 
 struct Cursor<'a> {
@@ -152,8 +151,7 @@ pub fn read_header(data: &[u8]) -> Result<(HeaderInfo, usize)> {
     let micro_block_size = c.read_i32()?;
     let blob_size = c.read_i32()?;
     let dt_raw = c.read_i32()?;
-    let data_type =
-        DataType::from_i32(dt_raw).ok_or(LercError::InvalidDataType(dt_raw))?;
+    let data_type = DataType::from_i32(dt_raw).ok_or(LercError::InvalidDataType(dt_raw))?;
 
     let (n_blobs_more, pass_no_data_values, is_int) = if version >= 6 {
         let nbm = c.read_i32()?;

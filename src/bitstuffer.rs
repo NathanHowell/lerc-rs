@@ -16,7 +16,11 @@ pub fn num_bytes_uint(k: u32) -> usize {
 fn num_tail_bytes_not_needed(num_elem: u32, num_bits: u32) -> u32 {
     let num_bits_tail = ((num_elem as u64 * num_bits as u64) & 31) as u32;
     let num_bytes_tail = (num_bits_tail + 7) >> 3;
-    if num_bytes_tail > 0 { 4 - num_bytes_tail } else { 0 }
+    if num_bytes_tail > 0 {
+        4 - num_bytes_tail
+    } else {
+        0
+    }
 }
 
 fn encode_uint(buf: &mut Vec<u8>, k: u32, num_bytes: usize) {
@@ -120,12 +124,7 @@ fn bit_stuff_into(out: &mut [u8], data: &[u32], num_bits: u32) {
 
 /// Bit-unstuff values from a buffer (v3+ format: LSB-first packing).
 /// Uses a 64-bit accumulator to avoid branching in the inner loop.
-fn bit_unstuff(
-    data: &[u8],
-    pos: &mut usize,
-    num_elements: u32,
-    num_bits: u32,
-) -> Result<Vec<u32>> {
+fn bit_unstuff(data: &[u8], pos: &mut usize, num_elements: u32, num_bits: u32) -> Result<Vec<u32>> {
     if num_elements == 0 || num_bits >= 32 {
         return Err(LercError::InvalidData("bitstuffer: invalid params".into()));
     }
@@ -402,9 +401,11 @@ pub fn encode_small_tile_into(buf: &mut Vec<u8>, quant_data: &[u32], max_elem: u
         }
         let num_bytes_simple =
             1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
-        let num_bytes_lut =
-            1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
-                + ((num_elem * n_bits_lut + 7) >> 3);
+        let num_bytes_lut = 1
+            + num_bytes_uint(num_elem) as u32
+            + 1
+            + ((n_lut * num_bits + 7) >> 3)
+            + ((num_elem * n_bits_lut + 7) >> 3);
         num_bytes_lut < num_bytes_simple
     } else {
         false
@@ -515,7 +516,11 @@ pub fn decode(
     *pos += 1;
 
     let bits67 = header_byte >> 6;
-    let nb = if bits67 == 0 { 4 } else { (3 - bits67) as usize };
+    let nb = if bits67 == 0 {
+        4
+    } else {
+        (3 - bits67) as usize
+    };
     let do_lut = (header_byte & (1 << 5)) != 0;
     let num_bits = (header_byte & 31) as u32;
 
@@ -627,7 +632,12 @@ pub fn should_use_lut(data: &[u32], max_elem: u32) -> Option<LutInfo> {
 /// Fast LUT construction for u8-range data (max_elem < 256).
 /// Uses a 256-entry histogram to count distinct values AND build the value-to-index
 /// mapping in a single pass, completely avoiding any sorting.
-fn should_use_lut_small(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u32) -> Option<LutInfo> {
+fn should_use_lut_small(
+    data: &[u32],
+    num_elem: u32,
+    num_bits: u32,
+    max_elem: u32,
+) -> Option<LutInfo> {
     // Build histogram
     let mut counts = [0u32; 256];
     for &val in data {
@@ -644,17 +654,18 @@ fn should_use_lut_small(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u3
     let n_lut = n_distinct - 1;
 
     // Estimate size before building the full LUT
-    let num_bytes_simple =
-        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+    let num_bytes_simple = 1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
     let mut n_bits_lut = 0u32;
     while (n_lut >> n_bits_lut) != 0 {
         n_bits_lut += 1;
     }
 
-    let num_bytes_lut =
-        1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
-            + ((num_elem * n_bits_lut + 7) >> 3);
+    let num_bytes_lut = 1
+        + num_bytes_uint(num_elem) as u32
+        + 1
+        + ((n_lut * num_bits + 7) >> 3)
+        + ((num_elem * n_bits_lut + 7) >> 3);
 
     if num_bytes_lut >= num_bytes_simple {
         return None;
@@ -690,7 +701,12 @@ fn should_use_lut_small(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u3
 }
 
 /// LUT construction for medium domains (256..65536).
-fn should_use_lut_medium(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u32) -> Option<LutInfo> {
+fn should_use_lut_medium(
+    data: &[u32],
+    num_elem: u32,
+    num_bits: u32,
+    max_elem: u32,
+) -> Option<LutInfo> {
     // Use a bitset to count distinct values
     let num_words = (max_elem as usize / 64) + 1;
     let mut bitset = vec![0u64; num_words];
@@ -707,17 +723,18 @@ fn should_use_lut_medium(data: &[u32], num_elem: u32, num_bits: u32, max_elem: u
 
     let n_lut = n_distinct - 1;
 
-    let num_bytes_simple =
-        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+    let num_bytes_simple = 1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
     let mut n_bits_lut = 0u32;
     while (n_lut >> n_bits_lut) != 0 {
         n_bits_lut += 1;
     }
 
-    let num_bytes_lut =
-        1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
-            + ((num_elem * n_bits_lut + 7) >> 3);
+    let num_bytes_lut = 1
+        + num_bytes_uint(num_elem) as u32
+        + 1
+        + ((n_lut * num_bits + 7) >> 3)
+        + ((num_elem * n_bits_lut + 7) >> 3);
 
     if num_bytes_lut >= num_bytes_simple {
         return None;
@@ -797,17 +814,18 @@ fn should_use_lut_large(data: &[u32], num_elem: u32, num_bits: u32) -> Option<Lu
     let n_lut = lut_vec.len() as u32;
 
     // Check if LUT is beneficial
-    let num_bytes_simple =
-        1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
+    let num_bytes_simple = 1 + num_bytes_uint(num_elem) as u32 + ((num_elem * num_bits + 7) >> 3);
 
     let mut n_bits_lut = 0u32;
     while (n_lut >> n_bits_lut) != 0 {
         n_bits_lut += 1;
     }
 
-    let num_bytes_lut =
-        1 + num_bytes_uint(num_elem) as u32 + 1 + ((n_lut * num_bits + 7) >> 3)
-            + ((num_elem * n_bits_lut + 7) >> 3);
+    let num_bytes_lut = 1
+        + num_bytes_uint(num_elem) as u32
+        + 1
+        + ((n_lut * num_bits + 7) >> 3)
+        + ((num_elem * n_bits_lut + 7) >> 3);
 
     if num_bytes_lut >= num_bytes_simple {
         return None;
@@ -890,8 +908,7 @@ mod tests {
             let stuffed = bit_stuff(&data, num_bits);
             let mut pos = 0;
             // Wrap in a full decode context
-            let unstuffed =
-                bit_unstuff(&stuffed, &mut pos, data.len() as u32, num_bits).unwrap();
+            let unstuffed = bit_unstuff(&stuffed, &mut pos, data.len() as u32, num_bits).unwrap();
             assert_eq!(unstuffed, data, "failed for num_bits={num_bits}");
         }
     }

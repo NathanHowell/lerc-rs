@@ -162,11 +162,7 @@ mod tests {
         // Round-trip through from_bytes again
         let mask2 = BitMask::from_bytes(bytes.to_vec(), 16);
         for i in 0..16 {
-            assert_eq!(
-                mask.is_valid(i),
-                mask2.is_valid(i),
-                "mismatch at pixel {i}"
-            );
+            assert_eq!(mask.is_valid(i), mask2.is_valid(i), "mismatch at pixel {i}");
         }
     }
 
@@ -181,11 +177,7 @@ mod tests {
         let bytes = mask.as_bytes().to_vec();
         let mask2 = BitMask::from_bytes(bytes, 10);
         for i in 0..10 {
-            assert_eq!(
-                mask.is_valid(i),
-                mask2.is_valid(i),
-                "mismatch at pixel {i}"
-            );
+            assert_eq!(mask.is_valid(i), mask2.is_valid(i), "mismatch at pixel {i}");
         }
     }
 

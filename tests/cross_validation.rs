@@ -14,10 +14,8 @@ use lerc::{DataType, LercData, LercImage};
 // Reference test data from the C++ LERC SDK
 // ---------------------------------------------------------------------------
 
-static CALIFORNIA: &[u8] =
-    include_bytes!("../esri-lerc/testData/california_400_400_1_float.lerc2");
-static BLUEMARBLE: &[u8] =
-    include_bytes!("../esri-lerc/testData/bluemarble_256_256_3_byte.lerc2");
+static CALIFORNIA: &[u8] = include_bytes!("../esri-lerc/testData/california_400_400_1_float.lerc2");
+static BLUEMARBLE: &[u8] = include_bytes!("../esri-lerc/testData/bluemarble_256_256_3_byte.lerc2");
 
 // ---------------------------------------------------------------------------
 // Minimal header parser (duplicates the crate-internal logic so we can
@@ -163,7 +161,11 @@ fn fletcher32(data: &[u8]) -> u32 {
 fn validate_header(blob: &[u8], expected_dt: i32, expected_rows: i32, expected_cols: i32) {
     let h = parse_header(blob);
 
-    assert!((3..=6).contains(&h.version), "expected encoder version 3-6, got {}", h.version);
+    assert!(
+        (3..=6).contains(&h.version),
+        "expected encoder version 3-6, got {}",
+        h.version
+    );
     assert_eq!(h.n_rows, expected_rows);
     assert_eq!(h.n_cols, expected_cols);
     assert_eq!(h.data_type, expected_dt);
@@ -179,7 +181,12 @@ fn validate_header(blob: &[u8], expected_dt: i32, expected_rows: i32, expected_c
         blob.len()
     );
     assert!(h.max_z_error >= 0.0, "maxZError must be non-negative");
-    assert!(h.z_min <= h.z_max, "zMin ({}) > zMax ({})", h.z_min, h.z_max);
+    assert!(
+        h.z_min <= h.z_max,
+        "zMin ({}) > zMax ({})",
+        h.z_min,
+        h.z_max
+    );
 
     // Verify checksum
     let computed = fletcher32(&blob[14..h.blob_size as usize]);
@@ -337,10 +344,7 @@ fn bluemarble_three_bands_detailed() {
 
     // Each band should have nonzero pixels
     for (band, &count) in band_nonzero.iter().enumerate() {
-        assert!(
-            count > 0,
-            "band {band} has no nonzero pixels"
-        );
+        assert!(count > 0, "band {band} has no nonzero pixels");
     }
 
     // Bands should not all have the same mean (they represent R, G, B)
@@ -348,8 +352,8 @@ fn bluemarble_three_bands_detailed() {
         .iter()
         .map(|&s| s as f64 / band_size as f64)
         .collect();
-    let all_same_mean = (band_means[0] - band_means[1]).abs() < 1.0
-        && (band_means[1] - band_means[2]).abs() < 1.0;
+    let all_same_mean =
+        (band_means[0] - band_means[1]).abs() < 1.0 && (band_means[1] - band_means[2]).abs() < 1.0;
     assert!(
         !all_same_mean,
         "all three bands have nearly identical means ({:?}), expected different R/G/B channels",
@@ -923,7 +927,13 @@ fn deterministic_encoding_with_mask() {
     }
 
     let pixels: Vec<f32> = (0..n)
-        .map(|i| if mask.is_valid(i) { (i as f32) * 0.7 } else { 0.0 })
+        .map(|i| {
+            if mask.is_valid(i) {
+                (i as f32) * 0.7
+            } else {
+                0.0
+            }
+        })
         .collect();
 
     let image = LercImage {
@@ -1129,7 +1139,11 @@ fn self_consistency_u32_sparse_mask() {
     match &decoded.data {
         LercData::U32(dec_pixels) => {
             for k in 0..n {
-                assert_eq!(mask.is_valid(k), dec_mask.is_valid(k), "mask mismatch at {k}");
+                assert_eq!(
+                    mask.is_valid(k),
+                    dec_mask.is_valid(k),
+                    "mask mismatch at {k}"
+                );
                 if mask.is_valid(k) {
                     assert_eq!(
                         pixels[k], dec_pixels[k],

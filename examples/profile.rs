@@ -27,7 +27,9 @@ fn main() {
         ..Default::default()
     };
 
-    let u8_pixels: Vec<u8> = (0..size * size).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+    let u8_pixels: Vec<u8> = (0..size * size)
+        .map(|i| ((i * 7 + 13) % 256) as u8)
+        .collect();
     let u8_image = LercImage {
         width: size as u32,
         height: size as u32,

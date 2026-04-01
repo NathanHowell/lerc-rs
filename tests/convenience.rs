@@ -45,11 +45,7 @@ round_trip_test!(
     i32,
     (0..16).map(|i| i * 1000 - 8000).collect()
 );
-round_trip_test!(
-    round_trip_u32,
-    u32,
-    (0..16).map(|i| i * 1000).collect()
-);
+round_trip_test!(round_trip_u32, u32, (0..16).map(|i| i * 1000).collect());
 round_trip_test!(
     round_trip_f32,
     f32,
@@ -222,9 +218,15 @@ fn decode_typed_rejects_multiband() {
 
     let blob = lerc::encode(&image, 0.5).unwrap();
     let result = lerc::decode_typed::<u8>(&blob);
-    assert!(result.is_err(), "decode_typed should reject multi-band blobs");
+    assert!(
+        result.is_err(),
+        "decode_typed should reject multi-band blobs"
+    );
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("single-band"), "error should mention single-band: {err}");
+    assert!(
+        err.contains("single-band"),
+        "error should mention single-band: {err}"
+    );
 }
 
 #[test]
@@ -248,9 +250,15 @@ fn decode_typed_rejects_multidepth() {
 
     let blob = lerc::encode(&image, 0.01).unwrap();
     let result = lerc::decode_typed::<f32>(&blob);
-    assert!(result.is_err(), "decode_typed should reject multi-depth blobs");
+    assert!(
+        result.is_err(),
+        "decode_typed should reject multi-depth blobs"
+    );
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("single-depth"), "error should mention single-depth: {err}");
+    assert!(
+        err.contains("single-depth"),
+        "error should mention single-depth: {err}"
+    );
 }
 
 // ---------------------------------------------------------------------------

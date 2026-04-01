@@ -89,7 +89,10 @@ fn round_trip_i32_ndepth3_lossless() {
     assert_eq!(decoded.n_depth, n_depth);
     match &decoded.data {
         LercData::I32(dec_pixels) => {
-            assert_eq!(dec_pixels, &pixels, "lossless i32 nDepth=3 round-trip mismatch");
+            assert_eq!(
+                dec_pixels, &pixels,
+                "lossless i32 nDepth=3 round-trip mismatch"
+            );
         }
         _ => panic!("expected I32 data"),
     }
@@ -252,7 +255,10 @@ fn round_trip_u8_ndepth3_lossless() {
     assert_eq!(decoded.n_depth, n_depth);
     match &decoded.data {
         LercData::U8(dec_pixels) => {
-            assert_eq!(dec_pixels, &pixels, "lossless u8 nDepth=3 round-trip mismatch");
+            assert_eq!(
+                dec_pixels, &pixels,
+                "lossless u8 nDepth=3 round-trip mismatch"
+            );
         }
         _ => panic!("expected U8 data"),
     }

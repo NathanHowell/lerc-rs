@@ -31,7 +31,12 @@ pub(crate) fn decode_huffman_flt<T: LercDataType>(
     n_depth: usize,
     output: &mut [T],
 ) -> Result<()> {
-    let params = FplSliceParams { is_double, width, height, n_depth };
+    let params = FplSliceParams {
+        is_double,
+        width,
+        height,
+        n_depth,
+    };
 
     for i_depth in 0..n_depth {
         decode_huffman_flt_slice(data, pos, &params, i_depth, output)?;
@@ -89,7 +94,9 @@ fn decode_huffman_flt_slice<T: LercDataType>(
         *pos += 6;
 
         if byte_index >= unit_size || best_level > 5 {
-            return Err(LercError::InvalidData("invalid FPL byte plane header".into()));
+            return Err(LercError::InvalidData(
+                "invalid FPL byte plane header".into(),
+            ));
         }
 
         if *pos + compressed_size > data.len() {
@@ -247,8 +254,7 @@ fn encode_huffman_flt_slice<T: LercDataType>(
             let m = pixel * n_depth + i_depth;
             let val = input[m].to_f64();
             let bytes = val.to_le_bytes();
-            unit_buffer[pixel * unit_size..pixel * unit_size + unit_size]
-                .copy_from_slice(&bytes);
+            unit_buffer[pixel * unit_size..pixel * unit_size + unit_size].copy_from_slice(&bytes);
         }
     } else {
         for pixel in 0..num_pixels {
@@ -257,8 +263,7 @@ fn encode_huffman_flt_slice<T: LercDataType>(
             let bits = input[m].to_bits_u64() as u32;
             let transformed = float_transform(bits);
             let bytes = transformed.to_le_bytes();
-            unit_buffer[pixel * unit_size..pixel * unit_size + unit_size]
-                .copy_from_slice(&bytes);
+            unit_buffer[pixel * unit_size..pixel * unit_size + unit_size].copy_from_slice(&bytes);
         }
     }
 
@@ -401,7 +406,11 @@ fn test_blocks_size(
     let mut ret = 0usize;
 
     // Pre-allocate buffers sized to the largest block
-    let max_length = blocks.iter().map(|tb| tb.height * raster_width).max().unwrap_or(0);
+    let max_length = blocks
+        .iter()
+        .map(|tb| tb.height * raster_width)
+        .max()
+        .unwrap_or(0);
     let mut plane_buffer = vec![0u8; max_length];
     let mut delta_buf = if test_first_byte_delta {
         vec![0u8; max_length]
@@ -439,12 +448,7 @@ fn test_blocks_size(
 
 /// Select the best predictor by generating test blocks and measuring estimated
 /// compressed sizes, matching C++ `selectInitialLinearOrCrossDelta`.
-fn select_predictor(
-    unit_buffer: &[u8],
-    width: usize,
-    height: usize,
-    unit_size: usize,
-) -> u8 {
+fn select_predictor(unit_buffer: &[u8], width: usize, height: usize, unit_size: usize) -> u8 {
     // For very small images, skip prediction
     if width <= 1 && height <= 1 {
         return 0;
@@ -520,8 +524,7 @@ fn get_best_level(plane: &[u8], max_delta: u8) -> u8 {
         return get_best_level_full(plane, max_delta);
     }
 
-    let top_margin =
-        (size as f64 - (count * TARGET_SAMPLE_SIZE) as f64) / (2.0 * count as f64);
+    let top_margin = (size as f64 - (count * TARGET_SAMPLE_SIZE) as f64) / (2.0 * count as f64);
     let delta = 2.0 * top_margin + TARGET_SAMPLE_SIZE as f64;
 
     let mut snippets: Vec<(usize, usize)> = Vec::with_capacity(count);
@@ -606,19 +609,33 @@ mod tests {
 
     #[test]
     fn float_transform_round_trip() {
-        for bits in [0u32, 1, 0x3F800000, 0x40000000, 0xBF800000, 0x7F7FFFFF, 0xFF7FFFFF] {
+        for bits in [
+            0u32, 1, 0x3F800000, 0x40000000, 0xBF800000, 0x7F7FFFFF, 0xFF7FFFFF,
+        ] {
             let transformed = float_transform(bits);
             let restored = undo_float_transform(transformed);
-            assert_eq!(restored, bits, "float transform round trip failed for {bits:#010x}");
+            assert_eq!(
+                restored, bits,
+                "float transform round trip failed for {bits:#010x}"
+            );
         }
     }
 
     #[test]
     fn double_transform_round_trip() {
-        for bits in [0u64, 1, 0x3FF0000000000000, 0x4000000000000000, 0xBFF0000000000000] {
+        for bits in [
+            0u64,
+            1,
+            0x3FF0000000000000,
+            0x4000000000000000,
+            0xBFF0000000000000,
+        ] {
             let transformed = double_transform(bits);
             let restored = undo_double_transform(transformed);
-            assert_eq!(restored, bits, "double transform round trip failed for {bits:#018x}");
+            assert_eq!(
+                restored, bits,
+                "double transform round trip failed for {bits:#018x}"
+            );
         }
     }
 
@@ -636,7 +653,16 @@ mod tests {
 
         let mut output = vec![0.0f32; width * height * n_depth];
         let mut pos = 0;
-        decode_huffman_flt(&encoded, &mut pos, is_double, width, height, n_depth, &mut output).unwrap();
+        decode_huffman_flt(
+            &encoded,
+            &mut pos,
+            is_double,
+            width,
+            height,
+            n_depth,
+            &mut output,
+        )
+        .unwrap();
 
         for (i, (&orig, &dec)) in input.iter().zip(output.iter()).enumerate() {
             assert_eq!(
@@ -683,7 +709,10 @@ mod tests {
         let mut data = original.clone();
         predictor::apply_sequence(&mut data, 16, 2);
         predictor::restore_sequence(&mut data, 16, 2);
-        assert_eq!(data, original, "apply_sequence/restore_sequence round-trip failed for level 2");
+        assert_eq!(
+            data, original,
+            "apply_sequence/restore_sequence round-trip failed for level 2"
+        );
     }
 
     #[test]
@@ -715,7 +744,16 @@ mod tests {
 
         let mut output = vec![0.0f64; width * height * n_depth];
         let mut pos = 0;
-        decode_huffman_flt(&encoded, &mut pos, is_double, width, height, n_depth, &mut output).unwrap();
+        decode_huffman_flt(
+            &encoded,
+            &mut pos,
+            is_double,
+            width,
+            height,
+            n_depth,
+            &mut output,
+        )
+        .unwrap();
 
         for (i, (&orig, &dec)) in input.iter().zip(output.iter()).enumerate() {
             assert_eq!(

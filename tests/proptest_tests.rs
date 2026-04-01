@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use lerc::bitmask::BitMask;
 use lerc::DataType;
+use lerc::bitmask::BitMask;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 
@@ -36,22 +36,14 @@ fn f64_image_strategy() -> impl Strategy<Value = (u32, u32, Vec<f64>, f64)> {
 fn u8_image_strategy() -> impl Strategy<Value = (u32, u32, Vec<u8>)> {
     (1..64u32, 1..64u32).prop_flat_map(|(w, h)| {
         let size = (w * h) as usize;
-        (
-            Just(w),
-            Just(h),
-            prop::collection::vec(any::<u8>(), size),
-        )
+        (Just(w), Just(h), prop::collection::vec(any::<u8>(), size))
     })
 }
 
 fn u16_image_strategy() -> impl Strategy<Value = (u32, u32, Vec<u16>)> {
     (1..64u32, 1..64u32).prop_flat_map(|(w, h)| {
         let size = (w * h) as usize;
-        (
-            Just(w),
-            Just(h),
-            prop::collection::vec(any::<u16>(), size),
-        )
+        (Just(w), Just(h), prop::collection::vec(any::<u16>(), size))
     })
 }
 

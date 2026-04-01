@@ -65,9 +65,8 @@ pub(super) fn select_block_size<T: LercDataType>(
     let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
     if T::DATA_TYPE == DataType::Byte && hd.max_z_error == 0.5 && all_valid && n_depth == 1 {
         debug_assert_eq!(T::BYTES, 1);
-        let u8_data: &[u8] = unsafe {
-            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
-        };
+        let u8_data: &[u8] =
+            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
         return Ok(select_block_size_u8_fast(u8_data, hd));
     }
 
@@ -99,7 +98,12 @@ pub(super) fn select_block_size<T: LercDataType>(
         h.micro_block_size = 8;
         h
     };
-    let ctx8 = TileEncodeContext { data, mask, header: &hd8, z_max_vec };
+    let ctx8 = TileEncodeContext {
+        data,
+        mask,
+        header: &hd8,
+        z_max_vec,
+    };
     for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
         let rect = crate::types::TileRect { i0, i1, j0, j1 };
         for i_depth in 0..n_depth {
@@ -114,7 +118,12 @@ pub(super) fn select_block_size<T: LercDataType>(
         h.micro_block_size = 16;
         h
     };
-    let ctx16 = TileEncodeContext { data, mask, header: &hd16, z_max_vec };
+    let ctx16 = TileEncodeContext {
+        data,
+        mask,
+        header: &hd16,
+        z_max_vec,
+    };
     for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
         let rect = crate::types::TileRect { i0, i1, j0, j1 };
         for i_depth in 0..n_depth {
@@ -122,11 +131,7 @@ pub(super) fn select_block_size<T: LercDataType>(
         }
     }
 
-    if size16 < size8 {
-        Ok(16)
-    } else {
-        Ok(8)
-    }
+    if size16 < size8 { Ok(16) } else { Ok(8) }
 }
 
 /// Scratch buffers reused across tiles to avoid per-tile allocations.
@@ -201,9 +206,8 @@ pub(super) fn encode_tiles<T: LercDataType>(
         debug_assert_eq!(T::BYTES, 1);
         debug_assert_eq!(core::mem::size_of::<T>(), 1);
         debug_assert_eq!(core::mem::align_of::<T>(), 1);
-        let u8_data: &[u8] = unsafe {
-            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
-        };
+        let u8_data: &[u8] =
+            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
         let mut quant_buf = [0u32; 256]; // max tile size is 16x16=256
         encode_tiles_u8_fast(blob, u8_data, header, &mut quant_buf);
         return Ok(());
@@ -212,7 +216,12 @@ pub(super) fn encode_tiles<T: LercDataType>(
     let num_tiles_vert = n_rows.div_ceil(mb_size);
     let num_tiles_hori = n_cols.div_ceil(mb_size);
 
-    let ctx = TileEncodeContext { data, mask, header, z_max_vec };
+    let ctx = TileEncodeContext {
+        data,
+        mask,
+        header,
+        z_max_vec,
+    };
     let mut scratch = ScratchBuffers::new();
 
     // Allocate a per-pixel reconstruction buffer when multi-depth lossy encoding
@@ -339,9 +348,7 @@ fn encode_tile<T: LercDataType>(
                     let diff = cur - prev;
                     // Check for integer overflow: for integer types, the diff
                     // must be representable as i32
-                    if T::is_integer()
-                        && (diff < i32::MIN as f64 || diff > i32::MAX as f64)
-                    {
+                    if T::is_integer() && (diff < i32::MIN as f64 || diff > i32::MAX as f64) {
                         overflow = true;
                         break;
                     }
@@ -531,11 +538,7 @@ struct ReconParams {
 /// Classify how a tile was encoded and return reconstruction info.
 /// This mirrors the logic in `encode_tile_inner` to determine whether the tile
 /// ended up as constant, quantized, or raw binary.
-fn classify_recon(
-    values: &[f64],
-    quant: &[u32],
-    p: &ReconParams,
-) -> TileReconInfo {
+fn classify_recon(values: &[f64], quant: &[u32], p: &ReconParams) -> TileReconInfo {
     let ReconParams {
         num_valid,
         z_min_f,
@@ -719,11 +722,20 @@ mod tests {
         let info = classify_recon(&values, &quant, &rp);
         match info {
             TileReconInfo::RawBinary => {}
-            _ => panic!("expected RawBinary, got {:?}", match info {
-                TileReconInfo::Constant(c) => alloc::format!("Constant({c})"),
-                TileReconInfo::Quantized { offset, inv_scale, z_max } => alloc::format!("Quantized(offset={offset}, inv_scale={inv_scale}, z_max={z_max})"),
-                TileReconInfo::RawBinary => "RawBinary".into(),
-            }),
+            _ => panic!(
+                "expected RawBinary, got {:?}",
+                match info {
+                    TileReconInfo::Constant(c) => alloc::format!("Constant({c})"),
+                    TileReconInfo::Quantized {
+                        offset,
+                        inv_scale,
+                        z_max,
+                    } => alloc::format!(
+                        "Quantized(offset={offset}, inv_scale={inv_scale}, z_max={z_max})"
+                    ),
+                    TileReconInfo::RawBinary => "RawBinary".into(),
+                }
+            ),
         }
     }
 
@@ -831,15 +843,23 @@ mod tests {
         assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == 0));
         // Top-right corner
         let last_j0 = (n_cols.div_ceil(mb_size) - 1) * mb_size;
-        assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == last_j0));
+        assert!(
+            positions
+                .iter()
+                .any(|&(i0, _, j0, _)| i0 == 0 && j0 == last_j0)
+        );
         // Bottom-left corner
         let last_i0 = (n_rows.div_ceil(mb_size) - 1) * mb_size;
-        assert!(positions
-            .iter()
-            .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == 0));
+        assert!(
+            positions
+                .iter()
+                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == 0)
+        );
         // Bottom-right corner
-        assert!(positions
-            .iter()
-            .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == last_j0));
+        assert!(
+            positions
+                .iter()
+                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == last_j0)
+        );
     }
 }

@@ -16,7 +16,11 @@ pub(super) fn is_high_entropy_u8<T: LercDataType>(
     let width = header.n_cols as usize;
     let height = header.n_rows as usize;
     let n_depth = header.n_depth as usize;
-    let offset: i32 = if header.data_type == DataType::Char { 128 } else { 0 };
+    let offset: i32 = if header.data_type == DataType::Char {
+        128
+    } else {
+        0
+    };
     let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
 
     // Build a quick histogram
@@ -26,9 +30,8 @@ pub(super) fn is_high_entropy_u8<T: LercDataType>(
     // Fast path for u8, all-valid, single-depth: avoid to_f64 and mask checks
     if T::DATA_TYPE == DataType::Byte && all_valid && n_depth == 1 {
         debug_assert_eq!(offset, 0);
-        let u8_data: &[u8] = unsafe {
-            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
-        };
+        let u8_data: &[u8] =
+            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
         for &val in u8_data {
             histo[val as usize] += 1;
         }
@@ -76,16 +79,19 @@ pub(super) fn is_high_entropy_u8<T: LercDataType>(
     let mut delta_total = 0u32;
 
     if T::DATA_TYPE == DataType::Byte && all_valid && n_depth == 1 {
-        let u8_data: &[u8] = unsafe {
-            core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len())
-        };
+        let u8_data: &[u8] =
+            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
         for row_idx in 0..sample_rows {
             let i = row_idx * row_step;
             let row_start = i * width;
             let mut prev_val: u8 = 0;
             for j in 0..width {
                 let val = u8_data[row_start + j];
-                let delta = if j > 0 { val.wrapping_sub(prev_val) } else { val };
+                let delta = if j > 0 {
+                    val.wrapping_sub(prev_val)
+                } else {
+                    val
+                };
                 delta_histo[delta as usize] += 1;
                 delta_total += 1;
                 prev_val = val;
@@ -99,7 +105,11 @@ pub(super) fn is_high_entropy_u8<T: LercDataType>(
                 let k = i * width + j;
                 if all_valid || mask.is_valid(k) {
                     let val = data[k * n_depth].to_f64() as i32;
-                    let delta = if j > 0 { val.wrapping_sub(prev_val) } else { val };
+                    let delta = if j > 0 {
+                        val.wrapping_sub(prev_val)
+                    } else {
+                        val
+                    };
                     delta_histo[(delta + offset) as u8 as usize] += 1;
                     delta_total += 1;
                     prev_val = val;
@@ -270,16 +280,13 @@ pub(super) fn try_encode_huffman_int<T: LercDataType>(
                         let k = i * width + j;
                         if all_valid || mask.is_valid(k) {
                             let val = data[k * n_depth + i_depth].to_f64() as i32;
-                            let predictor =
-                                if j > 0 && (all_valid || mask.is_valid(k - 1)) {
-                                    prev_val
-                                } else if i > 0
-                                    && (all_valid || mask.is_valid(k - width))
-                                {
-                                    data[(k - width) * n_depth + i_depth].to_f64() as i32
-                                } else {
-                                    prev_val
-                                };
+                            let predictor = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                                prev_val
+                            } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
+                                data[(k - width) * n_depth + i_depth].to_f64() as i32
+                            } else {
+                                prev_val
+                            };
                             let delta = val.wrapping_sub(predictor);
                             let bin = (delta + offset) as u8 as usize;
                             total_bits += code_table[bin].0 as u64;
@@ -328,16 +335,13 @@ pub(super) fn try_encode_huffman_int<T: LercDataType>(
                         let k = i * width + j;
                         if all_valid || mask.is_valid(k) {
                             let val = data[k * n_depth + i_depth].to_f64() as i32;
-                            let predictor =
-                                if j > 0 && (all_valid || mask.is_valid(k - 1)) {
-                                    prev_val
-                                } else if i > 0
-                                    && (all_valid || mask.is_valid(k - width))
-                                {
-                                    data[(k - width) * n_depth + i_depth].to_f64() as i32
-                                } else {
-                                    prev_val
-                                };
+                            let predictor = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                                prev_val
+                            } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
+                                data[(k - width) * n_depth + i_depth].to_f64() as i32
+                            } else {
+                                prev_val
+                            };
                             let delta = val.wrapping_sub(predictor);
                             let bin = (delta + offset) as u8 as usize;
                             let (len, code) = code_table[bin];
@@ -346,8 +350,7 @@ pub(super) fn try_encode_huffman_int<T: LercDataType>(
                             accum_bits += len;
                             if accum_bits >= 32 {
                                 let word = (accum >> 32) as u32;
-                                encoded[out_idx..out_idx + 4]
-                                    .copy_from_slice(&word.to_le_bytes());
+                                encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
                                 out_idx += 4;
                                 accum <<= 32;
                                 accum_bits -= 32;
@@ -372,8 +375,7 @@ pub(super) fn try_encode_huffman_int<T: LercDataType>(
                             accum_bits += len;
                             if accum_bits >= 32 {
                                 let word = (accum >> 32) as u32;
-                                encoded[out_idx..out_idx + 4]
-                                    .copy_from_slice(&word.to_le_bytes());
+                                encoded[out_idx..out_idx + 4].copy_from_slice(&word.to_le_bytes());
                                 out_idx += 4;
                                 accum <<= 32;
                                 accum_bits -= 32;
@@ -406,7 +408,12 @@ mod tests {
     use super::*;
 
     /// Helper to build a HeaderInfo for u8 data (DataType::Byte).
-    fn make_header_byte(width: usize, height: usize, n_depth: usize, num_valid: usize) -> HeaderInfo {
+    fn make_header_byte(
+        width: usize,
+        height: usize,
+        n_depth: usize,
+        num_valid: usize,
+    ) -> HeaderInfo {
         HeaderInfo {
             version: 6,
             n_rows: height as i32,
@@ -498,7 +505,12 @@ mod tests {
         let header = make_header_byte(width, height, 1, n);
         let (_histo, delta_histo) = compute_histo_for_huffman(&data, &mask, &header);
         // The delta value 3 should be the most common entry in delta_histo.
-        let max_bin = delta_histo.iter().enumerate().max_by_key(|(_i, c)| *c).unwrap().0;
+        let max_bin = delta_histo
+            .iter()
+            .enumerate()
+            .max_by_key(|(_i, c)| *c)
+            .unwrap()
+            .0;
         assert_eq!(max_bin, 3, "delta of 3 should be most frequent");
     }
 

@@ -112,8 +112,15 @@ pub fn encode<T: Copy>(
     let rc = unsafe {
         lerc_computeCompressedSize(
             data.as_ptr() as *const c_void,
-            data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
-            valid_ptr, max_z_err, &mut num_bytes,
+            data_type,
+            n_depth,
+            n_cols,
+            n_rows,
+            n_bands,
+            n_masks,
+            valid_ptr,
+            max_z_err,
+            &mut num_bytes,
         )
     };
     assert_eq!(rc, ERR_OK, "lerc_computeCompressedSize failed: {rc}");
@@ -123,9 +130,17 @@ pub fn encode<T: Copy>(
     let rc = unsafe {
         lerc_encode(
             data.as_ptr() as *const c_void,
-            data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
-            valid_ptr, max_z_err,
-            buffer.as_mut_ptr(), num_bytes, &mut bytes_written,
+            data_type,
+            n_depth,
+            n_cols,
+            n_rows,
+            n_bands,
+            n_masks,
+            valid_ptr,
+            max_z_err,
+            buffer.as_mut_ptr(),
+            num_bytes,
+            &mut bytes_written,
         )
     };
     assert_eq!(rc, ERR_OK, "lerc_encode failed: {rc}");
@@ -152,20 +167,40 @@ pub fn encode_for_version<T: Copy>(
     let rc = unsafe {
         lerc_computeCompressedSizeForVersion(
             data.as_ptr() as *const c_void,
-            codec_version, data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
-            valid_ptr, max_z_err, &mut num_bytes,
+            codec_version,
+            data_type,
+            n_depth,
+            n_cols,
+            n_rows,
+            n_bands,
+            n_masks,
+            valid_ptr,
+            max_z_err,
+            &mut num_bytes,
         )
     };
-    assert_eq!(rc, ERR_OK, "lerc_computeCompressedSizeForVersion failed: {rc}");
+    assert_eq!(
+        rc, ERR_OK,
+        "lerc_computeCompressedSizeForVersion failed: {rc}"
+    );
 
     let mut buffer = vec![0u8; num_bytes as usize];
     let mut bytes_written: u32 = 0;
     let rc = unsafe {
         lerc_encodeForVersion(
             data.as_ptr() as *const c_void,
-            codec_version, data_type, n_depth, n_cols, n_rows, n_bands, n_masks,
-            valid_ptr, max_z_err,
-            buffer.as_mut_ptr(), num_bytes, &mut bytes_written,
+            codec_version,
+            data_type,
+            n_depth,
+            n_cols,
+            n_rows,
+            n_bands,
+            n_masks,
+            valid_ptr,
+            max_z_err,
+            buffer.as_mut_ptr(),
+            num_bytes,
+            &mut bytes_written,
         )
     };
     assert_eq!(rc, ERR_OK, "lerc_encodeForVersion failed: {rc}");
@@ -190,9 +225,15 @@ pub fn decode<T: Copy + Default>(
 
     let rc = unsafe {
         lerc_decode(
-            blob.as_ptr(), blob.len() as u32,
-            1, valid_bytes.as_mut_ptr(),
-            n_depth, n_cols, n_rows, n_bands, data_type,
+            blob.as_ptr(),
+            blob.len() as u32,
+            1,
+            valid_bytes.as_mut_ptr(),
+            n_depth,
+            n_cols,
+            n_rows,
+            n_bands,
+            data_type,
             data.as_mut_ptr() as *mut c_void,
         )
     };
@@ -206,9 +247,12 @@ pub fn get_blob_info(blob: &[u8]) -> ([u32; INFO_ARRAY_SIZE], [f64; RANGE_ARRAY_
     let mut range = [0.0f64; RANGE_ARRAY_SIZE];
     let rc = unsafe {
         lerc_getBlobInfo(
-            blob.as_ptr(), blob.len() as u32,
-            info.as_mut_ptr(), range.as_mut_ptr(),
-            info.len() as i32, range.len() as i32,
+            blob.as_ptr(),
+            blob.len() as u32,
+            info.as_mut_ptr(),
+            range.as_mut_ptr(),
+            info.len() as i32,
+            range.len() as i32,
         )
     };
     assert_eq!(rc, ERR_OK, "lerc_getBlobInfo failed: {rc}");

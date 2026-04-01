@@ -52,7 +52,9 @@ fn bench_encode_512_lossless(c: &mut Criterion) {
 
 fn bench_encode_u8_512(c: &mut Criterion) {
     let size = 512;
-    let pixels: Vec<u8> = (0..size * size).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+    let pixels: Vec<u8> = (0..size * size)
+        .map(|i| ((i * 7 + 13) % 256) as u8)
+        .collect();
     let image = LercImage {
         width: size as u32,
         height: size as u32,

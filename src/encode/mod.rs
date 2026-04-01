@@ -83,14 +83,7 @@ fn encode_typed<T: LercDataType>(
             // Should not happen for a valid image, but be safe.
             &image.valid_masks[0]
         };
-        if try_raise_max_z_error(
-            data,
-            mask,
-            width,
-            height,
-            n_depth,
-            &mut raised,
-        ) {
+        if try_raise_max_z_error(data, mask, width, height, n_depth, &mut raised) {
             raised
         } else {
             max_z_error
@@ -183,10 +176,18 @@ fn compute_band_stats<T: LercDataType>(
     let mut depth_count_at_pixel = 0usize;
 
     for_each_valid_pixel(data, mask, width, height, n_depth, |k, m, val| {
-        if val < stats.z_min_vec[m] { stats.z_min_vec[m] = val; }
-        if val > stats.z_max_vec[m] { stats.z_max_vec[m] = val; }
-        if val < stats.overall_min { stats.overall_min = val; }
-        if val > stats.overall_max { stats.overall_max = val; }
+        if val < stats.z_min_vec[m] {
+            stats.z_min_vec[m] = val;
+        }
+        if val > stats.z_max_vec[m] {
+            stats.z_max_vec[m] = val;
+        }
+        if val < stats.overall_min {
+            stats.overall_min = val;
+        }
+        if val > stats.overall_max {
+            stats.overall_max = val;
+        }
 
         if let Some(nd) = nd_f64 {
             if k != prev_k {
@@ -256,7 +257,15 @@ fn process_no_data<T: LercDataType>(
     input: &NoDataInput,
     stats: &mut BandStats,
 ) -> Result<NoDataResult<T>> {
-    let NoDataInput { width, height, n_depth, num_valid, image_no_data, nd_f64, max_z_error } = *input;
+    let NoDataInput {
+        width,
+        height,
+        n_depth,
+        num_valid,
+        image_no_data,
+        nd_f64,
+        max_z_error,
+    } = *input;
     let mut result = NoDataResult {
         pass_no_data: false,
         no_data_val_internal: 0.0,
@@ -272,10 +281,13 @@ fn process_no_data<T: LercDataType>(
     }
 
     if stats.needs_no_data {
-        let sentinel = compute_no_data_sentinel::<T>(stats.valid_min, max_z_error)
-            .ok_or_else(|| LercError::InvalidData(
-                "cannot find a NoData sentinel value below the valid data range for this type".into(),
-            ))?;
+        let sentinel =
+            compute_no_data_sentinel::<T>(stats.valid_min, max_z_error).ok_or_else(|| {
+                LercError::InvalidData(
+                    "cannot find a NoData sentinel value below the valid data range for this type"
+                        .into(),
+                )
+            })?;
         result.pass_no_data = true;
         result.no_data_val_orig = nd_orig;
 
@@ -360,8 +372,8 @@ fn write_blob_payload<T: LercDataType>(
     blob.push(0u8);
 
     // Encoding mode dispatch
-    let try_huffman_int = matches!(T::DATA_TYPE, DataType::Char | DataType::Byte)
-        && hd.max_z_error == 0.5;
+    let try_huffman_int =
+        matches!(T::DATA_TYPE, DataType::Char | DataType::Byte) && hd.max_z_error == 0.5;
 
     if try_huffman_int {
         let skip_huffman = is_high_entropy_u8(encode_data, mask, hd);
@@ -369,8 +381,12 @@ fn write_blob_payload<T: LercDataType>(
             if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd) {
                 let mut tiling_blob = Vec::new();
                 encode_tiles(
-                    &mut tiling_blob, encode_data, mask, hd,
-                    &stats.z_min_vec, &stats.z_max_vec,
+                    &mut tiling_blob,
+                    encode_data,
+                    mask,
+                    hd,
+                    &stats.z_min_vec,
+                    &stats.z_max_vec,
                 )?;
                 if huffman_blob.len() < tiling_blob.len() {
                     blob.extend_from_slice(&huffman_blob);
@@ -381,14 +397,20 @@ fn write_blob_payload<T: LercDataType>(
         blob.push(ImageEncodeMode::Tiling as u8);
     } else if try_huffman_flt {
         let is_double = T::DATA_TYPE == DataType::Double;
-        let fpl_data =
-            fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
+        let fpl_data = fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
         blob.push(ImageEncodeMode::DeltaDeltaHuffman as u8);
         blob.extend_from_slice(&fpl_data);
         return Ok(());
     }
 
-    encode_tiles(blob, encode_data, mask, hd, &stats.z_min_vec, &stats.z_max_vec)?;
+    encode_tiles(
+        blob,
+        encode_data,
+        mask,
+        hd,
+        &stats.z_min_vec,
+        &stats.z_max_vec,
+    )?;
     Ok(())
 }
 
@@ -411,13 +433,17 @@ fn encode_one_band<T: LercDataType>(
     };
 
     // 1. Gather statistics in a single pass.
-    let mut stats =
-        compute_band_stats(data, mask, width, height, n_depth, num_valid, nd_f64);
+    let mut stats = compute_band_stats(data, mask, width, height, n_depth, num_valid, nd_f64);
 
     // 2. Handle NoData sentinel computation and data remapping.
     let nd_input = NoDataInput {
-        width, height, n_depth, num_valid,
-        image_no_data: image.no_data_value, nd_f64, max_z_error,
+        width,
+        height,
+        n_depth,
+        num_valid,
+        image_no_data: image.no_data_value,
+        nd_f64,
+        max_z_error,
     };
     let nd_result = process_no_data(data, mask, &nd_input, &mut stats)?;
     let encode_data: &[T] = nd_result.remapped_data.as_deref().unwrap_or(data);
@@ -462,7 +488,14 @@ fn encode_one_band<T: LercDataType>(
 
     // 5. Write header + payload, finalize checksum.
     let mut blob = header::write_header(&hd);
-    write_blob_payload(&mut blob, encode_data, mask, &mut hd, &stats, try_huffman_flt)?;
+    write_blob_payload(
+        &mut blob,
+        encode_data,
+        mask,
+        &mut hd,
+        &stats,
+        try_huffman_flt,
+    )?;
     header::finalize_blob(&mut blob);
     Ok(blob)
 }
@@ -478,9 +511,7 @@ mod tests {
         let width = 4;
         let height = 3;
         let data: Vec<f32> = vec![
-            1.0, 2.0, 3.0, 4.0,
-            5.0, 6.0, 7.0, 8.0,
-            9.0, 10.0, 11.0, 12.0,
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
         ];
         let mask = BitMask::all_valid(width * height);
         let stats = compute_band_stats(&data, &mask, width, height, 1, width * height, None);
@@ -498,10 +529,10 @@ mod tests {
         let height = 2;
         let n_depth = 2;
         let data: Vec<f32> = vec![
-            1.0, 100.0,  // pixel (0,0): depth0=1, depth1=100
-            2.0, 200.0,  // pixel (1,0): depth0=2, depth1=200
-            3.0, 50.0,   // pixel (0,1): depth0=3, depth1=50
-            4.0, 150.0,  // pixel (1,1): depth0=4, depth1=150
+            1.0, 100.0, // pixel (0,0): depth0=1, depth1=100
+            2.0, 200.0, // pixel (1,0): depth0=2, depth1=200
+            3.0, 50.0, // pixel (0,1): depth0=3, depth1=50
+            4.0, 150.0, // pixel (1,1): depth0=4, depth1=150
         ];
         let mask = BitMask::all_valid(width * height);
         let stats = compute_band_stats(&data, &mask, width, height, n_depth, width * height, None);
@@ -526,14 +557,21 @@ mod tests {
         let height = 1;
         let n_depth = 2;
         let nd = -9999.0_f64;
-        let data: Vec<f64> = vec![
-            5.0, nd,
-            10.0, 20.0,
-            15.0, 25.0,
-        ];
+        let data: Vec<f64> = vec![5.0, nd, 10.0, 20.0, 15.0, 25.0];
         let mask = BitMask::all_valid(width * height);
-        let stats = compute_band_stats(&data, &mask, width, height, n_depth, width * height, Some(nd));
-        assert!(stats.needs_no_data, "mixed NoData across depths should set needs_no_data");
+        let stats = compute_band_stats(
+            &data,
+            &mask,
+            width,
+            height,
+            n_depth,
+            width * height,
+            Some(nd),
+        );
+        assert!(
+            stats.needs_no_data,
+            "mixed NoData across depths should set needs_no_data"
+        );
         // valid_min should exclude the NoData value
         assert!(stats.valid_min > nd, "valid_min should exclude NoData");
         assert_eq!(stats.valid_min, 5.0);

@@ -110,6 +110,15 @@ cargo bench --bench codec  # requires C++ toolchain for comparison benchmarks
 
 ### wasm
 
+Tests run on `wasm32-wasip1` via [wasmtime](https://wasmtime.dev/):
+
+```sh
+rustup target add wasm32-wasip1
+cargo test --target wasm32-wasip1       # lib + integration tests
+```
+
+Compile-only check for `wasm32-unknown-unknown` (no test runner):
+
 ```sh
 cargo check --target wasm32-unknown-unknown
 ```

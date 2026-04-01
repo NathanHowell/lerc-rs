@@ -1322,6 +1322,7 @@ fn try_raise_max_z_error_with_partial_mask() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn decode_lerc1_world() {
     let data = std::fs::read("esri-lerc/testData/world.lerc1").expect("failed to read world.lerc1");
 

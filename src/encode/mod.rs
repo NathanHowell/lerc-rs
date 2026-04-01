@@ -658,26 +658,30 @@ mod tests {
         assert_eq!(visited[1], (1, 1, 4.0)); // pixel 1, depth 1
     }
 
-    use proptest::prelude::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
 
-    proptest! {
-        #[test]
-        fn for_each_valid_pixel_count(w in 1..32usize, h in 1..32usize) {
-            let mask = BitMask::all_valid(w * h);
-            let data: Vec<f32> = vec![1.0; w * h];
-            let mut count = 0usize;
-            for_each_valid_pixel(&data, &mask, w, h, 1, |_, _, _| count += 1);
-            prop_assert_eq!(count, w * h);
-        }
+        proptest! {
+            #[test]
+            fn for_each_valid_pixel_count(w in 1..32usize, h in 1..32usize) {
+                let mask = BitMask::all_valid(w * h);
+                let data: Vec<f32> = vec![1.0; w * h];
+                let mut count = 0usize;
+                for_each_valid_pixel(&data, &mask, w, h, 1, |_, _, _| count += 1);
+                prop_assert_eq!(count, w * h);
+            }
 
-        #[test]
-        fn compute_band_stats_invariants(w in 2..16usize, h in 2..16usize) {
-            let mask = BitMask::all_valid(w * h);
-            let data: Vec<f32> = (0..w*h).map(|i| i as f32).collect();
-            let stats = compute_band_stats(&data, &mask, w, h, 1, w*h, None);
-            prop_assert!(stats.overall_min <= stats.overall_max);
-            prop_assert_eq!(stats.z_min_vec.len(), 1);
-            prop_assert!(stats.z_min_vec[0] <= stats.z_max_vec[0]);
+            #[test]
+            fn compute_band_stats_invariants(w in 2..16usize, h in 2..16usize) {
+                let mask = BitMask::all_valid(w * h);
+                let data: Vec<f32> = (0..w*h).map(|i| i as f32).collect();
+                let stats = compute_band_stats(&data, &mask, w, h, 1, w*h, None);
+                prop_assert!(stats.overall_min <= stats.overall_max);
+                prop_assert_eq!(stats.z_min_vec.len(), 1);
+                prop_assert!(stats.z_min_vec[0] <= stats.z_max_vec[0]);
+            }
         }
     }
 }

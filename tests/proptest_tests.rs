@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use lerc::bitmask::BitMask;
 use lerc::DataType;
 use proptest::prelude::*;

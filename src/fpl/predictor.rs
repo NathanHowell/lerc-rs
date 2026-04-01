@@ -386,25 +386,6 @@ fn apply_byte_order_f64(data: &mut [u8], width: usize, height: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
-
-    // ---- Field-separated arithmetic round-trips ----
-
-    proptest! {
-        #[test]
-        fn sub_add_32_bit_flt_round_trip(a: u32, b: u32) {
-            let diff = sub32_bit_flt(a, b);
-            let recovered = add32_bit_flt(diff, b);
-            prop_assert_eq!(recovered, a);
-        }
-
-        #[test]
-        fn sub_add_64_bit_dbl_round_trip(a: u64, b: u64) {
-            let diff = sub64_bit_dbl(a, b);
-            let recovered = add64_bit_dbl(diff, b);
-            prop_assert_eq!(recovered, a);
-        }
-    }
 
     #[test]
     fn sub_add_32_bit_flt_known_values() {
@@ -422,19 +403,6 @@ mod tests {
         assert_eq!(sub64_bit_dbl(one_f64, one_f64), 0);
         assert_eq!(sub64_bit_dbl(one_f64, 0), one_f64);
         assert_eq!(add64_bit_dbl(0, one_f64), one_f64);
-    }
-
-    // ---- apply_sequence / restore_sequence round-trip ----
-
-    proptest! {
-        #[test]
-        fn apply_restore_sequence_round_trip(level in 1..5u8, len in 10..200usize) {
-            let original: Vec<u8> = (0..len).map(|i| (i * 7 + 13) as u8).collect();
-            let mut data = original.clone();
-            apply_sequence(&mut data, len, level);
-            restore_sequence(&mut data, len, level);
-            prop_assert_eq!(data, original);
-        }
     }
 
     #[test]
@@ -591,39 +559,76 @@ mod tests {
         }
     }
 
-    // ---- Larger proptest round-trips for cross_bytes and byte_order ----
+    #[cfg(not(target_arch = "wasm32"))]
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
 
-    proptest! {
-        #[test]
-        fn apply_restore_cross_bytes_f32_prop(
-            width in 2..8usize,
-            height in 2..8usize,
-            seed in 0u32..1000,
-        ) {
-            let n = width * height;
-            let floats: Vec<f32> = (0..n).map(|i| ((i as u32).wrapping_mul(seed.wrapping_add(1))) as f32).collect();
-            let mut data: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
-            let original = data.clone();
+        // ---- Field-separated arithmetic round-trips ----
 
-            apply_cross_bytes(&mut data, width, height, 4);
-            restore_cross_bytes(&mut data, width, height, 4);
-            prop_assert_eq!(data, original);
+        proptest! {
+            #[test]
+            fn sub_add_32_bit_flt_round_trip(a: u32, b: u32) {
+                let diff = sub32_bit_flt(a, b);
+                let recovered = add32_bit_flt(diff, b);
+                prop_assert_eq!(recovered, a);
+            }
+
+            #[test]
+            fn sub_add_64_bit_dbl_round_trip(a: u64, b: u64) {
+                let diff = sub64_bit_dbl(a, b);
+                let recovered = add64_bit_dbl(diff, b);
+                prop_assert_eq!(recovered, a);
+            }
         }
 
-        #[test]
-        fn apply_restore_byte_order_f32_prop(
-            width in 2..8usize,
-            height in 2..8usize,
-            seed in 0u32..1000,
-        ) {
-            let n = width * height;
-            let floats: Vec<f32> = (0..n).map(|i| ((i as u32).wrapping_mul(seed.wrapping_add(1))) as f32).collect();
-            let mut data: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
-            let original = data.clone();
+        // ---- apply_sequence / restore_sequence round-trip ----
 
-            apply_byte_order(&mut data, width, height, 4);
-            restore_byte_order(&mut data, width, height, 4);
-            prop_assert_eq!(data, original);
+        proptest! {
+            #[test]
+            fn apply_restore_sequence_round_trip(level in 1..5u8, len in 10..200usize) {
+                let original: Vec<u8> = (0..len).map(|i| (i * 7 + 13) as u8).collect();
+                let mut data = original.clone();
+                apply_sequence(&mut data, len, level);
+                restore_sequence(&mut data, len, level);
+                prop_assert_eq!(data, original);
+            }
+        }
+
+        // ---- Larger proptest round-trips for cross_bytes and byte_order ----
+
+        proptest! {
+            #[test]
+            fn apply_restore_cross_bytes_f32_prop(
+                width in 2..8usize,
+                height in 2..8usize,
+                seed in 0u32..1000,
+            ) {
+                let n = width * height;
+                let floats: Vec<f32> = (0..n).map(|i| ((i as u32).wrapping_mul(seed.wrapping_add(1))) as f32).collect();
+                let mut data: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+                let original = data.clone();
+
+                apply_cross_bytes(&mut data, width, height, 4);
+                restore_cross_bytes(&mut data, width, height, 4);
+                prop_assert_eq!(data, original);
+            }
+
+            #[test]
+            fn apply_restore_byte_order_f32_prop(
+                width in 2..8usize,
+                height in 2..8usize,
+                seed in 0u32..1000,
+            ) {
+                let n = width * height;
+                let floats: Vec<f32> = (0..n).map(|i| ((i as u32).wrapping_mul(seed.wrapping_add(1))) as f32).collect();
+                let mut data: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+                let original = data.clone();
+
+                apply_byte_order(&mut data, width, height, 4);
+                restore_byte_order(&mut data, width, height, 4);
+                prop_assert_eq!(data, original);
+            }
         }
     }
 }

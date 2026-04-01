@@ -226,25 +226,29 @@ mod tests {
         }
     }
 
-    use proptest::prelude::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
 
-    proptest! {
-        #[test]
-        fn prop_set_valid_is_valid(n in 1..1000usize, k in 0..999usize) {
-            let n = n.max(1);
-            let k = k % n;
-            let mut mask = BitMask::new(n);
-            mask.set_valid(k);
-            prop_assert!(mask.is_valid(k));
-        }
+        proptest! {
+            #[test]
+            fn prop_set_valid_is_valid(n in 1..1000usize, k in 0..999usize) {
+                let n = n.max(1);
+                let k = k % n;
+                let mut mask = BitMask::new(n);
+                mask.set_valid(k);
+                prop_assert!(mask.is_valid(k));
+            }
 
-        #[test]
-        fn prop_from_bytes_round_trip(n in 1..200usize) {
-            let mask = BitMask::all_valid(n);
-            let bytes = mask.as_bytes().to_vec();
-            let restored = BitMask::from_bytes(bytes, n);
-            for i in 0..n {
-                prop_assert_eq!(mask.is_valid(i), restored.is_valid(i));
+            #[test]
+            fn prop_from_bytes_round_trip(n in 1..200usize) {
+                let mask = BitMask::all_valid(n);
+                let bytes = mask.as_bytes().to_vec();
+                let restored = BitMask::from_bytes(bytes, n);
+                for i in 0..n {
+                    prop_assert_eq!(mask.is_valid(i), restored.is_valid(i));
+                }
             }
         }
     }

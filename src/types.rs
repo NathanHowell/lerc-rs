@@ -307,6 +307,19 @@ impl TryFrom<u8> for ImageEncodeMode {
     }
 }
 
+/// Row/column bounds for a micro-block tile within the image grid.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TileRect {
+    /// First row (inclusive).
+    pub i0: usize,
+    /// Past-the-end row (exclusive).
+    pub i1: usize,
+    /// First column (inclusive).
+    pub j0: usize,
+    /// Past-the-end column (exclusive).
+    pub j1: usize,
+}
+
 /// Tile compression mode — the 2-bit value stored in bits 0-1 of the tile header byte.
 ///
 /// C++ uses `BlockEncodeMode` for values 0-2 and separate logic for 2-3.

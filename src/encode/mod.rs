@@ -60,7 +60,6 @@ fn encode_typed<T: LercDataType>(
                 n_depth,
                 n_bands,
                 eps,
-                T::DATA_TYPE,
             )
             .unwrap_or(0.0)
         } else {
@@ -239,19 +238,25 @@ struct NoDataResult<T> {
     remapped_data: Option<Vec<T>>,
 }
 
-/// Compute the NoData sentinel and remap data if needed.
-fn process_no_data<T: LercDataType>(
-    data: &[T],
-    mask: &BitMask,
+/// Input parameters for NoData sentinel processing.
+struct NoDataInput {
     width: usize,
     height: usize,
     n_depth: usize,
     num_valid: usize,
     image_no_data: Option<f64>,
     nd_f64: Option<f64>,
-    stats: &mut BandStats,
     max_z_error: f64,
+}
+
+/// Compute the NoData sentinel and remap data if needed.
+fn process_no_data<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    input: &NoDataInput,
+    stats: &mut BandStats,
 ) -> Result<NoDataResult<T>> {
+    let NoDataInput { width, height, n_depth, num_valid, image_no_data, nd_f64, max_z_error } = *input;
     let mut result = NoDataResult {
         pass_no_data: false,
         no_data_val_internal: 0.0,
@@ -410,10 +415,11 @@ fn encode_one_band<T: LercDataType>(
         compute_band_stats(data, mask, width, height, n_depth, num_valid, nd_f64);
 
     // 2. Handle NoData sentinel computation and data remapping.
-    let nd_result = process_no_data(
-        data, mask, width, height, n_depth, num_valid,
-        image.no_data_value, nd_f64, &mut stats, max_z_error,
-    )?;
+    let nd_input = NoDataInput {
+        width, height, n_depth, num_valid,
+        image_no_data: image.no_data_value, nd_f64, max_z_error,
+    };
+    let nd_result = process_no_data(data, mask, &nd_input, &mut stats)?;
     let encode_data: &[T] = nd_result.remapped_data.as_deref().unwrap_or(data);
 
     // 3. Determine minimum required version and build header.

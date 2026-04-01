@@ -175,7 +175,6 @@ fn add_int_to_counts(counts: &mut [i32], mut val: i32, n_bits: usize) {
 /// neighboring pixels to find bit planes that look like random noise (1-bit
 /// frequency close to 0.5). Returns `Some(new_max_z_error)` if noisy bit planes
 /// were found, or `None` if the data doesn't qualify.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn try_bit_plane_compression<T: LercDataType>(
     data: &[T],
     valid_masks: &[BitMask],
@@ -184,12 +183,12 @@ pub(super) fn try_bit_plane_compression<T: LercDataType>(
     n_depth: usize,
     n_bands: usize,
     eps: f64,
-    data_type: DataType,
 ) -> Option<f64> {
     if eps <= 0.0 {
         return None;
     }
 
+    let data_type = T::DATA_TYPE;
     let max_shift = data_type.size() * 8;
     let min_cnt: usize = 5000;
     let is_signed = data_type.is_signed();

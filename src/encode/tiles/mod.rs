@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::header::HeaderInfo;
 use crate::types::{DataType, LercDataType};
 
-use inner::encode_tile_inner;
+use inner::{TileInnerParams, encode_tile_inner};
 use u8_fast::{encode_tile_to_count, encode_tiles_u8_fast, select_block_size_u8_fast};
 
 /// Pick representative tile positions for sampling at a given block size.
@@ -90,14 +90,6 @@ pub(super) fn select_block_size<T: LercDataType>(
         };
     }
 
-    let max_val_to_quantize: f64 = match hd.data_type {
-        DataType::Char | DataType::Byte | DataType::Short | DataType::UShort => {
-            ((1u32 << 15) - 1) as f64
-        }
-        _ => ((1u32 << 30) - 1) as f64,
-    };
-    let max_z_error = hd.max_z_error;
-
     let mut scratch = ScratchBuffers::new();
 
     // Encode sampled tiles at block size 8
@@ -107,23 +99,11 @@ pub(super) fn select_block_size<T: LercDataType>(
         h.micro_block_size = 8;
         h
     };
+    let ctx8 = TileEncodeContext { data, mask, header: &hd8, z_max_vec };
     for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
+        let rect = crate::types::TileRect { i0, i1, j0, j1 };
         for i_depth in 0..n_depth {
-            size8 += encode_tile_to_count::<T>(
-                data,
-                mask,
-                &hd8,
-                z_max_vec,
-                max_z_error,
-                max_val_to_quantize,
-                i0,
-                i1,
-                j0,
-                j1,
-                i_depth,
-                n_depth > 1 && i_depth > 0,
-                &mut scratch,
-            )?;
+            size8 += encode_tile_to_count::<T>(&ctx8, rect, i_depth, &mut scratch)?;
         }
     }
 
@@ -134,23 +114,11 @@ pub(super) fn select_block_size<T: LercDataType>(
         h.micro_block_size = 16;
         h
     };
+    let ctx16 = TileEncodeContext { data, mask, header: &hd16, z_max_vec };
     for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
+        let rect = crate::types::TileRect { i0, i1, j0, j1 };
         for i_depth in 0..n_depth {
-            size16 += encode_tile_to_count::<T>(
-                data,
-                mask,
-                &hd16,
-                z_max_vec,
-                max_z_error,
-                max_val_to_quantize,
-                i0,
-                i1,
-                j0,
-                j1,
-                i_depth,
-                n_depth > 1 && i_depth > 0,
-                &mut scratch,
-            )?;
+            size16 += encode_tile_to_count::<T>(&ctx16, rect, i_depth, &mut scratch)?;
         }
     }
 
@@ -201,6 +169,14 @@ enum TileReconInfo {
     RawBinary,
 }
 
+/// Read-only context shared across all tiles during encoding.
+struct TileEncodeContext<'a, T> {
+    data: &'a [T],
+    mask: &'a BitMask,
+    header: &'a HeaderInfo,
+    z_max_vec: &'a [f64],
+}
+
 pub(super) fn encode_tiles<T: LercDataType>(
     blob: &mut Vec<u8>,
     data: &[T],
@@ -236,13 +212,7 @@ pub(super) fn encode_tiles<T: LercDataType>(
     let num_tiles_vert = n_rows.div_ceil(mb_size);
     let num_tiles_hori = n_cols.div_ceil(mb_size);
 
-    let max_val_to_quantize: f64 = match header.data_type {
-        DataType::Char | DataType::Byte | DataType::Short | DataType::UShort => {
-            ((1u32 << 15) - 1) as f64
-        }
-        _ => ((1u32 << 30) - 1) as f64,
-    };
-
+    let ctx = TileEncodeContext { data, mask, header, z_max_vec };
     let mut scratch = ScratchBuffers::new();
 
     // Allocate a per-pixel reconstruction buffer when multi-depth lossy encoding
@@ -264,22 +234,14 @@ pub(super) fn encode_tiles<T: LercDataType>(
         for j_tile in 0..num_tiles_hori {
             let j0 = j_tile * mb_size;
             let j1 = (j0 + mb_size).min(n_cols);
+            let rect = crate::types::TileRect { i0, i1, j0, j1 };
 
             for i_depth in 0..n_depth {
                 encode_tile(
                     blob,
-                    data,
-                    mask,
-                    header,
-                    z_max_vec,
-                    max_z_error,
-                    max_val_to_quantize,
-                    i0,
-                    i1,
-                    j0,
-                    j1,
+                    &ctx,
+                    rect,
                     i_depth,
-                    n_depth > 1 && i_depth > 0,
                     &mut scratch,
                     if needs_recon {
                         Some(&mut recon_buf)
@@ -295,35 +257,38 @@ pub(super) fn encode_tiles<T: LercDataType>(
 }
 
 /// Encode a single tile block (one depth slice of one micro-block).
-/// When `try_diff` is true (depth > 0 with nDepth > 1), the encoder tries
-/// diff (delta) encoding relative to the previous depth slice and picks
-/// whichever representation is smaller.
+/// When depth > 0 and nDepth > 1, the encoder tries diff (delta) encoding
+/// relative to the previous depth slice and picks whichever representation
+/// is smaller.
 ///
 /// When `recon_buf` is `Some`, it holds the decoder-reconstructed values for the
 /// previous depth slice (indexed by pixel index `k = row * n_cols + col`).
 /// Diffs are computed against these reconstructed values instead of the original
 /// data. After encoding, the buffer is updated with this depth slice's
 /// reconstructed values so it is ready for the next depth.
-#[allow(clippy::too_many_arguments)]
 fn encode_tile<T: LercDataType>(
     blob: &mut Vec<u8>,
-    data: &[T],
-    mask: &BitMask,
-    header: &HeaderInfo,
-    z_max_vec: &[f64],
-    max_z_error: f64,
-    max_val_to_quantize: f64,
-    i0: usize,
-    i1: usize,
-    j0: usize,
-    j1: usize,
+    ctx: &TileEncodeContext<'_, T>,
+    rect: crate::types::TileRect,
     i_depth: usize,
-    try_diff: bool,
     scratch: &mut ScratchBuffers,
     recon_buf: Option<&mut Vec<f64>>,
 ) -> Result<()> {
+    let crate::types::TileRect { i0, i1, j0, j1 } = rect;
+    let data = ctx.data;
+    let mask = ctx.mask;
+    let header = ctx.header;
+    let z_max_vec = ctx.z_max_vec;
     let n_cols = header.n_cols as usize;
     let n_depth = header.n_depth as usize;
+    let max_z_error = header.max_z_error;
+    let max_val_to_quantize: f64 = match header.data_type {
+        DataType::Char | DataType::Byte | DataType::Short | DataType::UShort => {
+            ((1u32 << 15) - 1) as f64
+        }
+        _ => ((1u32 << 30) - 1) as f64,
+    };
+    let try_diff = n_depth > 1 && i_depth > 0;
 
     // Collect valid pixels for this depth slice (reusing scratch buffer)
     scratch.valid_data.clear();
@@ -396,18 +361,21 @@ fn encode_tile<T: LercDataType>(
 
     // Encode without diff
     scratch.tile_buf.clear();
-    encode_tile_inner::<T>(
-        &mut scratch.tile_buf,
-        &scratch.valid_data,
-        &mut scratch.quant_vec,
+    let non_diff_params = TileInnerParams {
         num_valid,
         z_min_f,
         z_max_f,
         max_z_error,
         max_val_to_quantize,
         integrity,
-        header.data_type,
-        false,
+        src_data_type: header.data_type,
+        b_diff_enc: false,
+    };
+    encode_tile_inner::<T>(
+        &mut scratch.tile_buf,
+        &scratch.valid_data,
+        &mut scratch.quant_vec,
+        &non_diff_params,
     );
     let non_diff_len = scratch.tile_buf.len();
 
@@ -436,18 +404,21 @@ fn encode_tile<T: LercDataType>(
         diff_z_max = diff_max;
         // Append diff encoding after the non-diff data in tile_buf
         let diff_start = scratch.tile_buf.len();
+        let diff_params = TileInnerParams {
+            num_valid,
+            z_min_f: diff_min,
+            z_max_f: diff_max,
+            max_z_error,
+            max_val_to_quantize,
+            integrity,
+            src_data_type: header.data_type,
+            b_diff_enc: true,
+        };
         encode_tile_inner::<T>(
             &mut scratch.tile_buf,
             &scratch.diff_data,
             &mut scratch.quant_vec,
-            num_valid,
-            diff_min,
-            diff_max,
-            max_z_error,
-            max_val_to_quantize,
-            integrity,
-            header.data_type,
-            true,
+            &diff_params,
         );
         let diff_len = scratch.tile_buf.len() - diff_start;
 
@@ -474,32 +445,28 @@ fn encode_tile<T: LercDataType>(
         // Determine reconstruction info based on the chosen encoding path
         let recon_info = if used_diff {
             // Diff encoding was chosen; reconstruct from diff quantized values
-            classify_recon(
-                &scratch.diff_data,
-                &scratch.quant_vec,
+            let rp = ReconParams {
                 num_valid,
-                diff_z_min,
-                diff_z_max,
+                z_min_f: diff_z_min,
+                z_max_f: diff_z_max,
                 max_z_error,
                 max_val_to_quantize,
                 z_max_depth,
-                header.data_type,
-                true,
-            )
+                b_diff_enc: true,
+            };
+            classify_recon(&scratch.diff_data, &scratch.quant_vec, &rp)
         } else {
             // Non-diff encoding was chosen; reconstruct from original quantized values
-            classify_recon(
-                &scratch.valid_data,
-                &scratch.non_diff_quant,
+            let rp = ReconParams {
                 num_valid,
-                non_diff_z_min,
-                non_diff_z_max,
+                z_min_f: non_diff_z_min,
+                z_max_f: non_diff_z_max,
                 max_z_error,
                 max_val_to_quantize,
                 z_max_depth,
-                header.data_type,
-                false,
-            )
+                b_diff_enc: false,
+            };
+            classify_recon(&scratch.valid_data, &scratch.non_diff_quant, &rp)
         };
 
         // Apply reconstruction to the buffer
@@ -550,22 +517,34 @@ fn encode_tile<T: LercDataType>(
     Ok(())
 }
 
-/// Classify how a tile was encoded and return reconstruction info.
-/// This mirrors the logic in `encode_tile_inner` to determine whether the tile
-/// ended up as constant, quantized, or raw binary.
-#[allow(clippy::too_many_arguments)]
-fn classify_recon(
-    values: &[f64],
-    quant: &[u32],
+/// Parameters for classifying how a tile was encoded for reconstruction.
+struct ReconParams {
     num_valid: usize,
     z_min_f: f64,
     z_max_f: f64,
     max_z_error: f64,
     max_val_to_quantize: f64,
     z_max_depth: f64,
-    _src_data_type: DataType,
     b_diff_enc: bool,
+}
+
+/// Classify how a tile was encoded and return reconstruction info.
+/// This mirrors the logic in `encode_tile_inner` to determine whether the tile
+/// ended up as constant, quantized, or raw binary.
+fn classify_recon(
+    values: &[f64],
+    quant: &[u32],
+    p: &ReconParams,
 ) -> TileReconInfo {
+    let ReconParams {
+        num_valid,
+        z_min_f,
+        z_max_f,
+        max_z_error,
+        max_val_to_quantize,
+        z_max_depth,
+        b_diff_enc,
+    } = *p;
     if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
         // Constant zero block
         return TileReconInfo::Constant(0.0);
@@ -640,18 +619,16 @@ mod tests {
 
     #[test]
     fn classify_recon_const_zero_num_valid_zero() {
-        let info = classify_recon(
-            &[],
-            &[],
-            0,
-            f64::MAX,
-            f64::MIN,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            255.0,
-            DataType::Byte,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 0,
+            z_min_f: f64::MAX,
+            z_max_f: f64::MIN,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            z_max_depth: 255.0,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&[], &[], &rp);
         match info {
             TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
             _ => panic!("expected Constant(0.0)"),
@@ -660,18 +637,16 @@ mod tests {
 
     #[test]
     fn classify_recon_const_zero_zmin_zmax_zero() {
-        let info = classify_recon(
-            &[0.0, 0.0],
-            &[0, 0],
-            2,
-            0.0,
-            0.0,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            255.0,
-            DataType::Byte,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 2,
+            z_min_f: 0.0,
+            z_max_f: 0.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            z_max_depth: 255.0,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&[0.0, 0.0], &[0, 0], &rp);
         match info {
             TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
             _ => panic!("expected Constant(0.0)"),
@@ -680,18 +655,16 @@ mod tests {
 
     #[test]
     fn classify_recon_const_offset() {
-        let info = classify_recon(
-            &[42.0, 42.0],
-            &[0, 0],
-            2,
-            42.0,
-            42.0,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            255.0,
-            DataType::Byte,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 2,
+            z_min_f: 42.0,
+            z_max_f: 42.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            z_max_depth: 255.0,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&[42.0, 42.0], &[0, 0], &rp);
         match info {
             TileReconInfo::Constant(c) => assert_eq!(c, 42.0),
             _ => panic!("expected Constant(42.0)"),
@@ -702,18 +675,16 @@ mod tests {
     fn classify_recon_quantized() {
         let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
         let quant: Vec<u32> = (0..8).collect();
-        let info = classify_recon(
-            &values,
-            &quant,
-            8,
-            0.0,
-            7.0,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            255.0,
-            DataType::Byte,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 8,
+            z_min_f: 0.0,
+            z_max_f: 7.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            z_max_depth: 255.0,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&values, &quant, &rp);
         match info {
             TileReconInfo::Quantized {
                 offset,
@@ -734,22 +705,18 @@ mod tests {
         //   max_z_error > 0 and max_val > max_val_to_quantize => need_quantize = false.
         let z_min = 0.0;
         let z_max = 1e18; // huge range
-        let max_z_error = 0.5;
-        let max_val_to_quantize = ((1u32 << 30) - 1) as f64;
         let values = vec![z_min, z_max];
         let quant = vec![0, 0];
-        let info = classify_recon(
-            &values,
-            &quant,
-            2,
-            z_min,
-            z_max,
-            max_z_error,
-            max_val_to_quantize,
-            1e18,
-            DataType::Double,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 2,
+            z_min_f: z_min,
+            z_max_f: z_max,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
+            z_max_depth: 1e18,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&values, &quant, &rp);
         match info {
             TileReconInfo::RawBinary => {}
             _ => panic!("expected RawBinary, got {:?}", match info {
@@ -765,18 +732,16 @@ mod tests {
         // max_quant == 0 path: need_quantize = true but all quant values are 0.
         let values = vec![10.0, 10.5, 11.0];
         let quant = vec![0, 0, 0]; // force max_quant = 0
-        let info = classify_recon(
-            &values,
-            &quant,
-            3,
-            10.0,
-            11.0,
-            0.5,
-            ((1u32 << 30) - 1) as f64,
-            100.0,
-            DataType::Double,
-            false,
-        );
+        let rp = ReconParams {
+            num_valid: 3,
+            z_min_f: 10.0,
+            z_max_f: 11.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
+            z_max_depth: 100.0,
+            b_diff_enc: false,
+        };
+        let info = classify_recon(&values, &quant, &rp);
         match info {
             TileReconInfo::Constant(c) => assert_eq!(c, 10.0),
             _ => panic!("expected Constant(10.0) for all-same quantization"),

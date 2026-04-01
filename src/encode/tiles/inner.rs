@@ -2,24 +2,38 @@ use alloc::vec::Vec;
 
 use crate::types::{DataType, LercDataType, TileCompressionMode, tile_flags};
 
+/// Parameters for encoding a single tile block's payload.
+pub(super) struct TileInnerParams {
+    pub num_valid: usize,
+    pub z_min_f: f64,
+    pub z_max_f: f64,
+    pub max_z_error: f64,
+    pub max_val_to_quantize: f64,
+    pub integrity: u8,
+    pub src_data_type: DataType,
+    pub b_diff_enc: bool,
+}
+
 /// Encode the payload for a single tile block, appending to `buf`.
 /// When `b_diff_enc` is true, bit 2 of the compression flag is set and the
 /// offset data type is forced to Int for integer source types.
 /// `quant_scratch` is a reusable scratch buffer for quantized values.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn encode_tile_inner<T: LercDataType>(
     buf: &mut Vec<u8>,
     values: &[f64],
     quant_scratch: &mut Vec<u32>,
-    num_valid: usize,
-    z_min_f: f64,
-    z_max_f: f64,
-    max_z_error: f64,
-    max_val_to_quantize: f64,
-    integrity: u8,
-    src_data_type: DataType,
-    b_diff_enc: bool,
+    p: &TileInnerParams,
 ) {
+    let TileInnerParams {
+        num_valid,
+        z_min_f,
+        z_max_f,
+        max_z_error,
+        max_val_to_quantize,
+        integrity,
+        src_data_type,
+        b_diff_enc,
+    } = *p;
     let diff_flag: u8 = if b_diff_enc { tile_flags::DIFF_ENCODING } else { 0 };
 
     if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
@@ -146,21 +160,17 @@ mod tests {
     ) -> (Vec<u8>, Vec<u32>) {
         let mut buf = Vec::new();
         let mut quant_scratch = Vec::new();
-        let num_valid = values.len();
-        // u8 lossless: max_z_error = 0.5, max_val_to_quantize = (1<<15)-1
-        encode_tile_inner::<u8>(
-            &mut buf,
-            values,
-            &mut quant_scratch,
-            num_valid,
+        let p = TileInnerParams {
+            num_valid: values.len(),
             z_min_f,
             z_max_f,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            0, // integrity = 0 for simplicity
-            DataType::Byte,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            integrity: 0,
+            src_data_type: DataType::Byte,
             b_diff_enc,
-        );
+        };
+        encode_tile_inner::<u8>(&mut buf, values, &mut quant_scratch, &p);
         (buf, quant_scratch)
     }
 
@@ -172,20 +182,17 @@ mod tests {
     ) -> (Vec<u8>, Vec<u32>) {
         let mut buf = Vec::new();
         let mut quant_scratch = Vec::new();
-        let num_valid = values.len();
-        encode_tile_inner::<f64>(
-            &mut buf,
-            values,
-            &mut quant_scratch,
-            num_valid,
+        let p = TileInnerParams {
+            num_valid: values.len(),
             z_min_f,
             z_max_f,
             max_z_error,
-            ((1u32 << 30) - 1) as f64,
-            0,
-            DataType::Double,
-            false,
-        );
+            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
+            integrity: 0,
+            src_data_type: DataType::Double,
+            b_diff_enc: false,
+        };
+        encode_tile_inner::<f64>(&mut buf, values, &mut quant_scratch, &p);
         (buf, quant_scratch)
     }
 
@@ -198,19 +205,17 @@ mod tests {
         let mut buf = Vec::new();
         let mut quant_scratch = Vec::new();
         // num_valid = 0 triggers const-zero path
-        encode_tile_inner::<u8>(
-            &mut buf,
-            &[],
-            &mut quant_scratch,
-            0,
-            f64::MAX,
-            f64::MIN,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            0,
-            DataType::Byte,
-            false,
-        );
+        let p = TileInnerParams {
+            num_valid: 0,
+            z_min_f: f64::MAX,
+            z_max_f: f64::MIN,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            integrity: 0,
+            src_data_type: DataType::Byte,
+            b_diff_enc: false,
+        };
+        encode_tile_inner::<u8>(&mut buf, &[], &mut quant_scratch, &p);
         assert_eq!(buf.len(), 1);
         assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
     }
@@ -247,19 +252,17 @@ mod tests {
         let values = vec![1000.0, 1000.0, 1000.0];
         let mut buf = Vec::new();
         let mut quant_scratch = Vec::new();
-        encode_tile_inner::<i16>(
-            &mut buf,
-            &values,
-            &mut quant_scratch,
-            3,
-            1000.0,
-            1000.0,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
-            0,
-            DataType::Short,
-            false,
-        );
+        let p = TileInnerParams {
+            num_valid: 3,
+            z_min_f: 1000.0,
+            z_max_f: 1000.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
+            integrity: 0,
+            src_data_type: DataType::Short,
+            b_diff_enc: false,
+        };
+        encode_tile_inner::<i16>(&mut buf, &values, &mut quant_scratch, &p);
         assert_eq!(
             buf[0] & tile_flags::MODE_MASK,
             TileCompressionMode::ConstOffset as u8
@@ -405,19 +408,17 @@ mod tests {
         let mut quant_scratch = Vec::new();
         let values = vec![0.0, 1e15];
         // Use f64 lossless with diff encoding
-        encode_tile_inner::<f64>(
-            &mut buf,
-            &values,
-            &mut quant_scratch,
-            values.len(),
-            0.0,
-            1e15,
-            0.0,
-            ((1u32 << 30) - 1) as f64,
-            0,
-            DataType::Double,
-            true,
-        );
+        let p = TileInnerParams {
+            num_valid: values.len(),
+            z_min_f: 0.0,
+            z_max_f: 1e15,
+            max_z_error: 0.0,
+            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
+            integrity: 0,
+            src_data_type: DataType::Double,
+            b_diff_enc: true,
+        };
+        encode_tile_inner::<f64>(&mut buf, &values, &mut quant_scratch, &p);
         // Should NOT be raw binary when diff is true
         assert_ne!(
             buf[0] & tile_flags::MODE_MASK,
@@ -435,19 +436,17 @@ mod tests {
         let mut quant_scratch = Vec::new();
         let values = vec![0.0, 0.0];
         let integrity: u8 = 0b00001100; // bits 2-3 set
-        encode_tile_inner::<u8>(
-            &mut buf,
-            &values,
-            &mut quant_scratch,
-            values.len(),
-            0.0,
-            0.0,
-            0.5,
-            ((1u32 << 15) - 1) as f64,
+        let p = TileInnerParams {
+            num_valid: values.len(),
+            z_min_f: 0.0,
+            z_max_f: 0.0,
+            max_z_error: 0.5,
+            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
             integrity,
-            DataType::Byte,
-            false,
-        );
+            src_data_type: DataType::Byte,
+            b_diff_enc: false,
+        };
+        encode_tile_inner::<u8>(&mut buf, &values, &mut quant_scratch, &p);
         // Integrity bits should be present in the header byte
         assert_eq!(buf[0] & integrity, integrity);
     }

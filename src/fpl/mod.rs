@@ -7,6 +7,20 @@ use crate::types::LercDataType;
 mod compression;
 mod predictor;
 
+/// Parameters for decoding a single FPL (float-point lossless) depth slice.
+struct FplSliceParams {
+    is_double: bool,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+}
+
+impl FplSliceParams {
+    fn unit_size(&self) -> usize {
+        if self.is_double { 8 } else { 4 }
+    }
+}
+
 /// Decode float-point lossless (FPL) Huffman-encoded data.
 pub(crate) fn decode_huffman_flt<T: LercDataType>(
     data: &[u8],
@@ -17,27 +31,20 @@ pub(crate) fn decode_huffman_flt<T: LercDataType>(
     n_depth: usize,
     output: &mut [T],
 ) -> Result<()> {
-    let unit_size = if is_double { 8 } else { 4 };
+    let params = FplSliceParams { is_double, width, height, n_depth };
 
     for i_depth in 0..n_depth {
-        decode_huffman_flt_slice(
-            data, pos, is_double, width, height, i_depth, n_depth, unit_size, output,
-        )?;
+        decode_huffman_flt_slice(data, pos, &params, i_depth, output)?;
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn decode_huffman_flt_slice<T: LercDataType>(
     data: &[u8],
     pos: &mut usize,
-    is_double: bool,
-    width: usize,
-    height: usize,
+    params: &FplSliceParams,
     i_depth: usize,
-    n_depth: usize,
-    unit_size: usize,
     output: &mut [T],
 ) -> Result<()> {
     if *pos >= data.len() {
@@ -54,6 +61,12 @@ fn decode_huffman_flt_slice<T: LercDataType>(
     if predictor_code > 2 {
         return Err(LercError::InvalidData("invalid FPL predictor code".into()));
     }
+
+    let width = params.width;
+    let height = params.height;
+    let n_depth = params.n_depth;
+    let unit_size = params.unit_size();
+    let is_double = params.is_double;
 
     let num_pixels = width * height;
     let mut byte_planes: Vec<Vec<u8>> = vec![Vec::new(); unit_size];

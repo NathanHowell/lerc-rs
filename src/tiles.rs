@@ -4,7 +4,13 @@ use crate::bitstuffer;
 use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::header::HeaderInfo;
-use crate::types::{DataType, LercDataType, TileCompressionMode, tile_flags};
+use crate::types::{DataType, LercDataType, TileCompressionMode, TileRect, tile_flags};
+
+/// A depth-slice identifier: the depth index plus the z_max for that depth.
+struct DepthSlice {
+    index: usize,
+    z_max: f64,
+}
 
 /// Read a variable-width value from the byte stream.
 /// DataType determines the wire format (may be reduced from the original type).
@@ -234,7 +240,7 @@ pub(crate) fn read_tiles<T: LercDataType>(
     pos: &mut usize,
     header: &HeaderInfo,
     mask: &BitMask,
-    z_min_vec: &[f64],
+    _z_min_vec: &[f64],
     z_max_vec: &[f64],
     output: &mut [T],
 ) -> Result<()> {
@@ -253,12 +259,16 @@ pub(crate) fn read_tiles<T: LercDataType>(
         for j_tile in 0..num_tiles_hori {
             let j0 = j_tile * mb_size;
             let j1 = (j0 + mb_size).min(n_cols);
+            let rect = TileRect { i0, i1, j0, j1 };
 
-            for i_depth in 0..n_depth {
-                read_tile(
-                    data_buf, pos, header, mask, z_min_vec, z_max_vec, output, i0, i1, j0,
-                    j1, i_depth,
-                )?;
+            for (i_depth, &z_max_d) in z_max_vec.iter().enumerate().take(n_depth) {
+                let z_max = if header.version >= 4 && n_depth > 1 {
+                    z_max_d
+                } else {
+                    header.z_max
+                };
+                let depth = DepthSlice { index: i_depth, z_max };
+                read_tile(data_buf, pos, header, mask, output, rect, &depth)?;
             }
         }
     }
@@ -266,21 +276,17 @@ pub(crate) fn read_tiles<T: LercDataType>(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn read_tile<T: LercDataType>(
     data: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
     mask: &BitMask,
-    _z_min_vec: &[f64],
-    z_max_vec: &[f64],
     output: &mut [T],
-    i0: usize,
-    i1: usize,
-    j0: usize,
-    j1: usize,
-    i_depth: usize,
+    rect: TileRect,
+    depth: &DepthSlice,
 ) -> Result<()> {
+    let TileRect { i0, i1, j0, j1 } = rect;
+    let i_depth = depth.index;
     if *pos >= data.len() {
         return Err(LercError::BufferTooSmall {
             needed: *pos + 1,
@@ -365,11 +371,7 @@ fn read_tile<T: LercDataType>(
 
     let offset = read_variable_data_type(data, pos, dt_used)?;
 
-    let z_max = if header.version >= 4 && n_depth > 1 {
-        z_max_vec[i_depth]
-    } else {
-        header.z_max
-    };
+    let z_max = depth.z_max;
 
     if compr_mode == TileCompressionMode::ConstOffset as u8 {
         for i in i0..i1 {

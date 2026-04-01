@@ -16,6 +16,7 @@ use alloc::vec::Vec;
 use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::rle;
+use crate::types::TileRect;
 use crate::{DataType, LercData, LercImage, LercInfo};
 
 const LERC1_MAGIC: &[u8; 10] = b"CntZImage ";
@@ -370,23 +371,27 @@ fn read_cnt_tile(
     Ok(())
 }
 
+/// Shared configuration for Lerc1 z-tile decoding.
+struct Lerc1ZConfig {
+    width: usize,
+    height: usize,
+    max_z_error_in_file: f64,
+    max_z_in_img: f32,
+    decoder_can_ignore_mask: bool,
+}
+
 /// Read a z tile (elevation values tile).
 ///
 /// Matches C++ `CntZImage::readZTile`.
-#[allow(clippy::too_many_arguments)]
 fn read_z_tile(
     cursor: &mut Cursor,
     cnt: &[f32],
     z: &mut [f32],
-    width: usize,
-    i0: usize,
-    i1: usize,
-    j0: usize,
-    j1: usize,
-    max_z_error_in_file: f64,
-    max_z_in_img: f32,
-    decoder_can_ignore_mask: bool,
+    cfg: &Lerc1ZConfig,
+    rect: TileRect,
 ) -> Result<()> {
+    let TileRect { i0, i1, j0, j1 } = rect;
+    let width = cfg.width;
     let byte0 = cursor.read_u8()?;
     let bits67 = (byte0 >> 6) as usize;
     let compr_flag = byte0 & 63;
@@ -438,16 +443,16 @@ fn read_z_tile(
         } else {
             // compr_flag == 1: bit-stuffed
             let data_vec = bit_unstuff(cursor)?;
-            let inv_scale = 2.0 * max_z_error_in_file;
+            let inv_scale = 2.0 * cfg.max_z_error_in_file;
             let mut src_idx = 0;
 
-            if decoder_can_ignore_mask {
+            if cfg.decoder_can_ignore_mask {
                 for i in i0..i1 {
                     for j in j0..j1 {
                         let idx = i * width + j;
                         let val =
                             (offset as f64 + data_vec[src_idx] as f64 * inv_scale) as f32;
-                        z[idx] = val.min(max_z_in_img);
+                        z[idx] = val.min(cfg.max_z_in_img);
                         src_idx += 1;
                     }
                 }
@@ -458,7 +463,7 @@ fn read_z_tile(
                         if cnt[idx] > 0.0 {
                             let val = (offset as f64 + data_vec[src_idx] as f64 * inv_scale)
                                 as f32;
-                            z[idx] = val.min(max_z_in_img);
+                            z[idx] = val.min(cfg.max_z_in_img);
                             src_idx += 1;
                         }
                     }
@@ -518,19 +523,17 @@ fn read_tiles_cnt(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn read_tiles_z(
     cursor: &mut Cursor,
     cnt: &[f32],
     z: &mut [f32],
-    width: usize,
-    height: usize,
+    cfg: &Lerc1ZConfig,
     num_tiles_vert: i32,
     num_tiles_hori: i32,
-    max_z_error_in_file: f64,
-    max_z_in_img: f32,
-    decoder_can_ignore_mask: bool,
 ) -> Result<()> {
+    let width = cfg.width;
+    let height = cfg.height;
+
     if num_tiles_vert <= 0 || num_tiles_hori <= 0 {
         return Err(LercError::InvalidData(
             "lerc1: invalid tile counts".into(),
@@ -559,19 +562,8 @@ fn read_tiles_z(
             }
             let j0 = j_tile as usize * (width / num_tiles_hori as usize);
 
-            read_z_tile(
-                cursor,
-                cnt,
-                z,
-                width,
-                i0,
-                i0 + tile_h,
-                j0,
-                j0 + tile_w,
-                max_z_error_in_file,
-                max_z_in_img,
-                decoder_can_ignore_mask,
-            )?;
+            let rect = TileRect { i0, i1: i0 + tile_h, j0, j1: j0 + tile_w };
+            read_z_tile(cursor, cnt, z, cfg, rect)?;
         }
     }
 
@@ -689,17 +681,20 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         ));
     }
 
+    let z_cfg = Lerc1ZConfig {
+        width,
+        height,
+        max_z_error_in_file: hd.max_z_error,
+        max_z_in_img: z_sec.max_val_in_img,
+        decoder_can_ignore_mask,
+    };
     read_tiles_z(
         &mut cursor,
         &cnt,
         &mut z,
-        width,
-        height,
+        &z_cfg,
         z_sec.num_tiles_vert,
         z_sec.num_tiles_hori,
-        hd.max_z_error,
-        z_sec.max_val_in_img,
-        decoder_can_ignore_mask,
     )?;
 
     // Build validity mask from count array
@@ -1079,11 +1074,12 @@ mod tests {
         let cnt = vec![1.0f32; 4]; // all valid
         let mut z = vec![f32::NAN; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,   // i0=0, i1=2, j0=0, j1=2
-            0.0, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z, vec![0.0, 0.0, 0.0, 0.0]);
     }
@@ -1097,11 +1093,12 @@ mod tests {
         let cnt = vec![1.0, 0.0, 0.0, 1.0]; // only corners valid
         let mut z = vec![f32::NAN; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.0, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 0.0);
         assert!(z[1].is_nan()); // invalid pixel, untouched
@@ -1118,11 +1115,12 @@ mod tests {
         let cnt = vec![1.0f32; 6];
         let mut z = vec![0.0f32; 6];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 3,
-            0.5, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.5, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 3 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         for &val in &z {
             assert_eq!(val, 42.5);
@@ -1138,11 +1136,12 @@ mod tests {
         let cnt = vec![1.0, 0.0, 0.0, 1.0];
         let mut z = vec![0.0f32; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.0, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 7.0);
         assert_eq!(z[1], 0.0); // invalid, untouched
@@ -1160,11 +1159,12 @@ mod tests {
         let cnt = vec![1.0f32; 4];
         let mut z = vec![0.0f32; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.0, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z, vec![1.0, 2.0, 3.0, 4.0]);
     }
@@ -1180,11 +1180,12 @@ mod tests {
         let cnt = vec![1.0, 0.0, 0.0, 1.0];
         let mut z = vec![0.0f32; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.0, 100.0, false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 10.0);
         assert_eq!(z[3], 20.0);
@@ -1200,11 +1201,12 @@ mod tests {
         let cnt = vec![1.0f32; 4];
         let mut z = vec![0.0f32; 4];
 
-        let result = read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.0, 100.0, false,
-        );
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.0, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        let result = read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect);
         assert!(result.is_err());
     }
 
@@ -1235,13 +1237,12 @@ mod tests {
         let cnt = vec![1.0f32; 4];
         let mut z = vec![0.0f32; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.5,    // max_z_error
-            100.0,  // max_z_in_img
-            false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.5, max_z_in_img: 100.0, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         // inv_scale = 2 * 0.5 = 1.0
         // z[i] = offset + val * inv_scale = 10.0 + [0,1,2,3] * 1.0
@@ -1262,13 +1263,12 @@ mod tests {
         let cnt = vec![1.0f32; 4];
         let mut z = vec![0.0f32; 4];
 
-        read_z_tile(
-            &mut cursor, &cnt, &mut z, width,
-            0, 2, 0, 2,
-            0.5,
-            11.5, // clamps values > 11.5
-            false,
-        ).unwrap();
+        let cfg = Lerc1ZConfig {
+            width, height: 2,
+            max_z_error_in_file: 0.5, max_z_in_img: 11.5, decoder_can_ignore_mask: false,
+        };
+        let rect = TileRect { i0: 0, i1: 2, j0: 0, j1: 2 };
+        read_z_tile(&mut cursor, &cnt, &mut z, &cfg, rect).unwrap();
 
         assert_eq!(z[0], 10.0);
         assert_eq!(z[1], 11.0);

@@ -804,6 +804,914 @@ mod tests {
             assert_eq!(val, 42, "pixel {i} should be 42");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // read_min_max_ranges
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_min_max_ranges_single_depth_u8() {
+        // nDepth=1, type u8 (1 byte each): min=10, max=200
+        let mut data = Vec::new();
+        data.push(10u8); // z_min[0]
+        data.push(200u8); // z_max[0]
+
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_depth: 1,
+            ..Default::default()
+        };
+        let (z_min, z_max) = read_min_max_ranges::<u8>(&data, &mut pos, &header).unwrap();
+        assert_eq!(z_min, vec![10.0]);
+        assert_eq!(z_max, vec![200.0]);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_min_max_ranges_multi_depth_f32() {
+        // nDepth=3, type f32 (4 bytes each): 6 values total
+        let mut data = Vec::new();
+        for &v in &[1.0f32, 2.0, 3.0] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        for &v in &[10.0f32, 20.0, 30.0] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_depth: 3,
+            ..Default::default()
+        };
+        let (z_min, z_max) = read_min_max_ranges::<f32>(&data, &mut pos, &header).unwrap();
+        assert_eq!(z_min, vec![1.0, 2.0, 3.0]);
+        assert_eq!(z_max, vec![10.0, 20.0, 30.0]);
+        assert_eq!(pos, 24); // 6 * 4 bytes
+    }
+
+    #[test]
+    fn read_min_max_ranges_buffer_too_small() {
+        let data = vec![0u8; 3]; // Need at least 4 bytes for nDepth=2, type u8
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_depth: 2,
+            ..Default::default()
+        };
+        let result = read_min_max_ranges::<u8>(&data, &mut pos, &header);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_min_max_ranges_i16() {
+        // nDepth=2, type i16 (2 bytes each): 4 values total
+        let mut data = Vec::new();
+        for &v in &[-100i16, 50] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        for &v in &[1000i16, 2000] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_depth: 2,
+            ..Default::default()
+        };
+        let (z_min, z_max) = read_min_max_ranges::<i16>(&data, &mut pos, &header).unwrap();
+        assert_eq!(z_min, vec![-100.0, 50.0]);
+        assert_eq!(z_max, vec![1000.0, 2000.0]);
+        assert_eq!(pos, 8); // 4 * 2 bytes
+    }
+
+    // -----------------------------------------------------------------------
+    // read_data_one_sweep
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_data_one_sweep_u8_all_valid() {
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 3,
+            n_depth: 1,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(6);
+        let data: Vec<u8> = vec![10, 20, 30, 40, 50, 60];
+        let mut pos = 0;
+        let mut output = vec![0u8; 6];
+        read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output).unwrap();
+        assert_eq!(output, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(pos, 6);
+    }
+
+    #[test]
+    fn read_data_one_sweep_f32_all_valid() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 3,
+            n_depth: 1,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(3);
+        let values = [1.5f32, -2.5, 100.0];
+        let mut data = Vec::new();
+        for &v in &values {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut pos = 0;
+        let mut output = vec![0.0f32; 3];
+        read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output).unwrap();
+        assert_eq!(output, vec![1.5, -2.5, 100.0]);
+        assert_eq!(pos, 12); // 3 * 4 bytes
+    }
+
+    #[test]
+    fn read_data_one_sweep_with_mask() {
+        // 2x2 image, pixels 0 and 2 valid, 1 and 3 invalid
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            n_depth: 1,
+            ..Default::default()
+        };
+        let mut mask = BitMask::new(4);
+        mask.set_valid(0);
+        mask.set_valid(2);
+        // Only 2 valid pixel values in the data stream
+        let data: Vec<u8> = vec![42, 99];
+        let mut pos = 0;
+        let mut output = vec![0u8; 4];
+        read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output).unwrap();
+        assert_eq!(output[0], 42); // valid pixel 0
+        assert_eq!(output[1], 0);  // invalid pixel 1 (untouched)
+        assert_eq!(output[2], 99); // valid pixel 2
+        assert_eq!(output[3], 0);  // invalid pixel 3 (untouched)
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_data_one_sweep_multi_depth() {
+        // 1x2 image, nDepth=2, all valid
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 2,
+            n_depth: 2,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(2);
+        // pixel0_d0, pixel0_d1, pixel1_d0, pixel1_d1
+        let data: Vec<u8> = vec![10, 20, 30, 40];
+        let mut pos = 0;
+        let mut output = vec![0u8; 4];
+        read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output).unwrap();
+        assert_eq!(output, vec![10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn read_data_one_sweep_buffer_too_small() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 3,
+            n_depth: 1,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(3);
+        let data: Vec<u8> = vec![10, 20]; // only 2 bytes, need 3
+        let mut pos = 0;
+        let mut output = vec![0u8; 3];
+        let result = read_data_one_sweep(&data, &mut pos, &header, &mask, &mut output);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_huffman via round-trip (encode then decode)
+    // -----------------------------------------------------------------------
+
+    /// Helper: encode a u8 image and decode it, returning the decoded pixels.
+    fn roundtrip_u8(width: u32, height: u32, pixels: &[u8], max_z_error: f64) -> Vec<u8> {
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Byte,
+            valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+            data: crate::LercData::U8(pixels.to_vec()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, max_z_error).unwrap();
+        let decoded = crate::decode(&blob).unwrap();
+        match decoded.data {
+            crate::LercData::U8(v) => v,
+            _ => panic!("expected U8 data"),
+        }
+    }
+
+    /// Helper: encode an i8 image and decode it, returning the decoded pixels.
+    fn roundtrip_i8(width: u32, height: u32, pixels: &[i8], max_z_error: f64) -> Vec<i8> {
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Char,
+            valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+            data: crate::LercData::I8(pixels.to_vec()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, max_z_error).unwrap();
+        let decoded = crate::decode(&blob).unwrap();
+        match decoded.data {
+            crate::LercData::I8(v) => v,
+            _ => panic!("expected I8 data"),
+        }
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_gradient() {
+        // A gradient pattern triggers DeltaHuffman encoding (max_z_error=0.5
+        // for u8 enables Huffman). Small deltas compress well with Huffman.
+        let width = 16;
+        let height = 16;
+        let pixels: Vec<u8> = (0..width * height)
+            .map(|i| (i % 256) as u8)
+            .collect();
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_repeated_pattern() {
+        // Repeated low-entropy pattern: very compressible by Huffman
+        let width = 32;
+        let height = 32;
+        let pixels: Vec<u8> = (0..width * height)
+            .map(|i| [0u8, 1, 2, 3, 4][i % 5])
+            .collect();
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_constant_regions() {
+        // Image with constant regions and sharp edges
+        let width = 24;
+        let height = 24;
+        let mut pixels = vec![0u8; width * height];
+        for i in 0..height {
+            for j in 0..width {
+                pixels[i * width + j] = if i < height / 2 { 50 } else { 200 };
+            }
+        }
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_i8_roundtrip() {
+        // Signed byte (Char) type triggers Huffman with offset=128
+        let width = 16;
+        let height = 16;
+        let pixels: Vec<i8> = (0..width * height)
+            .map(|i| ((i as i32 % 256) - 128) as i8)
+            .collect();
+        let decoded = roundtrip_i8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_all_same_value() {
+        // All same value — should be const image, not Huffman,
+        // but tests the decode path can handle it
+        let width = 8;
+        let height = 8;
+        let pixels = vec![42u8; width * height];
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_two_values() {
+        // Two alternating values — minimal Huffman tree
+        let width = 16;
+        let height = 16;
+        let pixels: Vec<u8> = (0..width * height)
+            .map(|i| if i % 2 == 0 { 100 } else { 200 })
+            .collect();
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_roundtrip_full_range() {
+        // Use all 256 values — covers full byte range
+        let width = 16;
+        let height = 16;
+        let pixels: Vec<u8> = (0..width * height)
+            .map(|i| (i % 256) as u8)
+            .collect();
+        let decoded = roundtrip_u8(width as u32, height as u32, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_one_band via round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_one_band_u8_roundtrip() {
+        // Encode a small u8 image, then decode with decode_one_band directly
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<u8> = (0..16).collect();
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Byte,
+            valid_masks: vec![BitMask::all_valid(16)],
+            data: crate::LercData::U8(pixels.clone()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.5).unwrap();
+        let mut output = vec![0u8; 16];
+        let (mask, hd, consumed) = decode_one_band(&blob, &mut output, None).unwrap();
+        assert_eq!(consumed, blob.len());
+        assert_eq!(mask.count_valid(), 16);
+        assert_eq!(hd.n_rows, 4);
+        assert_eq!(hd.n_cols, 4);
+        assert_eq!(output, pixels);
+    }
+
+    #[test]
+    fn decode_one_band_f32_roundtrip() {
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<f32> = (0..16).map(|i| i as f32 * 1.5).collect();
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Float,
+            valid_masks: vec![BitMask::all_valid(16)],
+            data: crate::LercData::F32(pixels.clone()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.0).unwrap();
+        let mut output = vec![0.0f32; 16];
+        let (mask, _hd, consumed) = decode_one_band(&blob, &mut output, None).unwrap();
+        assert_eq!(consumed, blob.len());
+        assert_eq!(mask.count_valid(), 16);
+        assert_eq!(output, pixels);
+    }
+
+    #[test]
+    fn decode_one_band_const_image() {
+        // All same value — const image path in decoder
+        let width = 3u32;
+        let height = 3u32;
+        let pixels = vec![42u16; 9];
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::UShort,
+            valid_masks: vec![BitMask::all_valid(9)],
+            data: crate::LercData::U16(pixels.clone()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.5).unwrap();
+        let mut output = vec![0u16; 9];
+        let (mask, _hd, _) = decode_one_band(&blob, &mut output, None).unwrap();
+        assert_eq!(mask.count_valid(), 9);
+        assert_eq!(output, pixels);
+    }
+
+    #[test]
+    fn decode_one_band_no_valid_pixels() {
+        // All pixels invalid — no data to decode
+        let width = 2u32;
+        let height = 2u32;
+        let pixels = vec![0u8; 4];
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Byte,
+            valid_masks: vec![BitMask::new(4)],
+            data: crate::LercData::U8(pixels),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.5).unwrap();
+        let mut output = vec![255u8; 4];
+        let (mask, _hd, _) = decode_one_band(&blob, &mut output, None).unwrap();
+        assert_eq!(mask.count_valid(), 0);
+        // Output should be zeroed for invalid pixels
+        assert_eq!(output, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn decode_one_band_partial_mask() {
+        // 4x4 image with only some pixels valid
+        let width = 4u32;
+        let height = 4u32;
+        let n = (width * height) as usize;
+        let mut mask = BitMask::new(n);
+        let mut pixels = vec![0u8; n];
+        // Set a checkerboard pattern of valid pixels
+        for i in 0..n {
+            if i % 3 == 0 {
+                mask.set_valid(i);
+                pixels[i] = (i * 7 % 256) as u8;
+            }
+        }
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: DataType::Byte,
+            valid_masks: vec![mask.clone()],
+            data: crate::LercData::U8(pixels.clone()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.5).unwrap();
+        let mut output = vec![0u8; n];
+        let (decoded_mask, _hd, _) = decode_one_band(&blob, &mut output, None).unwrap();
+
+        // Verify valid pixels match
+        for i in 0..n {
+            if mask.is_valid(i) {
+                assert!(decoded_mask.is_valid(i), "pixel {i} should be valid");
+                assert_eq!(output[i], pixels[i], "pixel {i} value mismatch");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_bands_into / decode_into
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_into_u8_roundtrip() {
+        let width = 8u32;
+        let height = 8u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<u8> = (0..n).map(|i| (i * 3 % 256) as u8).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let mut output = vec![0u8; n];
+        let result = crate::decode_into(&blob, &mut output).unwrap();
+        assert_eq!(result.width, width);
+        assert_eq!(result.height, height);
+        assert_eq!(result.data_type, DataType::Byte);
+        assert_eq!(output, pixels);
+    }
+
+    #[test]
+    fn decode_into_f64_roundtrip() {
+        let width = 4u32;
+        let height = 4u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.0).unwrap();
+        let mut output = vec![0.0f64; n];
+        let result = crate::decode_into(&blob, &mut output).unwrap();
+        assert_eq!(result.data_type, DataType::Double);
+        assert_eq!(output, pixels);
+    }
+
+    #[test]
+    fn decode_into_type_mismatch() {
+        let pixels: Vec<u8> = vec![1, 2, 3, 4];
+        let blob = crate::encode_typed(2, 2, &pixels, 0.5).unwrap();
+        let mut output = vec![0.0f32; 4];
+        let result = crate::decode_into(&blob, &mut output);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_into_buffer_too_small() {
+        let pixels: Vec<u8> = vec![1, 2, 3, 4];
+        let blob = crate::encode_typed(2, 2, &pixels, 0.5).unwrap();
+        let mut output = vec![0u8; 2]; // too small, need 4
+        let result = crate::decode_into(&blob, &mut output);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_info
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_info_u8() {
+        let width = 10u32;
+        let height = 20u32;
+        let pixels: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let info = crate::decode_info(&blob).unwrap();
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+        assert_eq!(info.n_bands, 1);
+        assert_eq!(info.n_depth, 1);
+        assert_eq!(info.data_type, DataType::Byte);
+        assert_eq!(info.num_valid_pixels, width * height);
+    }
+
+    #[test]
+    fn decode_info_f32() {
+        let width = 5u32;
+        let height = 5u32;
+        let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.01).unwrap();
+        let info = crate::decode_info(&blob).unwrap();
+        assert_eq!(info.width, width);
+        assert_eq!(info.height, height);
+        assert_eq!(info.data_type, DataType::Float);
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-band decode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_multi_band_u8() {
+        let width = 4u32;
+        let height = 4u32;
+        let n = (width * height) as usize;
+        let band1: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
+        let band2: Vec<u8> = (0..n).map(|i| ((i * 3) % 256) as u8).collect();
+        let mut all_pixels = band1.clone();
+        all_pixels.extend_from_slice(&band2);
+
+        let image = crate::LercImage {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 2,
+            data_type: DataType::Byte,
+            valid_masks: vec![
+                BitMask::all_valid(n),
+                BitMask::all_valid(n),
+            ],
+            data: crate::LercData::U8(all_pixels.clone()),
+            no_data_value: None,
+        };
+        let blob = crate::encode(&image, 0.5).unwrap();
+        let decoded = crate::decode(&blob).unwrap();
+        assert_eq!(decoded.n_bands, 2);
+        assert_eq!(decoded.valid_masks.len(), 2);
+        match decoded.data {
+            crate::LercData::U8(v) => assert_eq!(v, all_pixels),
+            _ => panic!("expected U8 data"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_typed convenience
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_typed_u8() {
+        let width = 6u32;
+        let height = 6u32;
+        let pixels: Vec<u8> = (0..36).map(|i| (i * 7 % 256) as u8).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let (decoded, mask, w, h) = crate::decode_typed::<u8>(&blob).unwrap();
+        assert_eq!(w, width);
+        assert_eq!(h, height);
+        assert_eq!(mask.count_valid(), 36);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_typed_wrong_type() {
+        let pixels: Vec<u8> = vec![1, 2, 3, 4];
+        let blob = crate::encode_typed(2, 2, &pixels, 0.5).unwrap();
+        let result = crate::decode_typed::<f32>(&blob);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // remap_no_data
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remap_no_data_replaces_sentinel() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 3,
+            n_depth: 2,
+            no_data_val: -9998.0,      // internal sentinel
+            no_data_val_orig: -9999.0,  // original user value
+            ..Default::default()
+        };
+        let mut mask = BitMask::new(3);
+        mask.set_valid(0);
+        mask.set_valid(1);
+        mask.set_valid(2);
+
+        // pixel0: [5.0, -9998.0] -> [5.0, -9999.0]
+        // pixel1: [10.0, 20.0]   -> unchanged
+        // pixel2: [-9998.0, 30.0] -> [-9999.0, 30.0]
+        let mut output: Vec<f64> = vec![5.0, -9998.0, 10.0, 20.0, -9998.0, 30.0];
+        remap_no_data(&mut output, &mask, &header);
+        assert_eq!(output[0], 5.0);
+        assert_eq!(output[1], -9999.0); // remapped
+        assert_eq!(output[2], 10.0);
+        assert_eq!(output[3], 20.0);
+        assert_eq!(output[4], -9999.0); // remapped
+        assert_eq!(output[5], 30.0);
+    }
+
+    #[test]
+    fn remap_no_data_skips_invalid_pixels() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 2,
+            n_depth: 1,
+            no_data_val: -9998.0,
+            no_data_val_orig: -9999.0,
+            ..Default::default()
+        };
+        let mut mask = BitMask::new(2);
+        mask.set_valid(0);
+        // pixel 1 is invalid
+
+        let mut output: Vec<f64> = vec![-9998.0, -9998.0];
+        remap_no_data(&mut output, &mask, &header);
+        assert_eq!(output[0], -9999.0); // valid pixel: remapped
+        assert_eq!(output[1], -9998.0); // invalid pixel: not touched
+    }
+
+    // -----------------------------------------------------------------------
+    // Integer type round-trips (i16, u16, i32, u32)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn roundtrip_i16() {
+        let width = 8u32;
+        let height = 8u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<i16> = (0..n).map(|i| i as i16 - 32).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let (decoded, _mask, w, h) = crate::decode_typed::<i16>(&blob).unwrap();
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn roundtrip_u32() {
+        let width = 4u32;
+        let height = 4u32;
+        let pixels: Vec<u32> = (0..16).map(|i| i * 1000).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_typed::<u32>(&blob).unwrap();
+        assert_eq!(decoded, pixels);
+    }
+
+    // -----------------------------------------------------------------------
+    // One-sweep decode via manually constructed blob
+    // -----------------------------------------------------------------------
+
+    /// Build a valid LERC2 blob with one_sweep=1, containing raw pixel data.
+    fn build_one_sweep_blob_u8(
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Vec<u8> {
+        let n = (width * height) as usize;
+        assert_eq!(pixels.len(), n);
+        let z_min = *pixels.iter().min().unwrap() as f64;
+        let z_max = *pixels.iter().max().unwrap() as f64;
+
+        let version = 6;
+        let hd = HeaderInfo {
+            version,
+            checksum: 0,
+            n_rows: height as i32,
+            n_cols: width as i32,
+            n_depth: 1,
+            num_valid_pixel: n as i32,
+            micro_block_size: 8,
+            blob_size: 0, // patched later
+            data_type: DataType::Byte,
+            max_z_error: 0.0,
+            z_min,
+            z_max,
+            ..Default::default()
+        };
+
+        let mut blob = header::write_header(&hd);
+
+        // Mask: numBytesMask=0 (all valid)
+        blob.extend_from_slice(&0i32.to_le_bytes());
+
+        // Per-depth min/max ranges (v4+): 1 byte min, 1 byte max
+        blob.push(z_min as u8); // z_min[0]
+        blob.push(z_max as u8); // z_max[0]
+
+        // One sweep flag = 1
+        blob.push(1u8);
+
+        // Raw pixel data
+        blob.extend_from_slice(pixels);
+
+        // Finalize (patches blob_size and checksum)
+        header::finalize_blob(&mut blob);
+        blob
+    }
+
+    #[test]
+    fn decode_one_sweep_blob_u8() {
+        let pixels: Vec<u8> = vec![10, 20, 30, 40, 50, 60];
+        let blob = build_one_sweep_blob_u8(3, 2, &pixels);
+        let decoded = crate::decode(&blob).unwrap();
+        assert_eq!(decoded.width, 3);
+        assert_eq!(decoded.height, 2);
+        match decoded.data {
+            crate::LercData::U8(v) => assert_eq!(v, pixels),
+            _ => panic!("expected U8 data"),
+        }
+    }
+
+    #[test]
+    fn decode_one_sweep_blob_u8_gradient() {
+        let width = 8u32;
+        let height = 8u32;
+        let pixels: Vec<u8> = (0..64).map(|i| (i * 4 % 256) as u8).collect();
+        let blob = build_one_sweep_blob_u8(width, height, &pixels);
+        let (decoded, _mask, w, h) = crate::decode_typed::<u8>(&blob).unwrap();
+        assert_eq!((w, h), (width, height));
+        assert_eq!(decoded, pixels);
+    }
+
+    /// Build a valid LERC2 blob with one_sweep=1 for f32 data.
+    fn build_one_sweep_blob_f32(
+        width: u32,
+        height: u32,
+        pixels: &[f32],
+    ) -> Vec<u8> {
+        let n = (width * height) as usize;
+        assert_eq!(pixels.len(), n);
+        let z_min = pixels.iter().cloned().reduce(f32::min).unwrap() as f64;
+        let z_max = pixels.iter().cloned().reduce(f32::max).unwrap() as f64;
+
+        let hd = HeaderInfo {
+            version: 6,
+            checksum: 0,
+            n_rows: height as i32,
+            n_cols: width as i32,
+            n_depth: 1,
+            num_valid_pixel: n as i32,
+            micro_block_size: 8,
+            blob_size: 0,
+            data_type: DataType::Float,
+            max_z_error: 0.0,
+            z_min,
+            z_max,
+            ..Default::default()
+        };
+
+        let mut blob = header::write_header(&hd);
+
+        // Mask: numBytesMask=0 (all valid)
+        blob.extend_from_slice(&0i32.to_le_bytes());
+
+        // Per-depth min/max ranges: f32 LE
+        blob.extend_from_slice(&(z_min as f32).to_le_bytes());
+        blob.extend_from_slice(&(z_max as f32).to_le_bytes());
+
+        // One sweep flag = 1
+        blob.push(1u8);
+
+        // Raw pixel data (f32 LE)
+        for &v in pixels {
+            blob.extend_from_slice(&v.to_le_bytes());
+        }
+
+        header::finalize_blob(&mut blob);
+        blob
+    }
+
+    #[test]
+    fn decode_one_sweep_blob_f32() {
+        let pixels: Vec<f32> = vec![1.5, -2.5, 100.0, 0.0];
+        let blob = build_one_sweep_blob_f32(2, 2, &pixels);
+        let (decoded, _mask, w, h) = crate::decode_typed::<f32>(&blob).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(decoded, pixels);
+    }
+
+    // -----------------------------------------------------------------------
+    // Large u8 Huffman round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_huffman_u8_large_image() {
+        // Larger image to ensure Huffman encoding is definitely used
+        // (small images might fall back to tiling)
+        let width = 64u32;
+        let height = 64u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<u8> = (0..n)
+            .map(|i| {
+                let x = (i % width as usize) as u8;
+                let y = (i / width as usize) as u8;
+                x.wrapping_add(y)
+            })
+            .collect();
+        let decoded = roundtrip_u8(width, height, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_huffman_u8_sparse_values() {
+        // Only a few distinct values — small Huffman tree
+        let width = 32u32;
+        let height = 32u32;
+        let n = (width * height) as usize;
+        let values = [0u8, 128, 255];
+        let pixels: Vec<u8> = (0..n).map(|i| values[i % 3]).collect();
+        let decoded = roundtrip_u8(width, height, &pixels, 0.5);
+        assert_eq!(decoded, pixels);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tiling mode round-trips (for completeness, covers tiles::read_tiles
+    // path through decode_one_band)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_tiling_i32_roundtrip() {
+        let width = 16u32;
+        let height = 16u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<i32> = (0..n).map(|i| (i as i32) * 100 - 10000).collect();
+        let blob = crate::encode_typed(width, height, &pixels, 0.5).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_typed::<i32>(&blob).unwrap();
+        assert_eq!(decoded, pixels);
+    }
+
+    #[test]
+    fn decode_tiling_f32_lossy() {
+        let width = 16u32;
+        let height = 16u32;
+        let n = (width * height) as usize;
+        let pixels: Vec<f32> = (0..n).map(|i| (i as f32) * 0.7).collect();
+        let max_z_error = 0.01;
+        let blob = crate::encode_typed(width, height, &pixels, max_z_error).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_typed::<f32>(&blob).unwrap();
+        for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+            assert!(
+                (orig - dec).abs() <= max_z_error as f32,
+                "pixel {i}: orig={orig}, decoded={dec}, error={}",
+                (orig - dec).abs()
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Error cases in decode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decode_invalid_magic() {
+        let data = b"NotLerc data here";
+        let result = crate::decode(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_empty_data() {
+        let result = crate::decode(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_truncated_blob() {
+        let pixels: Vec<u8> = (0..64).collect();
+        let blob = crate::encode_typed(8, 8, &pixels, 0.5).unwrap();
+        // Truncate the blob
+        let truncated = &blob[..blob.len() / 2];
+        let result = crate::decode(truncated);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_info_truncated_blob() {
+        // Valid header but truncated — decode_info should still succeed
+        // since it only reads the header
+        let pixels: Vec<u8> = (0..64).collect();
+        let blob = crate::encode_typed(8, 8, &pixels, 0.5).unwrap();
+        // Just the header should be enough for decode_info
+        let info = crate::decode_info(&blob).unwrap();
+        assert_eq!(info.width, 8);
+        assert_eq!(info.height, 8);
+    }
 }
 
 fn decode_huffman<T: LercDataType>(

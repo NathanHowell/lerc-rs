@@ -245,6 +245,96 @@ impl LercImage {
     pub fn mask(&self) -> Option<&BitMask> {
         self.valid_masks.first()
     }
+
+    /// Get the pixel value at `(row, col)` for single-band, single-depth images.
+    ///
+    /// Returns `None` if the data type does not match `T`, if `n_bands > 1` or
+    /// `n_depth > 1`, or if the coordinates are out of bounds.
+    pub fn pixel<T: LercDataType>(&self, row: u32, col: u32) -> Option<T> {
+        if self.n_bands != 1 || self.n_depth != 1 {
+            return None;
+        }
+        if row >= self.height || col >= self.width {
+            return None;
+        }
+        let data = self.as_typed::<T>()?;
+        let idx = row as usize * self.width as usize + col as usize;
+        Some(data[idx])
+    }
+
+    /// Iterate over valid pixels as `(row, col, value)` tuples.
+    ///
+    /// Only works for single-band, single-depth images. Returns `None` if the data
+    /// type does not match `T` or if `n_bands > 1` or `n_depth > 1`.
+    /// The iterator respects the validity mask, skipping invalid pixels.
+    pub fn valid_pixels<'a, T: LercDataType + 'a>(
+        &'a self,
+    ) -> Option<impl Iterator<Item = (u32, u32, T)> + 'a> {
+        if self.n_bands != 1 || self.n_depth != 1 {
+            return None;
+        }
+        let data = self.as_typed::<T>()?;
+        let width = self.width;
+        let mask = self.valid_masks.first();
+        Some(data.iter().enumerate().filter_map(move |(idx, &val)| {
+            let is_valid = match mask {
+                Some(m) => m.is_valid(idx),
+                None => true,
+            };
+            if is_valid {
+                let row = (idx / width as usize) as u32;
+                let col = (idx % width as usize) as u32;
+                Some((row, col, val))
+            } else {
+                None
+            }
+        }))
+    }
+
+    /// Get dimensions as `(width, height)`.
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Total number of pixels (`width * height`).
+    pub fn num_pixels(&self) -> usize {
+        self.width as usize * self.height as usize
+    }
+
+    /// Check if all pixels are valid (in the first band's mask).
+    ///
+    /// Returns `true` if there is no mask (all pixels are implicitly valid)
+    /// or if every pixel in the mask is marked valid.
+    pub fn all_valid(&self) -> bool {
+        match self.valid_masks.first() {
+            Some(m) => m.count_valid() == m.num_pixels(),
+            None => true,
+        }
+    }
+
+    /// Create a single-band, all-valid `LercImage` from a typed pixel vector
+    /// and dimensions.
+    ///
+    /// Returns an error if `data.len() != width * height`.
+    pub fn from_pixels<T: LercDataType>(width: u32, height: u32, data: Vec<T>) -> Result<Self> {
+        let expected = width as usize * height as usize;
+        if data.len() != expected {
+            return Err(LercError::InvalidData(alloc::format!(
+                "data length {} does not match width*height {expected}",
+                data.len()
+            )));
+        }
+        Ok(Self {
+            width,
+            height,
+            n_depth: 1,
+            n_bands: 1,
+            data_type: T::DATA_TYPE,
+            valid_masks: vec![BitMask::all_valid(expected)],
+            data: T::into_lerc_data(data),
+            no_data_value: None,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

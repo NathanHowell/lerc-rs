@@ -252,3 +252,183 @@ fn decode_typed_rejects_multidepth() {
     let err = result.unwrap_err().to_string();
     assert!(err.contains("single-depth"), "error should mention single-depth: {err}");
 }
+
+// ---------------------------------------------------------------------------
+// LercImage ergonomic API tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lerc_image_pixel_accessor() {
+    let width = 4u32;
+    let height = 3u32;
+    let pixels: Vec<f32> = (0..12).map(|i| i as f32 * 2.0).collect();
+
+    let blob = lerc::encode_typed(width, height, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    // Valid coordinates
+    assert_eq!(image.pixel::<f32>(0, 0), Some(0.0));
+    assert_eq!(image.pixel::<f32>(0, 3), Some(6.0));
+    assert_eq!(image.pixel::<f32>(2, 3), Some(22.0));
+
+    // Out of bounds
+    assert_eq!(image.pixel::<f32>(3, 0), None);
+    assert_eq!(image.pixel::<f32>(0, 4), None);
+
+    // Wrong type
+    assert_eq!(image.pixel::<u8>(0, 0), None);
+}
+
+#[test]
+fn lerc_image_valid_pixels_all_valid() {
+    let width = 3u32;
+    let height = 2u32;
+    let pixels: Vec<u16> = vec![10, 20, 30, 40, 50, 60];
+
+    let blob = lerc::encode_typed(width, height, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    let valid: Vec<(u32, u32, u16)> = image.valid_pixels::<u16>().unwrap().collect();
+    assert_eq!(valid.len(), 6);
+    assert_eq!(valid[0], (0, 0, 10));
+    assert_eq!(valid[1], (0, 1, 20));
+    assert_eq!(valid[2], (0, 2, 30));
+    assert_eq!(valid[3], (1, 0, 40));
+    assert_eq!(valid[4], (1, 1, 50));
+    assert_eq!(valid[5], (1, 2, 60));
+}
+
+#[test]
+fn lerc_image_valid_pixels_with_mask() {
+    let width = 4u32;
+    let height = 2u32;
+    let n = (width * height) as usize;
+
+    let mut mask = BitMask::new(n);
+    // Mark only even indices as valid: 0, 2, 4, 6
+    for k in (0..n).step_by(2) {
+        mask.set_valid(k);
+    }
+
+    let pixels: Vec<i32> = (0..n as i32).collect();
+    let blob =
+        lerc::encode_typed_masked(width, height, &pixels, &mask, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    let valid: Vec<(u32, u32, i32)> = image.valid_pixels::<i32>().unwrap().collect();
+    assert_eq!(valid.len(), 4);
+    assert_eq!(valid[0], (0, 0, 0)); // idx 0
+    assert_eq!(valid[1], (0, 2, 2)); // idx 2
+    assert_eq!(valid[2], (1, 0, 4)); // idx 4
+    assert_eq!(valid[3], (1, 2, 6)); // idx 6
+}
+
+#[test]
+fn lerc_image_valid_pixels_wrong_type() {
+    let pixels: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0];
+    let blob = lerc::encode_typed(2, 2, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    assert!(image.valid_pixels::<u8>().is_none());
+}
+
+#[test]
+fn lerc_image_dimensions_and_num_pixels() {
+    let width = 5u32;
+    let height = 7u32;
+    let pixels: Vec<u8> = vec![0; (width * height) as usize];
+
+    let blob = lerc::encode_typed(width, height, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    assert_eq!(image.dimensions(), (5, 7));
+    assert_eq!(image.num_pixels(), 35);
+}
+
+#[test]
+fn lerc_image_all_valid_true() {
+    let pixels: Vec<f32> = vec![1.0; 16];
+    let blob = lerc::encode_typed(4, 4, &pixels, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    assert!(image.all_valid());
+}
+
+#[test]
+fn lerc_image_all_valid_false() {
+    let width = 4u32;
+    let height = 4u32;
+    let n = (width * height) as usize;
+
+    let mut mask = BitMask::new(n);
+    for k in 0..n - 1 {
+        mask.set_valid(k);
+    }
+    // Last pixel is invalid
+
+    let pixels: Vec<f32> = vec![1.0; n];
+    let blob =
+        lerc::encode_typed_masked(width, height, &pixels, &mask, 0.0).expect("encode failed");
+    let image = lerc::decode(&blob).expect("decode failed");
+
+    assert!(!image.all_valid());
+}
+
+#[test]
+fn lerc_image_from_pixels() {
+    let width = 3u32;
+    let height = 2u32;
+    let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+
+    let image = lerc::LercImage::from_pixels(width, height, data.clone()).expect("from_pixels");
+    assert_eq!(image.width, width);
+    assert_eq!(image.height, height);
+    assert_eq!(image.n_bands, 1);
+    assert_eq!(image.n_depth, 1);
+    assert_eq!(image.data_type, lerc::DataType::Float);
+    assert!(image.all_valid());
+    assert_eq!(image.as_typed::<f32>().unwrap(), &data[..]);
+
+    // Round-trip through encode/decode
+    let blob = lerc::encode(&image, 0.0).expect("encode failed");
+    let decoded = lerc::decode(&blob).expect("decode failed");
+    assert_eq!(decoded.as_typed::<f32>().unwrap(), &data[..]);
+}
+
+#[test]
+fn lerc_image_from_pixels_wrong_size() {
+    let result = lerc::LercImage::from_pixels::<u8>(3, 3, vec![0u8; 10]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn lerc_image_from_pixels_all_types() {
+    // Verify from_pixels works for every LercDataType
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i8; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u8; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i16; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u16; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i32; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u32; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0.0f32; 4]).is_ok());
+    assert!(lerc::LercImage::from_pixels(2, 2, vec![0.0f64; 4]).is_ok());
+}
+
+#[test]
+fn lerc_image_pixel_multiband_returns_none() {
+    use lerc::{DataType, LercData, LercImage};
+
+    let image = LercImage {
+        width: 2,
+        height: 2,
+        n_depth: 1,
+        n_bands: 2,
+        data_type: DataType::Byte,
+        valid_masks: vec![BitMask::all_valid(4)],
+        data: LercData::U8(vec![0; 8]),
+        no_data_value: None,
+    };
+
+    assert_eq!(image.pixel::<u8>(0, 0), None);
+    assert!(image.valid_pixels::<u8>().is_none());
+}

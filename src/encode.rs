@@ -938,10 +938,11 @@ fn encode_one_band<T: LercDataType>(
     let n_depth = image.n_depth as usize;
     let num_valid = mask.count_valid().min(width * height);
 
-    let nd_f64 = image
-        .no_data_value
-        .filter(|_| n_depth > 1)
-        .map(|nd| T::from_f64(nd).to_f64());
+    let nd_f64 = if n_depth > 1 {
+        image.no_data_value.map(|nd| T::from_f64(nd).to_f64())
+    } else {
+        None
+    };
 
     // 1. Gather statistics in a single pass.
     let mut stats =

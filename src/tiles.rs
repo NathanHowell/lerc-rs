@@ -497,12 +497,12 @@ pub(crate) fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -
     match T::DATA_TYPE {
         DataType::Char => s[0] as i8 as f64,
         DataType::Byte => s[0] as f64,
-        DataType::Short => i16::from_le_bytes(s[..2].try_into().unwrap()) as f64,
-        DataType::UShort => u16::from_le_bytes(s[..2].try_into().unwrap()) as f64,
-        DataType::Int => i32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
-        DataType::UInt => u32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
-        DataType::Float => f32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
-        DataType::Double => f64::from_le_bytes(s[..8].try_into().unwrap()),
+        DataType::Short => i16::from_le_bytes([s[0], s[1]]) as f64,
+        DataType::UShort => u16::from_le_bytes([s[0], s[1]]) as f64,
+        DataType::Int => i32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
+        DataType::UInt => u32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
+        DataType::Float => f32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
+        DataType::Double => f64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]),
     }
 }
 

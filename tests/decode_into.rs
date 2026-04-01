@@ -143,7 +143,7 @@ test_decode_into_matches!(
     (0..64 * 64).map(|i| i as f32 * 0.1).collect::<Vec<f32>>(),
     64,
     64,
-    Precision::MaxError(0.001)
+    Precision::Tolerance(0.001)
 );
 
 test_decode_into_matches!(
@@ -156,7 +156,7 @@ test_decode_into_matches!(
     (0..32 * 32).map(|i| i as f64 * 0.01).collect::<Vec<f64>>(),
     32,
     32,
-    Precision::MaxError(0.0001)
+    Precision::Tolerance(0.0001)
 );
 
 #[test]
@@ -176,7 +176,7 @@ fn decode_into_buffer_too_small() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
 
     // Buffer is too small
     let mut output = vec![0.0f32; 10];
@@ -207,7 +207,7 @@ fn decode_into_type_mismatch() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
 
     // Try to decode f32 data into a u8 buffer
     let mut output = vec![0u8; (width * height) as usize];
@@ -334,7 +334,7 @@ fn decode_into_with_mask() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {

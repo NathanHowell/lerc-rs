@@ -108,7 +108,7 @@ fn rust_encode_cpp_decode_f32_near_lossless() {
     let max_z_err = f32::EPSILON as f64;
 
     let blob =
-        lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err as f32)).unwrap();
+        lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err as f32)).unwrap();
 
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
@@ -131,7 +131,7 @@ fn rust_encode_cpp_decode_f32_lossy() {
     let data = make_gradient_f32(width, height);
 
     for max_z_err in [0.01, 0.1, 1.0] {
-        let blob = lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err as f32))
+        let blob = lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err as f32))
             .unwrap();
 
         let (info, range) = cpp::get_blob_info(&blob);
@@ -162,7 +162,7 @@ fn rust_encode_cpp_decode_f64_near_lossless() {
     let data = make_gradient_f64(width, height);
     let max_z_err = f64::EPSILON;
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err)).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err)).unwrap();
 
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_DOUBLE);
@@ -181,7 +181,7 @@ fn rust_encode_cpp_decode_f64_lossy() {
     let data = make_gradient_f64(width, height);
     let max_z_err = 0.5;
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err)).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err)).unwrap();
 
     let (decoded, _): (Vec<f64>, _) =
         cpp::decode(&blob, DT_DOUBLE, width as i32, height as i32, 1, 1);
@@ -196,7 +196,7 @@ fn rust_encode_cpp_decode_u8() {
     let (width, height) = (64, 64);
     let data = make_ramp_u8(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_UCHAR);
 
@@ -212,7 +212,7 @@ fn rust_encode_cpp_decode_i8() {
         .map(|i| ((i % 256) as i16 - 128) as i8)
         .collect();
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_CHAR);
 
@@ -225,7 +225,7 @@ fn rust_encode_cpp_decode_i16() {
     let (width, height) = (64, 64);
     let data = make_ramp_i16(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_SHORT);
 
@@ -239,7 +239,7 @@ fn rust_encode_cpp_decode_u16() {
     let (width, height) = (64, 64);
     let data = make_ramp_u16(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_USHORT);
 
@@ -253,7 +253,7 @@ fn rust_encode_cpp_decode_u32() {
     let (width, height) = (64, 64);
     let data = make_ramp_u32(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_UINT);
 
@@ -267,7 +267,7 @@ fn rust_encode_cpp_decode_i32() {
     let (width, height) = (64, 64);
     let data = make_ramp_i32(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_INT);
 
@@ -282,12 +282,12 @@ fn rust_encode_cpp_decode_with_mask() {
     let (mask, valid_bytes) = make_validity_mask(width, height);
     let max_z_err = 0.01;
 
-    let blob = lerc::encode_typed_masked(
+    let blob = lerc::encode_slice_masked(
         width,
         height,
         &data,
         &mask,
-        Precision::MaxError(max_z_err as f32),
+        Precision::Tolerance(max_z_err as f32),
     )
     .unwrap();
 
@@ -570,7 +570,7 @@ fn rust_encode_cpp_decode_multiband_f32() {
         no_data_value: None,
     };
 
-    let blob = lerc::encode(&image, Precision::MaxError(max_z_err)).unwrap();
+    let blob = lerc::encode(&image, Precision::Tolerance(max_z_err)).unwrap();
 
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
@@ -623,11 +623,11 @@ fn roundtrip_rust_cpp_rust_f32() {
     let original = make_gradient_f32(width, height);
     let max_z_err = 0.01;
 
-    let rust_blob = lerc::encode_typed(
+    let rust_blob = lerc::encode_slice(
         width,
         height,
         &original,
-        Precision::MaxError(max_z_err as f32),
+        Precision::Tolerance(max_z_err as f32),
     )
     .unwrap();
     let (cpp_decoded, _): (Vec<f32>, _) =
@@ -668,11 +668,11 @@ fn roundtrip_cpp_rust_cpp_f32() {
     );
     let rust_image = lerc::decode(&cpp_blob).unwrap();
     let rust_decoded: Vec<f32> = rust_image.as_typed::<f32>().unwrap().to_vec();
-    let rust_blob = lerc::encode_typed(
+    let rust_blob = lerc::encode_slice(
         width,
         height,
         &rust_decoded,
-        Precision::MaxError(max_z_err as f32),
+        Precision::Tolerance(max_z_err as f32),
     )
     .unwrap();
     let (final_decoded, _): (Vec<f32>, _) =
@@ -688,7 +688,7 @@ fn roundtrip_rust_cpp_rust_u8_lossless() {
     let (width, height) = (64, 64);
     let original = make_ramp_u8(width, height);
 
-    let rust_blob = lerc::encode_typed(width, height, &original, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &original, Precision::Lossless).unwrap();
     let (cpp_decoded, _): (Vec<u8>, _) =
         cpp::decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(original, cpp_decoded);
@@ -726,7 +726,7 @@ fn roundtrip_cpp_rust_cpp_u8_lossless() {
     let rust_decoded: Vec<u8> = rust_image.as_typed::<u8>().unwrap().to_vec();
     assert_eq!(original, rust_decoded);
 
-    let rust_blob = lerc::encode_typed(width, height, &rust_decoded, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &rust_decoded, Precision::Lossless).unwrap();
     let (final_decoded, _): (Vec<u8>, _) =
         cpp::decode(&rust_blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(original, final_decoded);
@@ -739,12 +739,12 @@ fn roundtrip_with_mask_f32() {
     let (mask, valid_bytes) = make_validity_mask(width, height);
     let max_z_err = 0.01;
 
-    let rust_blob = lerc::encode_typed_masked(
+    let rust_blob = lerc::encode_slice_masked(
         width,
         height,
         &original,
         &mask,
-        Precision::MaxError(max_z_err as f32),
+        Precision::Tolerance(max_z_err as f32),
     )
     .unwrap();
     let (cpp_decoded, cpp_valid): (Vec<f32>, _) =
@@ -798,7 +798,7 @@ fn rust_encode_cpp_decode_large_f32() {
     let max_z_err = 0.001;
 
     let blob =
-        lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err as f32)).unwrap();
+        lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err as f32)).unwrap();
     let (decoded, _): (Vec<f32>, _) =
         cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 
@@ -841,7 +841,7 @@ fn rust_encode_cpp_decode_constant_f32() {
     let (width, height) = (32, 32);
     let data = vec![42.5f32; (width * height) as usize];
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (decoded, _): (Vec<f32>, _) =
         cpp::decode(&blob, DT_FLOAT, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
@@ -862,7 +862,7 @@ fn rust_encode_cpp_decode_all_zeros_u8() {
     let (width, height) = (32, 32);
     let data = vec![0u8; (width * height) as usize];
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (decoded, _): (Vec<u8>, _) =
         cpp::decode(&blob, DT_UCHAR, width as i32, height as i32, 1, 1);
     assert_eq!(data, decoded);
@@ -901,7 +901,7 @@ fn rust_encode_cpp_decode_multi_depth_f32_lossy() {
         no_data_value: None,
     };
 
-    let blob = lerc::encode(&image, Precision::MaxError(max_z_err)).unwrap();
+    let blob = lerc::encode(&image, Precision::Tolerance(max_z_err)).unwrap();
 
     // C++ decoder should accept our blob
     let (decoded, _): (Vec<f32>, _) = cpp::decode(
@@ -987,7 +987,7 @@ fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
     };
 
     // Rust encode
-    let rust_blob = lerc::encode(&image, Precision::MaxError(max_z_err)).unwrap();
+    let rust_blob = lerc::encode(&image, Precision::Tolerance(max_z_err)).unwrap();
 
     // C++ decode
     let (cpp_decoded, _): (Vec<f32>, _) = cpp::decode(
@@ -1035,7 +1035,7 @@ fn rust_encode_cpp_decode_f32_lossless_fpl() {
     let data = make_gradient_f32(width, height);
 
     // maxZErr=0 triggers the FPL (floating-point lossless) path
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
 
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
@@ -1084,7 +1084,7 @@ fn rust_encode_cpp_decode_f64_lossless_fpl() {
     let (width, height) = (32, 32);
     let data = make_gradient_f64(width, height);
 
-    let blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
 
     let (info, _) = cpp::get_blob_info(&blob);
     assert_eq!(info[INFO_DATA_TYPE], DT_DOUBLE);
@@ -1138,7 +1138,7 @@ fn fpl_cross_validation_constant_byte_plane() {
         .collect();
 
     // Rust encode -> C++ decode
-    let rust_blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let (cpp_decoded, _): (Vec<f32>, _) =
         cpp::decode(&rust_blob, DT_FLOAT, width as i32, height as i32, 1, 1);
 

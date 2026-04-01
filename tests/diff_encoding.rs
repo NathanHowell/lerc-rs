@@ -127,7 +127,7 @@ fn round_trip_f32_ndepth3_lossy() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -505,7 +505,7 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -552,7 +552,7 @@ fn lossy_multi_depth_f64_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -600,7 +600,7 @@ fn lossy_multi_depth_i32_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -656,7 +656,7 @@ fn lossy_multi_depth_with_mask_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);
@@ -722,7 +722,7 @@ fn lossy_multi_depth_multiband_round_trip() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(max_z_error)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     assert_eq!(decoded.n_depth, n_depth);

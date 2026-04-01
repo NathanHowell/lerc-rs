@@ -48,7 +48,7 @@ fn main() {
     if mode == "all" || mode == "encode-lossy" {
         let start = Instant::now();
         for _ in 0..iters {
-            black_box(lerc::encode(black_box(&image), Precision::MaxError(0.01)).unwrap());
+            black_box(lerc::encode(black_box(&image), Precision::Tolerance(0.01)).unwrap());
         }
         let elapsed = start.elapsed();
         eprintln!(
@@ -82,7 +82,7 @@ fn main() {
     }
 
     if mode == "all" || mode == "decode" {
-        let blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
+        let blob = lerc::encode(&image, Precision::Tolerance(0.01)).unwrap();
         let start = Instant::now();
         for _ in 0..iters {
             black_box(lerc::decode(black_box(&blob)).unwrap());

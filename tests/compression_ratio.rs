@@ -83,7 +83,7 @@ fn ratio_f32_lossy() {
     let max_z_err = 0.01;
 
     let rust_blob =
-        lerc::encode_typed(width, height, &data, Precision::MaxError(max_z_err as f32)).unwrap();
+        lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err as f32)).unwrap();
     let cpp_blob = cpp::encode(
         &data,
         DT_FLOAT,
@@ -104,7 +104,7 @@ fn ratio_u8_lossless() {
     let (width, height) = (256u32, 256u32);
     let data = make_ramp_u8(width, height);
 
-    let rust_blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let cpp_blob = cpp::encode(
         &data,
         DT_UCHAR,
@@ -125,7 +125,7 @@ fn ratio_f32_lossless() {
     let (width, height) = (256u32, 256u32);
     let data = make_gradient_f32(width, height);
 
-    let rust_blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let cpp_blob = cpp::encode(
         &data,
         DT_FLOAT,
@@ -150,7 +150,7 @@ fn ratio_f32_lossless_sin() {
     let (width, height) = (256u32, 256u32);
     let data = make_sin_f32(width, height);
 
-    let rust_blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let cpp_blob = cpp::encode(
         &data,
         DT_FLOAT,
@@ -175,7 +175,7 @@ fn ratio_f64_lossless() {
     let (width, height) = (128u32, 128u32);
     let data = make_gradient_f64(width, height);
 
-    let rust_blob = lerc::encode_typed(width, height, &data, Precision::Lossless).unwrap();
+    let rust_blob = lerc::encode_slice(width, height, &data, Precision::Lossless).unwrap();
     let cpp_blob = cpp::encode(
         &data,
         DT_DOUBLE,
@@ -207,7 +207,7 @@ fn ratio_reference_california() {
     let max_z_err = 0.01; // lossy
 
     let rust_blob =
-        lerc::encode_typed(width, height, data, Precision::MaxError(max_z_err as f32)).unwrap();
+        lerc::encode_slice(width, height, data, Precision::Tolerance(max_z_err as f32)).unwrap();
     let cpp_blob = cpp::encode(
         data,
         DT_FLOAT,
@@ -222,7 +222,7 @@ fn ratio_reference_california() {
     check_ratio("california_lossy", rust_blob.len(), cpp_blob.len(), 1.02);
 
     // Also check lossless
-    let rust_blob_ll = lerc::encode_typed(width, height, data, Precision::Lossless).unwrap();
+    let rust_blob_ll = lerc::encode_slice(width, height, data, Precision::Lossless).unwrap();
     let cpp_blob_ll = cpp::encode(data, DT_FLOAT, width as i32, height as i32, 1, 1, None, 0.0);
 
     check_ratio(

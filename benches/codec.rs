@@ -121,7 +121,7 @@ fn bench_encode_f32(c: &mut Criterion) {
             BenchmarkId::new("lossy_0.01/rust", size),
             &image,
             |b, img| {
-                b.iter(|| lerc::encode(img, Precision::MaxError(0.01)).unwrap());
+                b.iter(|| lerc::encode(img, Precision::Tolerance(0.01)).unwrap());
             },
         );
 
@@ -230,7 +230,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
             data: LercData::F32(pixels.clone()),
             ..Default::default()
         };
-        let rust_blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
+        let rust_blob = lerc::encode(&image, Precision::Tolerance(0.01)).unwrap();
 
         // Encode with C++, then benchmark decode
         let cpp_blob = cpp::encode(

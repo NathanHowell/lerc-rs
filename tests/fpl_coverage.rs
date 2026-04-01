@@ -61,7 +61,7 @@ fn assert_fpl_used(blob: &[u8]) {
 /// Encode f32 data losslessly, verify FPL was used, decode and check bit-exact.
 fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
     let blob =
-        lerc::encode_typed(width, height, pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
     assert_fpl_used(&blob);
 
@@ -70,7 +70,7 @@ fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
     assert_eq!(info.max_z_error, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
-    let (decoded, _mask, dw, dh) = lerc::decode_typed::<f32>(&blob).expect("decode failed");
+    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
     assert_eq!(dw, width);
     assert_eq!(dh, height);
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -90,7 +90,7 @@ fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
 /// Encode f64 data losslessly, verify FPL was used, decode and check bit-exact.
 fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
     let blob =
-        lerc::encode_typed(width, height, pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
     assert_fpl_used(&blob);
 
@@ -99,7 +99,7 @@ fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
     assert_eq!(info.max_z_error, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
-    let (decoded, _mask, dw, dh) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
     assert_eq!(dw, width);
     assert_eq!(dh, height);
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -120,9 +120,9 @@ fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
 /// Used for constant data and 1x1 images that take the const-image shortcut.
 fn round_trip_f32_lossless(width: u32, height: u32, pixels: &[f32]) {
     let blob =
-        lerc::encode_typed(width, height, pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
-    let (decoded, _mask, dw, dh) = lerc::decode_typed::<f32>(&blob).expect("decode failed");
+    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
     assert_eq!(dw, width);
     assert_eq!(dh, height);
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -142,9 +142,9 @@ fn round_trip_f32_lossless(width: u32, height: u32, pixels: &[f32]) {
 /// Encode f64 data losslessly, decode and check bit-exact (no FPL assertion).
 fn round_trip_f64_lossless(width: u32, height: u32, pixels: &[f64]) {
     let blob =
-        lerc::encode_typed(width, height, pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
-    let (decoded, _mask, dw, dh) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
     assert_eq!(dw, width);
     assert_eq!(dh, height);
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {

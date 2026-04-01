@@ -1096,7 +1096,7 @@ mod tests {
             data: crate::LercData::U8(pixels.to_vec()),
             no_data_value: None,
         };
-        let blob = crate::encode(&image, crate::Precision::MaxError(max_z_error)).unwrap();
+        let blob = crate::encode(&image, crate::Precision::Tolerance(max_z_error)).unwrap();
         let decoded = crate::decode(&blob).unwrap();
         match decoded.data {
             crate::LercData::U8(v) => v,
@@ -1116,7 +1116,7 @@ mod tests {
             data: crate::LercData::I8(pixels.to_vec()),
             no_data_value: None,
         };
-        let blob = crate::encode(&image, crate::Precision::MaxError(max_z_error)).unwrap();
+        let blob = crate::encode(&image, crate::Precision::Tolerance(max_z_error)).unwrap();
         let decoded = crate::decode(&blob).unwrap();
         match decoded.data {
             crate::LercData::I8(v) => v,
@@ -1355,7 +1355,7 @@ mod tests {
         let height = 8u32;
         let n = (width * height) as usize;
         let pixels: Vec<u8> = (0..n).map(|i| (i * 3 % 256) as u8).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
         let mut output = vec![0u8; n];
         let result = crate::decode_into(&blob, &mut output).unwrap();
         assert_eq!(result.width, width);
@@ -1370,7 +1370,7 @@ mod tests {
         let height = 4u32;
         let n = (width * height) as usize;
         let pixels: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
         let mut output = vec![0.0f64; n];
         let result = crate::decode_into(&blob, &mut output).unwrap();
         assert_eq!(result.data_type, DataType::Double);
@@ -1380,7 +1380,7 @@ mod tests {
     #[test]
     fn decode_into_type_mismatch() {
         let pixels: Vec<u8> = vec![1, 2, 3, 4];
-        let blob = crate::encode_typed(2, 2, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(2, 2, &pixels, crate::Precision::Lossless).unwrap();
         let mut output = vec![0.0f32; 4];
         let result = crate::decode_into(&blob, &mut output);
         assert!(result.is_err());
@@ -1389,7 +1389,7 @@ mod tests {
     #[test]
     fn decode_into_buffer_too_small() {
         let pixels: Vec<u8> = vec![1, 2, 3, 4];
-        let blob = crate::encode_typed(2, 2, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(2, 2, &pixels, crate::Precision::Lossless).unwrap();
         let mut output = vec![0u8; 2]; // too small, need 4
         let result = crate::decode_into(&blob, &mut output);
         assert!(result.is_err());
@@ -1404,7 +1404,7 @@ mod tests {
         let width = 10u32;
         let height = 20u32;
         let pixels: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
         let info = crate::decode_info(&blob).unwrap();
         assert_eq!(info.width, width);
         assert_eq!(info.height, height);
@@ -1419,8 +1419,9 @@ mod tests {
         let width = 5u32;
         let height = 5u32;
         let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::MaxError(0.01f32))
-            .unwrap();
+        let blob =
+            crate::encode_slice(width, height, &pixels, crate::Precision::Tolerance(0.01f32))
+                .unwrap();
         let info = crate::decode_info(&blob).unwrap();
         assert_eq!(info.width, width);
         assert_eq!(info.height, height);
@@ -1462,16 +1463,16 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // decode_typed convenience
+    // decode_slice convenience
     // -----------------------------------------------------------------------
 
     #[test]
-    fn decode_typed_u8() {
+    fn decode_slice_u8() {
         let width = 6u32;
         let height = 6u32;
         let pixels: Vec<u8> = (0..36).map(|i| (i * 7 % 256) as u8).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, mask, w, h) = crate::decode_typed::<u8>(&blob).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let (decoded, mask, w, h) = crate::decode_slice::<u8>(&blob).unwrap();
         assert_eq!(w, width);
         assert_eq!(h, height);
         assert_eq!(mask.count_valid(), 36);
@@ -1479,10 +1480,10 @@ mod tests {
     }
 
     #[test]
-    fn decode_typed_wrong_type() {
+    fn decode_slice_wrong_type() {
         let pixels: Vec<u8> = vec![1, 2, 3, 4];
-        let blob = crate::encode_typed(2, 2, &pixels, crate::Precision::Lossless).unwrap();
-        let result = crate::decode_typed::<f32>(&blob);
+        let blob = crate::encode_slice(2, 2, &pixels, crate::Precision::Lossless).unwrap();
+        let result = crate::decode_slice::<f32>(&blob);
         assert!(result.is_err());
     }
 
@@ -1548,8 +1549,8 @@ mod tests {
         let height = 8u32;
         let n = (width * height) as usize;
         let pixels: Vec<i16> = (0..n).map(|i| i as i16 - 32).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, w, h) = crate::decode_typed::<i16>(&blob).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let (decoded, _mask, w, h) = crate::decode_slice::<i16>(&blob).unwrap();
         assert_eq!((w, h), (width, height));
         assert_eq!(decoded, pixels);
     }
@@ -1559,8 +1560,8 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<u32> = (0..16).map(|i| i * 1000).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, _, _) = crate::decode_typed::<u32>(&blob).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_slice::<u32>(&blob).unwrap();
         assert_eq!(decoded, pixels);
     }
 
@@ -1631,7 +1632,7 @@ mod tests {
         let height = 8u32;
         let pixels: Vec<u8> = (0..64).map(|i| (i * 4 % 256) as u8).collect();
         let blob = build_one_sweep_blob_u8(width, height, &pixels);
-        let (decoded, _mask, w, h) = crate::decode_typed::<u8>(&blob).unwrap();
+        let (decoded, _mask, w, h) = crate::decode_slice::<u8>(&blob).unwrap();
         assert_eq!((w, h), (width, height));
         assert_eq!(decoded, pixels);
     }
@@ -1684,7 +1685,7 @@ mod tests {
     fn decode_one_sweep_blob_f32() {
         let pixels: Vec<f32> = vec![1.5, -2.5, 100.0, 0.0];
         let blob = build_one_sweep_blob_f32(2, 2, &pixels);
-        let (decoded, _mask, w, h) = crate::decode_typed::<f32>(&blob).unwrap();
+        let (decoded, _mask, w, h) = crate::decode_slice::<f32>(&blob).unwrap();
         assert_eq!((w, h), (2, 2));
         assert_eq!(decoded, pixels);
     }
@@ -1734,8 +1735,8 @@ mod tests {
         let height = 16u32;
         let n = (width * height) as usize;
         let pixels: Vec<i32> = (0..n).map(|i| (i as i32) * 100 - 10000).collect();
-        let blob = crate::encode_typed(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, _, _) = crate::decode_typed::<i32>(&blob).unwrap();
+        let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_slice::<i32>(&blob).unwrap();
         assert_eq!(decoded, pixels);
     }
 
@@ -1746,14 +1747,14 @@ mod tests {
         let n = (width * height) as usize;
         let pixels: Vec<f32> = (0..n).map(|i| (i as f32) * 0.7).collect();
         let max_z_error = 0.01;
-        let blob = crate::encode_typed(
+        let blob = crate::encode_slice(
             width,
             height,
             &pixels,
-            crate::Precision::MaxError(max_z_error as f32),
+            crate::Precision::Tolerance(max_z_error as f32),
         )
         .unwrap();
-        let (decoded, _mask, _, _) = crate::decode_typed::<f32>(&blob).unwrap();
+        let (decoded, _mask, _, _) = crate::decode_slice::<f32>(&blob).unwrap();
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
             assert!(
                 (orig - dec).abs() <= max_z_error as f32,
@@ -1783,7 +1784,7 @@ mod tests {
     #[test]
     fn decode_truncated_blob() {
         let pixels: Vec<u8> = (0..64).collect();
-        let blob = crate::encode_typed(8, 8, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(8, 8, &pixels, crate::Precision::Lossless).unwrap();
         // Truncate the blob
         let truncated = &blob[..blob.len() / 2];
         let result = crate::decode(truncated);
@@ -1795,7 +1796,7 @@ mod tests {
         // Valid header but truncated — decode_info should still succeed
         // since it only reads the header
         let pixels: Vec<u8> = (0..64).collect();
-        let blob = crate::encode_typed(8, 8, &pixels, crate::Precision::Lossless).unwrap();
+        let blob = crate::encode_slice(8, 8, &pixels, crate::Precision::Lossless).unwrap();
         // Just the header should be enough for decode_info
         let info = crate::decode_info(&blob).unwrap();
         assert_eq!(info.width, 8);

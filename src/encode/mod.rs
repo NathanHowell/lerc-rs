@@ -19,18 +19,18 @@ use tiles::{encode_tiles, select_block_size};
 
 pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
     match &image.data {
-        LercData::I8(d) => encode_typed(image, d, max_z_error),
-        LercData::U8(d) => encode_typed(image, d, max_z_error),
-        LercData::I16(d) => encode_typed(image, d, max_z_error),
-        LercData::U16(d) => encode_typed(image, d, max_z_error),
-        LercData::I32(d) => encode_typed(image, d, max_z_error),
-        LercData::U32(d) => encode_typed(image, d, max_z_error),
-        LercData::F32(d) => encode_typed(image, d, max_z_error),
-        LercData::F64(d) => encode_typed(image, d, max_z_error),
+        LercData::I8(d) => encode_slice(image, d, max_z_error),
+        LercData::U8(d) => encode_slice(image, d, max_z_error),
+        LercData::I16(d) => encode_slice(image, d, max_z_error),
+        LercData::U16(d) => encode_slice(image, d, max_z_error),
+        LercData::I32(d) => encode_slice(image, d, max_z_error),
+        LercData::U32(d) => encode_slice(image, d, max_z_error),
+        LercData::F32(d) => encode_slice(image, d, max_z_error),
+        LercData::F64(d) => encode_slice(image, d, max_z_error),
     }
 }
 
-fn encode_typed<T: LercDataType>(
+fn encode_slice<T: LercDataType>(
     image: &LercImage,
     data: &[T],
     max_z_error: f64,

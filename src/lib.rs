@@ -39,12 +39,16 @@ use alloc::vec::Vec;
 use bitmask::BitMask;
 
 /// Controls the precision/error tolerance for LERC encoding.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// `Lossless` preserves exact values. `Tolerance(x)` allows decoded values
+/// to differ from originals by at most ±x.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Precision<T> {
-    /// Lossless compression -- exact round-trip for all pixel values.
+    /// Lossless compression — exact round-trip for all pixel values.
+    #[default]
     Lossless,
-    /// Lossy compression -- decoded values are within the given error of originals.
-    MaxError(T),
+    /// Lossy compression — decoded values are within ±tolerance of originals.
+    Tolerance(T),
 }
 
 /// Metadata returned from a decode-into operation (no owned pixel data).
@@ -135,7 +139,7 @@ pub fn encode(image: &LercImage, precision: Precision<f64>) -> Result<Vec<u8>> {
                 0.0
             }
         }
-        Precision::MaxError(val) => val,
+        Precision::Tolerance(val) => val,
     };
     encode::encode(image, max_z_error)
 }
@@ -148,7 +152,7 @@ pub fn encode(image: &LercImage, precision: Precision<f64>) -> Result<Vec<u8>> {
 ///
 /// The pixel type `T` determines the LERC data type automatically via `LercDataType`.
 /// Returns an error if `data.len() != width * height`.
-pub fn encode_typed<T: LercDataType>(
+pub fn encode_slice<T: LercDataType>(
     width: u32,
     height: u32,
     data: &[T],
@@ -169,7 +173,7 @@ pub fn encode_typed<T: LercDataType>(
                 0.0
             }
         }
-        Precision::MaxError(val) => val.to_f64(),
+        Precision::Tolerance(val) => val.to_f64(),
     };
     let image = LercImage {
         width,
@@ -188,7 +192,7 @@ pub fn encode_typed<T: LercDataType>(
 ///
 /// The pixel type `T` determines the LERC data type automatically via `LercDataType`.
 /// Returns an error if `data.len() != width * height` or if the mask size does not match.
-pub fn encode_typed_masked<T: LercDataType>(
+pub fn encode_slice_masked<T: LercDataType>(
     width: u32,
     height: u32,
     data: &[T],
@@ -216,7 +220,7 @@ pub fn encode_typed_masked<T: LercDataType>(
                 0.0
             }
         }
-        Precision::MaxError(val) => val.to_f64(),
+        Precision::Tolerance(val) => val.to_f64(),
     };
     let image = LercImage {
         width,
@@ -237,17 +241,17 @@ pub fn encode_typed_masked<T: LercDataType>(
 /// The pixel type `T` must match the blob's data type. Returns an error on type
 /// mismatch or if the blob contains multiple bands or depths (use [`decode`] for
 /// multi-band/multi-depth blobs to get full shape and per-band masks).
-pub fn decode_typed<T: LercDataType>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
+pub fn decode_slice<T: LercDataType>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
     let image = decode::decode(blob)?;
     if image.n_bands > 1 {
         return Err(LercError::InvalidData(alloc::format!(
-            "decode_typed requires single-band data, got {} bands (use decode() instead)",
+            "decode_slice requires single-band data, got {} bands (use decode() instead)",
             image.n_bands
         )));
     }
     if image.n_depth > 1 {
         return Err(LercError::InvalidData(alloc::format!(
-            "decode_typed requires single-depth data, got n_depth={} (use decode() instead)",
+            "decode_slice requires single-depth data, got n_depth={} (use decode() instead)",
             image.n_depth
         )));
     }

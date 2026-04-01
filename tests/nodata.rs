@@ -52,7 +52,7 @@ fn round_trip_f32_ndepth3_nodata() {
     };
 
     // Encode with lossy compression
-    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.01)).expect("encode failed");
 
     // Decode
     let decoded = lerc::decode(&encoded).expect("decode failed");
@@ -296,7 +296,7 @@ fn decode_info_reports_nodata() {
         no_data_value: Some(no_data_val),
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.01)).expect("encode failed");
     let info = lerc::decode_info(&encoded).expect("decode_info failed");
 
     assert_eq!(

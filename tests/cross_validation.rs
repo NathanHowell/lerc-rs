@@ -395,7 +395,7 @@ fn california_round_trip_lossy() {
 
     // Re-encode with the same maxZError
     let reencoded =
-        lerc::encode(&image, Precision::MaxError(max_z_error)).expect("re-encode failed");
+        lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("re-encode failed");
 
     // Decode the re-encoded blob
     let image2 = lerc::decode(&reencoded).expect("decode re-encoded failed");
@@ -530,7 +530,7 @@ fn encoded_single_band_header_validation() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.01)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.01)).expect("encode failed");
     validate_header(&encoded, 6, height as i32, width as i32);
 
     let h = parse_header(&encoded);
@@ -721,7 +721,7 @@ fn encoded_checksum_verified_manually() {
         no_data_value: None,
     };
 
-    let encoded = lerc::encode(&image, Precision::MaxError(0.001)).expect("encode failed");
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
     let h = parse_header(&encoded);
 
     // Manually compute checksum over everything after the checksum field (offset 14)
@@ -873,8 +873,8 @@ fn deterministic_encoding_f32() {
         no_data_value: None,
     };
 
-    let encoded1 = lerc::encode(&image, Precision::MaxError(0.01)).expect("first encode failed");
-    let encoded2 = lerc::encode(&image, Precision::MaxError(0.01)).expect("second encode failed");
+    let encoded1 = lerc::encode(&image, Precision::Tolerance(0.01)).expect("first encode failed");
+    let encoded2 = lerc::encode(&image, Precision::Tolerance(0.01)).expect("second encode failed");
 
     assert_eq!(
         encoded1, encoded2,
@@ -944,8 +944,8 @@ fn deterministic_encoding_with_mask() {
         no_data_value: None,
     };
 
-    let encoded1 = lerc::encode(&image, Precision::MaxError(0.001)).expect("first encode failed");
-    let encoded2 = lerc::encode(&image, Precision::MaxError(0.001)).expect("second encode failed");
+    let encoded1 = lerc::encode(&image, Precision::Tolerance(0.001)).expect("first encode failed");
+    let encoded2 = lerc::encode(&image, Precision::Tolerance(0.001)).expect("second encode failed");
 
     assert_eq!(
         encoded1, encoded2,

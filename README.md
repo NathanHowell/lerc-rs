@@ -37,23 +37,23 @@ lerc-rs = "0.1"
 ### Encode
 
 ```rust
-use lerc::{encode_typed, decode_typed, Precision};
+use lerc::{encode_slice, decode_slice, Precision};
 use lerc::bitmask::BitMask;
 
 // Encode a 256×256 f32 raster with 0.01 precision
 let pixels: Vec<f32> = vec![0.0; 256 * 256]; // your data here
-let blob = lerc::encode_typed(256, 256, &pixels, Precision::MaxError(0.01f32)).unwrap();
+let blob = lerc::encode_slice(256, 256, &pixels, Precision::Tolerance(0.01f32)).unwrap();
 
 // Lossless encoding (works for any type)
 let bytes: Vec<u8> = vec![0; 128 * 128];
-let blob = lerc::encode_typed(128, 128, &bytes, Precision::Lossless).unwrap();
+let blob = lerc::encode_slice(128, 128, &bytes, Precision::Lossless).unwrap();
 ```
 
 ### Decode
 
 ```rust
 // Decode to typed data
-let (pixels, mask, width, height) = lerc::decode_typed::<f32>(&blob).unwrap();
+let (pixels, mask, width, height) = lerc::decode_slice::<f32>(&blob).unwrap();
 
 // Or decode to LercImage for full metadata
 let image = lerc::decode(&blob).unwrap();
@@ -79,7 +79,7 @@ let mut mask = BitMask::new(256 * 256);
 mask.set_valid(0); // mark specific pixels as valid
 // ... set more pixels valid ...
 
-let blob = lerc::encode_typed_masked(256, 256, &pixels, &mask, Precision::MaxError(0.01f32)).unwrap();
+let blob = lerc::encode_slice_masked(256, 256, &pixels, &mask, Precision::Tolerance(0.01f32)).unwrap();
 ```
 
 ## Supported formats

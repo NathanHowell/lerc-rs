@@ -80,7 +80,7 @@ proptest! {
 
     #[test]
     fn lossy_f32_round_trip((w, h, pixels, mze) in f32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze as f32)).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze as f32)).expect("encode failed");
         // The encoder may raise maxZError (e.g. try_raise_max_z_error for float data
         // with limited precision). Use the effective maxZError from the header.
         let info = lerc::decode_info(&blob).expect("decode_info failed");
@@ -90,7 +90,7 @@ proptest! {
         // data range is large relative to maxZError (same issue as C++
         // NeedToCheckForFltRndErr). The error is bounded by maxZError plus a few
         // ULPs of the value magnitude from the f32 arithmetic pipeline.
-        let (decoded, mask, dw, dh) = lerc::decode_typed::<f32>(&blob).expect("decode failed");
+        let (decoded, mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -119,11 +119,11 @@ proptest! {
 
     #[test]
     fn lossy_f64_round_trip((w, h, pixels, mze) in f64_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze)).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze)).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         let effective_mze = info.max_z_error;
         let tol = effective_mze * 1.001;
-        let (decoded, mask, dw, dh) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+        let (decoded, mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -147,8 +147,8 @@ proptest! {
 
     #[test]
     fn lossless_u8_round_trip((w, h, pixels) in u8_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
-        let (decoded, _mask, dw, dh) = lerc::decode_typed::<u8>(&blob).expect("decode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let (decoded, _mask, dw, dh) = lerc::decode_slice::<u8>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         prop_assert_eq!(decoded, pixels);
@@ -156,8 +156,8 @@ proptest! {
 
     #[test]
     fn lossless_u16_round_trip((w, h, pixels) in u16_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
-        let (decoded, _mask, dw, dh) = lerc::decode_typed::<u16>(&blob).expect("decode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let (decoded, _mask, dw, dh) = lerc::decode_slice::<u16>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         prop_assert_eq!(decoded, pixels);
@@ -165,8 +165,8 @@ proptest! {
 
     #[test]
     fn lossless_i32_round_trip((w, h, pixels) in i32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
-        let (decoded, _mask, dw, dh) = lerc::decode_typed::<i32>(&blob).expect("decode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let (decoded, _mask, dw, dh) = lerc::decode_slice::<i32>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         prop_assert_eq!(decoded, pixels);
@@ -182,8 +182,8 @@ proptest! {
 
     #[test]
     fn lossless_f32_round_trip((w, h, pixels, _mze) in f32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
-        let (decoded, _mask, dw, dh) = lerc::decode_typed::<f32>(&blob).expect("decode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -200,8 +200,8 @@ proptest! {
 
     #[test]
     fn lossless_f64_round_trip((w, h, pixels, _mze) in f64_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
-        let (decoded, _mask, dw, dh) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
         for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
@@ -242,10 +242,10 @@ proptest! {
         }
 
         let pixels: Vec<f32> = (0..n).map(|i| i as f32 * 0.1).collect();
-        let blob = lerc::encode_typed_masked(w, h, &pixels, &mask, Precision::Lossless)
+        let blob = lerc::encode_slice_masked(w, h, &pixels, &mask, Precision::Lossless)
             .expect("encode failed");
         let (decoded, decoded_mask, dw, dh) =
-            lerc::decode_typed::<f32>(&blob).expect("decode failed");
+            lerc::decode_slice::<f32>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
 
@@ -283,10 +283,10 @@ proptest! {
         }
 
         let pixels: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
-        let blob = lerc::encode_typed_masked(w, h, &pixels, &mask, Precision::Lossless)
+        let blob = lerc::encode_slice_masked(w, h, &pixels, &mask, Precision::Lossless)
             .expect("encode failed");
         let (decoded, decoded_mask, dw, dh) =
-            lerc::decode_typed::<u8>(&blob).expect("decode failed");
+            lerc::decode_slice::<u8>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);
         prop_assert_eq!(dh, h);
 
@@ -317,7 +317,7 @@ proptest! {
 
     #[test]
     fn header_consistency_f32((w, h, pixels, mze) in f32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze as f32)).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze as f32)).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         let image = lerc::decode(&blob).expect("decode failed");
 
@@ -331,7 +331,7 @@ proptest! {
 
     #[test]
     fn header_consistency_u8((w, h, pixels) in u8_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         let image = lerc::decode(&blob).expect("decode failed");
 
@@ -353,7 +353,7 @@ proptest! {
 
     #[test]
     fn blob_size_matches_header_f32((w, h, pixels, mze) in f32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze as f32)).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze as f32)).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         prop_assert_eq!(
             info.blob_size as usize,
@@ -366,7 +366,7 @@ proptest! {
 
     #[test]
     fn blob_size_matches_header_u16((w, h, pixels) in u16_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         prop_assert_eq!(
             info.blob_size as usize,
@@ -379,7 +379,7 @@ proptest! {
 
     #[test]
     fn blob_size_matches_header_i32((w, h, pixels) in i32_image_strategy()) {
-        let blob = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode failed");
+        let blob = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
         prop_assert_eq!(
             info.blob_size as usize,
@@ -400,22 +400,22 @@ proptest! {
 
     #[test]
     fn deterministic_f32((w, h, pixels, mze) in f32_image_strategy()) {
-        let blob1 = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze as f32)).expect("encode 1 failed");
-        let blob2 = lerc::encode_typed(w, h, &pixels, Precision::MaxError(mze as f32)).expect("encode 2 failed");
+        let blob1 = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze as f32)).expect("encode 1 failed");
+        let blob2 = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze as f32)).expect("encode 2 failed");
         prop_assert_eq!(blob1, blob2, "encoding same data twice produced different blobs");
     }
 
     #[test]
     fn deterministic_u8((w, h, pixels) in u8_image_strategy()) {
-        let blob1 = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode 1 failed");
-        let blob2 = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode 2 failed");
+        let blob1 = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode 1 failed");
+        let blob2 = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode 2 failed");
         prop_assert_eq!(blob1, blob2, "encoding same data twice produced different blobs");
     }
 
     #[test]
     fn deterministic_f64((w, h, pixels, _mze) in f64_image_strategy()) {
-        let blob1 = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode 1 failed");
-        let blob2 = lerc::encode_typed(w, h, &pixels, Precision::Lossless).expect("encode 2 failed");
+        let blob1 = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode 1 failed");
+        let blob2 = lerc::encode_slice(w, h, &pixels, Precision::Lossless).expect("encode 2 failed");
         prop_assert_eq!(blob1, blob2, "encoding same data twice produced different blobs");
     }
 }

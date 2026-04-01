@@ -2,7 +2,7 @@ use lerc::Precision;
 use lerc::bitmask::BitMask;
 
 // ---------------------------------------------------------------------------
-// Round-trip tests for every data type via encode_typed / decode_typed
+// Round-trip tests for every data type via encode_slice / decode_slice
 // ---------------------------------------------------------------------------
 
 macro_rules! round_trip_test {
@@ -14,10 +14,10 @@ macro_rules! round_trip_test {
             let pixels: Vec<$ty> = $values;
             assert_eq!(pixels.len(), (width * height) as usize);
 
-            let blob = lerc::encode_typed(width, height, &pixels, Precision::Lossless)
+            let blob = lerc::encode_slice(width, height, &pixels, Precision::Lossless)
                 .expect("encode failed");
             let (decoded_pixels, mask, w, h) =
-                lerc::decode_typed::<$ty>(&blob).expect("decode failed");
+                lerc::decode_slice::<$ty>(&blob).expect("decode failed");
 
             assert_eq!(w, width);
             assert_eq!(h, height);
@@ -77,10 +77,10 @@ fn round_trip_f32_masked() {
     }
 
     let pixels: Vec<f32> = (0..n as u32).map(|i| i as f32 * 1.5).collect();
-    let blob = lerc::encode_typed_masked(width, height, &pixels, &mask, Precision::Lossless)
+    let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
     let (decoded_pixels, decoded_mask, w, h) =
-        lerc::decode_typed::<f32>(&blob).expect("decode failed");
+        lerc::decode_slice::<f32>(&blob).expect("decode failed");
 
     assert_eq!(w, width);
     assert_eq!(h, height);
@@ -106,10 +106,10 @@ fn round_trip_u8_masked() {
     }
 
     let pixels: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
-    let blob = lerc::encode_typed_masked(width, height, &pixels, &mask, Precision::Lossless)
+    let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
     let (decoded_pixels, decoded_mask, w, h) =
-        lerc::decode_typed::<u8>(&blob).expect("decode failed");
+        lerc::decode_slice::<u8>(&blob).expect("decode failed");
 
     assert_eq!(w, width);
     assert_eq!(h, height);
@@ -132,7 +132,7 @@ fn lerc_image_as_typed() {
     let pixels: Vec<f32> = (0..16).map(|i| i as f32).collect();
 
     let blob =
-        lerc::encode_typed(width, height, &pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     // Correct type succeeds
@@ -155,14 +155,14 @@ fn lerc_image_as_typed() {
 #[test]
 fn encode_wrong_data_length() {
     // 3x3 = 9 pixels but we provide 10 values
-    let result = lerc::encode_typed(3, 3, &[0.0f32; 10], Precision::Lossless);
+    let result = lerc::encode_slice(3, 3, &[0.0f32; 10], Precision::Lossless);
     assert!(result.is_err(), "should fail with wrong data length");
 }
 
 #[test]
 fn encode_masked_wrong_mask_length() {
     let mask = BitMask::all_valid(100); // 100 pixels
-    let result = lerc::encode_typed_masked(3, 3, &[0.0f32; 9], &mask, Precision::Lossless); // 9 pixels vs 100
+    let result = lerc::encode_slice_masked(3, 3, &[0.0f32; 9], &mask, Precision::Lossless); // 9 pixels vs 100
     assert!(result.is_err(), "should fail with mismatched mask size");
 }
 
@@ -170,8 +170,8 @@ fn encode_masked_wrong_mask_length() {
 fn decode_wrong_type() {
     // Encode as u8 then try to decode as f32
     let blob =
-        lerc::encode_typed(2, 2, &[1u8, 2, 3, 4], Precision::Lossless).expect("encode failed");
-    let result = lerc::decode_typed::<f32>(&blob);
+        lerc::encode_slice(2, 2, &[1u8, 2, 3, 4], Precision::Lossless).expect("encode failed");
+    let result = lerc::decode_slice::<f32>(&blob);
     assert!(result.is_err(), "should fail with type mismatch");
 }
 
@@ -186,9 +186,9 @@ fn lossy_round_trip_f64() {
     let max_z_error = 0.5;
     let pixels: Vec<f64> = (0..64).map(|i| i as f64 * 0.1).collect();
 
-    let blob = lerc::encode_typed(width, height, &pixels, Precision::MaxError(max_z_error))
+    let blob = lerc::encode_slice(width, height, &pixels, Precision::Tolerance(max_z_error))
         .expect("encode failed");
-    let (decoded, _mask, w, h) = lerc::decode_typed::<f64>(&blob).expect("decode failed");
+    let (decoded, _mask, w, h) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
 
     assert_eq!(w, width);
     assert_eq!(h, height);
@@ -202,7 +202,7 @@ fn lossy_round_trip_f64() {
 }
 
 #[test]
-fn decode_typed_rejects_multiband() {
+fn decode_slice_rejects_multiband() {
     use lerc::{DataType, LercData, LercImage};
 
     let width = 8u32;
@@ -222,10 +222,10 @@ fn decode_typed_rejects_multiband() {
     };
 
     let blob = lerc::encode(&image, Precision::Lossless).unwrap();
-    let result = lerc::decode_typed::<u8>(&blob);
+    let result = lerc::decode_slice::<u8>(&blob);
     assert!(
         result.is_err(),
-        "decode_typed should reject multi-band blobs"
+        "decode_slice should reject multi-band blobs"
     );
     let err = result.unwrap_err().to_string();
     assert!(
@@ -235,7 +235,7 @@ fn decode_typed_rejects_multiband() {
 }
 
 #[test]
-fn decode_typed_rejects_multidepth() {
+fn decode_slice_rejects_multidepth() {
     use lerc::{DataType, LercData, LercImage};
 
     let width = 8u32;
@@ -253,11 +253,11 @@ fn decode_typed_rejects_multidepth() {
         no_data_value: None,
     };
 
-    let blob = lerc::encode(&image, Precision::MaxError(0.01)).unwrap();
-    let result = lerc::decode_typed::<f32>(&blob);
+    let blob = lerc::encode(&image, Precision::Tolerance(0.01)).unwrap();
+    let result = lerc::decode_slice::<f32>(&blob);
     assert!(
         result.is_err(),
-        "decode_typed should reject multi-depth blobs"
+        "decode_slice should reject multi-depth blobs"
     );
     let err = result.unwrap_err().to_string();
     assert!(
@@ -277,7 +277,7 @@ fn lerc_image_pixel_accessor() {
     let pixels: Vec<f32> = (0..12).map(|i| i as f32 * 2.0).collect();
 
     let blob =
-        lerc::encode_typed(width, height, &pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     // Valid coordinates
@@ -300,7 +300,7 @@ fn lerc_image_valid_pixels_all_valid() {
     let pixels: Vec<u16> = vec![10, 20, 30, 40, 50, 60];
 
     let blob =
-        lerc::encode_typed(width, height, &pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     let valid: Vec<(u32, u32, u16)> = image.valid_pixels::<u16>().unwrap().collect();
@@ -326,7 +326,7 @@ fn lerc_image_valid_pixels_with_mask() {
     }
 
     let pixels: Vec<i32> = (0..n as i32).collect();
-    let blob = lerc::encode_typed_masked(width, height, &pixels, &mask, Precision::Lossless)
+    let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
@@ -341,7 +341,7 @@ fn lerc_image_valid_pixels_with_mask() {
 #[test]
 fn lerc_image_valid_pixels_wrong_type() {
     let pixels: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0];
-    let blob = lerc::encode_typed(2, 2, &pixels, Precision::Lossless).expect("encode failed");
+    let blob = lerc::encode_slice(2, 2, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     assert!(image.valid_pixels::<u8>().is_none());
@@ -354,7 +354,7 @@ fn lerc_image_dimensions_and_num_pixels() {
     let pixels: Vec<u8> = vec![0; (width * height) as usize];
 
     let blob =
-        lerc::encode_typed(width, height, &pixels, Precision::Lossless).expect("encode failed");
+        lerc::encode_slice(width, height, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     assert_eq!(image.dimensions(), (5, 7));
@@ -364,7 +364,7 @@ fn lerc_image_dimensions_and_num_pixels() {
 #[test]
 fn lerc_image_all_valid_true() {
     let pixels: Vec<f32> = vec![1.0; 16];
-    let blob = lerc::encode_typed(4, 4, &pixels, Precision::Lossless).expect("encode failed");
+    let blob = lerc::encode_slice(4, 4, &pixels, Precision::Lossless).expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 
     assert!(image.all_valid());
@@ -383,7 +383,7 @@ fn lerc_image_all_valid_false() {
     // Last pixel is invalid
 
     let pixels: Vec<f32> = vec![1.0; n];
-    let blob = lerc::encode_typed_masked(width, height, &pixels, &mask, Precision::Lossless)
+    let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
     let image = lerc::decode(&blob).expect("decode failed");
 

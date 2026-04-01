@@ -130,15 +130,19 @@ fn rust_encode_cpp_decode_f32_lossy() {
     let (width, height) = (64, 48);
     let data = make_gradient_f32(width, height);
 
-    for max_z_err in [0.01, 0.1, 1.0] {
-        let blob = lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err as f32))
-            .unwrap();
+    for max_z_err in [0.01f32, 0.1, 1.0] {
+        let blob =
+            lerc::encode_slice(width, height, &data, Precision::Tolerance(max_z_err)).unwrap();
 
         let (info, range) = cpp::get_blob_info(&blob);
         assert_eq!(info[INFO_DATA_TYPE], DT_FLOAT);
+        // The encoder receives an f32 tolerance, so compare against the f32
+        // round-trip value. TryRaiseMaxZError may also raise it slightly.
+        let requested = max_z_err as f64;
+        let tol = requested + (requested * f32::EPSILON as f64);
         assert!(
-            range[RANGE_MAX_Z_ERR_USED] <= max_z_err + f64::EPSILON,
-            "maxZErrUsed {} > requested {max_z_err}",
+            range[RANGE_MAX_Z_ERR_USED] <= tol,
+            "maxZErrUsed {} > tolerance {tol} (requested {requested})",
             range[RANGE_MAX_Z_ERR_USED]
         );
 
@@ -149,7 +153,7 @@ fn rust_encode_cpp_decode_f32_lossy() {
             assert_f32_close(
                 o,
                 d,
-                max_z_err,
+                max_z_err as f64,
                 format_args!("maxZErr={max_z_err} pixel {i}"),
             );
         }

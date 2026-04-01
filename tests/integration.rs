@@ -196,9 +196,8 @@ fn decode_california_float() {
             let mut max_val = f32::MIN;
             let mut valid_count = 0u32;
 
-            for k in 0..400 * 400 {
+            for (k, &v) in pixels.iter().enumerate() {
                 if mask.is_valid(k) {
-                    let v = pixels[k];
                     assert!(!v.is_nan(), "valid pixel {k} is NaN");
                     if v < min_val {
                         min_val = v;
@@ -1070,9 +1069,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
     let pixels: Vec<f64> = (0..width * height)
         .map(|i| {
             // Use irrational-like fractions that won't land on any decimal grid.
-            let x =
-                (i as f64 + 1.0) / 3.0 + (i as f64 + 0.5).sqrt() * std::f64::consts::FRAC_1_SQRT_2;
-            x
+            (i as f64 + 1.0) / 3.0 + (i as f64 + 0.5).sqrt() * std::f64::consts::FRAC_1_SQRT_2
         })
         .collect();
 

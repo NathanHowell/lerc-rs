@@ -577,11 +577,12 @@ mod tests {
 
     #[test]
     fn read_variable_data_type_f32() {
-        let data = 3.14_f32.to_le_bytes();
+        let test_val = 3.25_f32;
+        let data = test_val.to_le_bytes();
         let mut pos = 0;
         let val = read_variable_data_type(&data, &mut pos, DataType::Float).unwrap();
         // f32 -> f64 conversion: compare with the actual f32 value promoted to f64
-        assert_eq!(val, 3.14_f32 as f64);
+        assert_eq!(val, test_val as f64);
         assert_eq!(pos, 4);
     }
 
@@ -672,7 +673,7 @@ mod tests {
 
     #[test]
     fn reduce_f32_fractional_no_reduction() {
-        let (dt, tc) = reduce_data_type(3.14_f32, DataType::Float);
+        let (dt, tc) = reduce_data_type(3.25_f32, DataType::Float);
         assert_eq!(dt, DataType::Float);
         assert_eq!(tc, 0);
     }
@@ -759,10 +760,11 @@ mod tests {
 
     #[test]
     fn read_typed_as_f64_f32() {
-        let data = 2.718_f32.to_le_bytes();
+        let test_val = 2.75_f32;
+        let data = test_val.to_le_bytes();
         let mut pos = 0;
         let val = read_typed_as_f64::<f32>(&data, &mut pos);
-        assert_eq!(val, 2.718_f32 as f64);
+        assert_eq!(val, test_val as f64);
         assert_eq!(pos, 4);
     }
 
@@ -906,6 +908,7 @@ mod tests {
 
     #[test]
     fn write_then_read_variable_data_type() {
+        let f32_test_val = 3.25_f32;
         let test_cases: &[(f64, DataType)] = &[
             (-1.0, DataType::Char),
             (255.0, DataType::Byte),
@@ -913,7 +916,7 @@ mod tests {
             (60000.0, DataType::UShort),
             (-123456.0, DataType::Int),
             (4_000_000_000.0, DataType::UInt),
-            (3.14_f32 as f64, DataType::Float),
+            (f32_test_val as f64, DataType::Float),
             (core::f64::consts::PI, DataType::Double),
         ];
 

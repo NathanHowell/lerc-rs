@@ -491,7 +491,7 @@ mod tests {
         let result: Vec<u32> = (0..9).map(|i| read_u32_le(&data, i * 4)).collect();
 
         // Row 0 should be unchanged (no row above to subtract)
-        let row0_original: Vec<u32> = vec![1.0f32, 2.0, 3.0].iter().map(|f| f.to_bits()).collect();
+        let row0_original: Vec<u32> = [1.0f32, 2.0, 3.0].iter().map(|f| f.to_bits()).collect();
         assert_eq!(&result[0..3], &row0_original[..]);
 
         // Row 1 and Row 2 should be modified by column deltas

@@ -491,6 +491,110 @@ fn read_data_one_sweep<T: LercDataType>(
     Ok(())
 }
 
+fn decode_huffman<T: LercDataType>(
+    data: &[u8],
+    pos: &mut usize,
+    header: &HeaderInfo,
+    mask: &BitMask,
+    mode: ImageEncodeMode,
+    output: &mut [T],
+) -> Result<()> {
+    let mut codec = HuffmanCodec::new();
+    codec.read_code_table(data, pos, header.version)?;
+    let num_bits_lut = codec.build_tree_from_codes()?;
+
+    let offset = if header.data_type == DataType::Char {
+        128
+    } else {
+        0
+    };
+
+    let height = header.n_rows as usize;
+    let width = header.n_cols as usize;
+    let n_depth = header.n_depth as usize;
+
+    let mut byte_pos = *pos;
+    let mut bit_pos = 0i32;
+    let start_byte_pos = byte_pos;
+
+    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+
+    // For 8-bit types, use wrapping integer arithmetic for reconstruction
+    let is_byte_type = matches!(header.data_type, DataType::Char | DataType::Byte);
+
+    if mode == ImageEncodeMode::DeltaHuffman {
+        for i_depth in 0..n_depth {
+            let mut prev_val = T::default();
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    let m = k * n_depth + i_depth;
+
+                    if all_valid || mask.is_valid(k) {
+                        let val = codec.decode_one_value(
+                            data,
+                            &mut byte_pos,
+                            &mut bit_pos,
+                            num_bits_lut,
+                        )?;
+                        let delta = val - offset;
+
+                        let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                            prev_val
+                        } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
+                            output[m - width * n_depth]
+                        } else {
+                            prev_val
+                        };
+
+                        let result = if is_byte_type {
+                            // Use wrapping arithmetic for 8-bit types to match C++ behavior
+                            let predicted_i = predicted.to_f64() as i32;
+                            let reconstructed = (delta + predicted_i) as u8;
+                            if header.data_type == DataType::Char {
+                                T::from_f64(reconstructed as i8 as f64)
+                            } else {
+                                T::from_f64(reconstructed as f64)
+                            }
+                        } else {
+                            T::from_f64(delta as f64 + predicted.to_f64())
+                        };
+                        output[m] = result;
+                        prev_val = result;
+                    }
+                }
+            }
+        }
+    } else if mode == ImageEncodeMode::Huffman {
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if all_valid || mask.is_valid(k) {
+                    let m0 = k * n_depth;
+                    for m in 0..n_depth {
+                        let val = codec.decode_one_value(
+                            data,
+                            &mut byte_pos,
+                            &mut bit_pos,
+                            num_bits_lut,
+                        )?;
+                        output[m0 + m] = T::from_f64((val - offset) as f64);
+                    }
+                }
+            }
+        }
+    } else {
+        return Err(LercError::InvalidData("unexpected huffman mode".into()));
+    }
+
+    // Advance past the consumed data (including read-ahead padding)
+    let num_uints = if bit_pos > 0 { 1usize } else { 0 } + 1; // +1 for decode LUT read-ahead
+    let consumed = (byte_pos - start_byte_pos) + num_uints * 4;
+    *pos = start_byte_pos + consumed;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -807,9 +911,7 @@ mod tests {
     #[test]
     fn read_min_max_ranges_single_depth_u8() {
         // nDepth=1, type u8 (1 byte each): min=10, max=200
-        let mut data = Vec::new();
-        data.push(10u8); // z_min[0]
-        data.push(200u8); // z_max[0]
+        let data = vec![10u8, 200u8]; // z_min[0], z_max[0]
 
         let mut pos = 0;
         let header = HeaderInfo {
@@ -1066,7 +1168,7 @@ mod tests {
         let width = 16;
         let height = 16;
         let pixels: Vec<i8> = (0..width * height)
-            .map(|i| ((i as i32 % 256) - 128) as i8)
+            .map(|i| ((i % 256) - 128) as i8)
             .collect();
         let decoded = roundtrip_i8(width as u32, height as u32, &pixels, 0.5);
         assert_eq!(decoded, pixels);
@@ -1214,10 +1316,10 @@ mod tests {
         let mut mask = BitMask::new(n);
         let mut pixels = vec![0u8; n];
         // Set a checkerboard pattern of valid pixels
-        for i in 0..n {
+        for (i, pixel) in pixels.iter_mut().enumerate().take(n) {
             if i % 3 == 0 {
                 mask.set_valid(i);
-                pixels[i] = (i * 7 % 256) as u8;
+                *pixel = (i * 7 % 256) as u8;
             }
         }
         let image = crate::LercImage {
@@ -1692,108 +1794,4 @@ mod tests {
         assert_eq!(info.width, 8);
         assert_eq!(info.height, 8);
     }
-}
-
-fn decode_huffman<T: LercDataType>(
-    data: &[u8],
-    pos: &mut usize,
-    header: &HeaderInfo,
-    mask: &BitMask,
-    mode: ImageEncodeMode,
-    output: &mut [T],
-) -> Result<()> {
-    let mut codec = HuffmanCodec::new();
-    codec.read_code_table(data, pos, header.version)?;
-    let num_bits_lut = codec.build_tree_from_codes()?;
-
-    let offset = if header.data_type == DataType::Char {
-        128
-    } else {
-        0
-    };
-
-    let height = header.n_rows as usize;
-    let width = header.n_cols as usize;
-    let n_depth = header.n_depth as usize;
-
-    let mut byte_pos = *pos;
-    let mut bit_pos = 0i32;
-    let start_byte_pos = byte_pos;
-
-    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
-
-    // For 8-bit types, use wrapping integer arithmetic for reconstruction
-    let is_byte_type = matches!(header.data_type, DataType::Char | DataType::Byte);
-
-    if mode == ImageEncodeMode::DeltaHuffman {
-        for i_depth in 0..n_depth {
-            let mut prev_val = T::default();
-            for i in 0..height {
-                for j in 0..width {
-                    let k = i * width + j;
-                    let m = k * n_depth + i_depth;
-
-                    if all_valid || mask.is_valid(k) {
-                        let val = codec.decode_one_value(
-                            data,
-                            &mut byte_pos,
-                            &mut bit_pos,
-                            num_bits_lut,
-                        )?;
-                        let delta = val - offset;
-
-                        let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
-                            prev_val
-                        } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
-                            output[m - width * n_depth]
-                        } else {
-                            prev_val
-                        };
-
-                        let result = if is_byte_type {
-                            // Use wrapping arithmetic for 8-bit types to match C++ behavior
-                            let predicted_i = predicted.to_f64() as i32;
-                            let reconstructed = (delta + predicted_i) as u8;
-                            if header.data_type == DataType::Char {
-                                T::from_f64(reconstructed as i8 as f64)
-                            } else {
-                                T::from_f64(reconstructed as f64)
-                            }
-                        } else {
-                            T::from_f64(delta as f64 + predicted.to_f64())
-                        };
-                        output[m] = result;
-                        prev_val = result;
-                    }
-                }
-            }
-        }
-    } else if mode == ImageEncodeMode::Huffman {
-        for i in 0..height {
-            for j in 0..width {
-                let k = i * width + j;
-                if all_valid || mask.is_valid(k) {
-                    let m0 = k * n_depth;
-                    for m in 0..n_depth {
-                        let val = codec.decode_one_value(
-                            data,
-                            &mut byte_pos,
-                            &mut bit_pos,
-                            num_bits_lut,
-                        )?;
-                        output[m0 + m] = T::from_f64((val - offset) as f64);
-                    }
-                }
-            }
-        }
-    } else {
-        return Err(LercError::InvalidData("unexpected huffman mode".into()));
-    }
-
-    // Advance past the consumed data (including read-ahead padding)
-    let num_uints = if bit_pos > 0 { 1usize } else { 0 } + 1; // +1 for decode LUT read-ahead
-    let consumed = (byte_pos - start_byte_pos) + num_uints * 4;
-    *pos = start_byte_pos + consumed;
-
-    Ok(())
 }

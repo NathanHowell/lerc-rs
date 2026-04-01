@@ -901,7 +901,7 @@ mod tests {
             histo[b as usize] += 1;
         }
 
-        let (codec, encoded) = encode_huffman(&data, &histo, 256).unwrap();
+        let (_codec, encoded) = encode_huffman(&data, &histo, 256).unwrap();
 
         // Decode
         let mut codec2 = HuffmanCodec::new();

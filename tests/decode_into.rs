@@ -114,7 +114,7 @@ test_decode_into_matches!(
     i32,
     0i32,
     (0..32 * 32)
-        .map(|i| i as i32 * 100 - 50000)
+        .map(|i| i * 100 - 50000)
         .collect::<Vec<i32>>(),
     32,
     32,

@@ -583,8 +583,8 @@ mod tests {
         add_uint_to_counts(&mut counts, 1, 8);
         // 1 = 0b00000001 => only bit 0 is set
         assert_eq!(counts[0], 1);
-        for i in 1..8 {
-            assert_eq!(counts[i], 0, "bit {i} should be 0");
+        for (i, &count) in counts.iter().enumerate().skip(1) {
+            assert_eq!(count, 0, "bit {i} should be 0");
         }
     }
 
@@ -593,8 +593,8 @@ mod tests {
         let mut counts = vec![0i32; 8];
         add_uint_to_counts(&mut counts, 255, 8);
         // 255 = 0b11111111 => all 8 bits set
-        for i in 0..8 {
-            assert_eq!(counts[i], 1, "bit {i} should be 1 for 255");
+        for (i, &count) in counts.iter().enumerate() {
+            assert_eq!(count, 1, "bit {i} should be 1 for 255");
         }
     }
 
@@ -618,8 +618,8 @@ mod tests {
         let mut counts = vec![0i32; 8];
         add_uint_to_counts(&mut counts, 0xFF, 8);
         add_uint_to_counts(&mut counts, 0xFF, 8);
-        for i in 0..8 {
-            assert_eq!(counts[i], 2, "bit {i} should be counted twice");
+        for (i, &count) in counts.iter().enumerate() {
+            assert_eq!(count, 2, "bit {i} should be counted twice");
         }
     }
 
@@ -637,8 +637,8 @@ mod tests {
         let mut counts = vec![0i32; 8];
         add_int_to_counts(&mut counts, 1, 8);
         assert_eq!(counts[0], 1);
-        for i in 1..8 {
-            assert_eq!(counts[i], 0);
+        for &count in counts.iter().skip(1) {
+            assert_eq!(count, 0);
         }
     }
 
@@ -647,8 +647,8 @@ mod tests {
         let mut counts = vec![0i32; 32];
         add_int_to_counts(&mut counts, -1, 32);
         // -1 in two's complement is all 1s
-        for i in 0..32 {
-            assert_eq!(counts[i], 1, "bit {i} should be 1 for -1");
+        for (i, &count) in counts.iter().enumerate() {
+            assert_eq!(count, 1, "bit {i} should be 1 for -1");
         }
     }
 

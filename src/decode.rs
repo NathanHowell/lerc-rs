@@ -422,29 +422,7 @@ fn read_min_max_ranges<T: LercDataType>(
     Ok((z_min_vec, z_max_vec))
 }
 
-fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -> f64 {
-    let size = T::BYTES;
-    let mut bytes = [0u8; 8];
-    bytes[..size].copy_from_slice(&data[*pos..*pos + size]);
-    *pos += size;
-
-    match T::DATA_TYPE {
-        DataType::Char => i8::from_le_bytes([bytes[0]]) as f64,
-        DataType::Byte => bytes[0] as f64,
-        DataType::Short => i16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        DataType::UShort => u16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        DataType::Int => {
-            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::UInt => {
-            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::Float => {
-            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::Double => f64::from_le_bytes(bytes),
-    }
-}
+use crate::tiles::{read_typed_as_f64, read_typed_value};
 
 fn fill_const_image<T: LercDataType>(
     header: &HeaderInfo,
@@ -516,11 +494,6 @@ fn read_data_one_sweep<T: LercDataType>(
     }
 
     Ok(())
-}
-
-fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) -> T {
-    let val = read_typed_as_f64::<T>(data, pos);
-    T::from_f64(val)
 }
 
 fn decode_huffman<T: LercDataType>(

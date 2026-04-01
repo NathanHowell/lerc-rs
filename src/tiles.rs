@@ -489,31 +489,32 @@ fn read_tile<T: LercDataType>(
     Ok(())
 }
 
-fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) -> T {
+/// Read a typed value from LE bytes, returning as f64.
+pub(crate) fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -> f64 {
     let size = T::BYTES;
     let mut bytes = [0u8; 8];
     bytes[..size].copy_from_slice(&data[*pos..*pos + size]);
     *pos += size;
 
-    // Interpret as the correct type via from_le_bytes pattern
     match T::DATA_TYPE {
-        DataType::Char => T::from_f64(i8::from_le_bytes([bytes[0]]) as f64),
-        DataType::Byte => T::from_f64(bytes[0] as f64),
-        DataType::Short => {
-            T::from_f64(i16::from_le_bytes([bytes[0], bytes[1]]) as f64)
+        DataType::Char => i8::from_le_bytes([bytes[0]]) as f64,
+        DataType::Byte => bytes[0] as f64,
+        DataType::Short => i16::from_le_bytes([bytes[0], bytes[1]]) as f64,
+        DataType::UShort => u16::from_le_bytes([bytes[0], bytes[1]]) as f64,
+        DataType::Int => {
+            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
         }
-        DataType::UShort => {
-            T::from_f64(u16::from_le_bytes([bytes[0], bytes[1]]) as f64)
+        DataType::UInt => {
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
         }
-        DataType::Int => T::from_f64(
-            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        ),
-        DataType::UInt => T::from_f64(
-            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        ),
-        DataType::Float => T::from_f64(
-            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        ),
-        DataType::Double => T::from_f64(f64::from_le_bytes(bytes)),
+        DataType::Float => {
+            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
+        }
+        DataType::Double => f64::from_le_bytes(bytes),
     }
+}
+
+/// Read a typed value from LE bytes, returning as T.
+pub(crate) fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) -> T {
+    T::from_f64(read_typed_as_f64::<T>(data, pos))
 }

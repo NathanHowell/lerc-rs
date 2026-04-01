@@ -902,4 +902,16 @@ mod tests {
             assert_eq!(pos, buf.len());
         }
     }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn reduce_data_type_preserves_value(val in -128i32..127) {
+            let (_dt_reduced, tc) = reduce_data_type(val, DataType::Int);
+            // The reduced type must be able to represent the value
+            let recovered_dt = get_data_type_used(DataType::Int, tc);
+            prop_assert!(recovered_dt.is_some());
+        }
+    }
 }

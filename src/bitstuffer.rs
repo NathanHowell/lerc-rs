@@ -829,6 +829,7 @@ fn should_use_lut_large(data: &[u32], num_elem: u32, num_bits: u32) -> Option<Lu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn round_trip_simple() {
@@ -893,6 +894,26 @@ mod tests {
             let unstuffed =
                 bit_unstuff(&stuffed, &mut pos, data.len() as u32, num_bits).unwrap();
             assert_eq!(unstuffed, data, "failed for num_bits={num_bits}");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn bit_stuff_round_trip(num_bits in 1..31u32, len in 1..200usize) {
+            let max_val = (1u32 << num_bits) - 1;
+            let data: Vec<u32> = (0..len).map(|i| (i as u32) % (max_val + 1)).collect();
+            let stuffed = bit_stuff(&data, num_bits);
+            let mut pos = 0;
+            let unstuffed = bit_unstuff(&stuffed, &mut pos, len as u32, num_bits).unwrap();
+            prop_assert_eq!(unstuffed, data);
+        }
+
+        #[test]
+        fn encode_simple_round_trip(data in prop::collection::vec(0..1000u32, 1..200)) {
+            let encoded = encode_simple(&data);
+            let mut pos = 0;
+            let decoded = decode(&encoded, &mut pos, data.len(), 6).unwrap();
+            prop_assert_eq!(decoded, data);
         }
     }
 }

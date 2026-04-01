@@ -113,9 +113,7 @@ test_decode_into_matches!(
     lerc::decode_i32_into,
     i32,
     0i32,
-    (0..32 * 32)
-        .map(|i| i * 100 - 50000)
-        .collect::<Vec<i32>>(),
+    (0..32 * 32).map(|i| i * 100 - 50000).collect::<Vec<i32>>(),
     32,
     32,
     0.0

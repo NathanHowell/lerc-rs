@@ -755,6 +755,181 @@ mod tests {
     }
 
     #[test]
+    fn bit_unstuff_empty_elements() {
+        // numBits=1, numElements=0 => empty result
+        // First byte: bits67=1 (n=2), numBits=1 => byte = 0x41
+        // numElements as u16 LE: 0, 0
+        let data = [0x41, 0x00, 0x00];
+        let mut cursor = Cursor::new(&data);
+        let result = bit_unstuff(&mut cursor).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn bit_unstuff_31bit_values() {
+        // Test with numBits=31 (maximum valid), 1 element
+        // Value: 0x7FFF_FFFF (all 31 bits set)
+        //
+        // First byte: bits67=1 (n=2), numBits=31 => byte = 0b01_011111 = 0x5F
+        // numElements as u16 LE: 1, 0
+        // Data bytes: ceil(1*31/8) = 4 bytes
+        //
+        // The value 0x7FFFFFFF packed MSB-first in one u32:
+        // bits[31..1] = 0x7FFFFFFF => shifted to MSB: 0xFFFF_FFFE
+        // After tail fix: numBitsTail = (1*31)&31 = 31, numBytesTail = (31+7)/8 = 4
+        // tailShift = 0. So u32 from 4 LE bytes should be 0xFFFF_FFFE
+        // LE bytes: 0xFE 0xFF 0xFF 0xFF
+        let data = [0x5F, 0x01, 0x00, 0xFE, 0xFF, 0xFF, 0xFF];
+        let mut cursor = Cursor::new(&data);
+        let result = bit_unstuff(&mut cursor).unwrap();
+        assert_eq!(result, vec![0x7FFF_FFFF]);
+    }
+
+    #[test]
+    fn bit_unstuff_multi_word_3bit() {
+        // 12 elements at 3 bits each = 36 bits total => 2 u32 words
+        // Values: [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]
+        //
+        // MSB-first packing into u32 words:
+        // Word 0 (bits 0..31): 000 001 010 011 100 101 110 111 000 001 01
+        //   = 0b00000101001110010111000101_000010 = ...
+        // Let's compute carefully:
+        //   bit positions in word 0 (MSB=bit31):
+        //   val[0]=0b000 at bits 31-29 => 0x0000_0000
+        //   val[1]=0b001 at bits 28-26 => shift 26 => 0x0400_0000
+        //   val[2]=0b010 at bits 25-23 => shift 23 => 0x0100_0000
+        //   val[3]=0b011 at bits 22-20 => shift 20 => 0x0030_0000
+        //   val[4]=0b100 at bits 19-17 => shift 17 => 0x0008_0000
+        //   val[5]=0b101 at bits 16-14 => shift 14 => 0x0001_4000
+        //   val[6]=0b110 at bits 13-11 => shift 11 => 0x0000_3000
+        //   val[7]=0b111 at bits 10-8  => shift 8  => 0x0000_0700
+        //   val[8]=0b000 at bits 7-5   => 0
+        //   val[9]=0b001 at bits 4-2   => shift 2  => 0x0000_0004
+        //   val[10]: needs 3 bits, only 2 remain (bits 1-0)
+        //     top 2 bits of 010 = 01 at bits 1-0 => 0x0000_0001
+        //
+        //   Word 0 = 0x0000_0000 | 0x0400_0000 | 0x0100_0000 | 0x0030_0000
+        //          | 0x0008_0000 | 0x0001_4000 | 0x0000_3000 | 0x0000_0700
+        //          | 0x0000_0000 | 0x0000_0004 | 0x0000_0001
+        //          = 0x0539_7705
+        //
+        //   Word 1: remaining 1 bit of val[10] (0) at bit 31, then val[11]=011 at bits 30-28
+        //     val[10] bottom bit: 0 at bit 31 => 0x0000_0000
+        //     val[11]=0b011 at bits 30-28 => shift 28 => 0x3000_0000
+        //     Word 1 = 0x3000_0000
+        //
+        //   numBitsTail = (12*3) & 31 = 36 & 31 = 4
+        //   numBytesTail = (4+7)/8 = 1
+        //   tailShift = 4 - 1 = 3 bytes => shift left by 24
+        //   So word1 before shift: we need 0x3000_0000 >> 24 = 0x30 in first byte
+        //   Actually, let's approach differently: n_bytes_to_copy = ceil(36/8) = 5
+        //
+        // This is getting complex. Let me construct the test by encoding manually.
+        // Simpler approach: construct from known packed bytes.
+        //
+        // 12 values, 3 bits: total 36 bits => 5 bytes to copy.
+        // Pack MSB-first:
+        //   Byte 0 (bits 31-24 of word0): val0=000, val1=001, val2=01_ => 0b00000101 = 0x05
+        //   Byte 1 (bits 23-16 of word0): _0, val3=011, val4=100, val5=1_ => 0b00011001 = 0x39
+        //     wait, val2 remaining bit is 0: 0_011_100_1 = 0b00111001 = 0x39
+        //   Byte 2 (bits 15-8 of word0): val5 remaining=01, val6=110, val7=111 => 0b01110111 = 0x77
+        //   Byte 3 (bits 7-0 of word0): val8=000, val9=001, val10 top 2 = 01 => 0b00000101 = 0x05
+        //   Byte 4: val10 bottom 1 = 0, val11=011, pad=0000 => 0b00110000 = 0x30
+        //
+        // Word0 from LE bytes [0x05, 0x39, 0x77, 0x05] = 0x0577_3905
+        //   Hmm that doesn't match. LE means byte0 is least significant.
+        //   u32::from_le_bytes([0x05, 0x39, 0x77, 0x05]) = 0x0577_3905
+        //   But we want word0 MSB = byte0 content...
+        //   Actually in the code: bytes are loaded via from_le_bytes, so
+        //   data[cursor.pos + 0] => least significant byte of word0.
+        //   But we pack MSB-first from the most significant bit of the u32.
+        //   So byte at offset 0 should be the LE representation's byte 0,
+        //   i.e., the LEAST significant byte of the packed u32.
+        //
+        // I think the easiest test approach: use known small values and verify.
+        // Let me just pack 3 elements of 2 bits each: [1, 2, 3]
+        // Total: 6 bits => 1 byte
+        // MSB-first: val0=01, val1=10, val2=11, pad=00 => 0b01101100 = 0x6C
+        //
+        // u32 from 1 LE byte: [0x6C, 0, 0, 0] => 0x0000_006C
+        // numBitsTail = (3*2) & 31 = 6
+        // numBytesTail = (6+7)/8 = 1
+        // tailShift = 4 - 1 = 3 => shift left 3*8=24 bits
+        // word0 = 0x6C << 24 = 0x6C00_0000
+        //
+        // Extract val0: word0 << 0 >> 30 = 0x6C00_0000 >> 30 = 0b01 = 1 ✓
+        // Extract val1: bit_pos=2, word0 << 2 = 0xB000_0000, >> 30 = 0b10 = 2 ✓
+        // Extract val2: bit_pos=4, word0 << 4 = 0xC000_0000, >> 30 = 0b11 = 3 ✓
+        //
+        // First byte: bits67=1 (n=2), numBits=2 => byte = 0b01_000010 = 0x42
+        // numElements as u16 LE: 3, 0
+        // Data: 1 byte = 0x6C
+        let data = [0x42, 0x03, 0x00, 0x6C];
+        let mut cursor = Cursor::new(&data);
+        let result = bit_unstuff(&mut cursor).unwrap();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn bit_unstuff_8bit_values() {
+        // 3 elements, 8 bits each: [100, 200, 42]
+        // Total: 24 bits => 3 bytes
+        // MSB-first packing into a u32:
+        //   val0=100=0x64 at bits 31-24
+        //   val1=200=0xC8 at bits 23-16
+        //   val2=42=0x2A at bits 15-8
+        //
+        // n_bytes_to_copy = ceil(3*8/8) = 3
+        // LE bytes: the u32 should have 0x64 at bits 31-24, 0xC8 at 23-16, 0x2A at 15-8
+        //   u32 = 0x64C8_2A00
+        //   LE bytes: [0x00, 0x2A, 0xC8, 0x64]
+        //   But we only copy 3 bytes: [0x00, 0x2A, 0xC8]
+        //   Partial last word: numBitsTail = (3*8)&31 = 24, numBytesTail=(24+7)/8=3
+        //   tailShift = 4-3 = 1 => shift left 8 bits
+        //   word0 from LE [0x00, 0x2A, 0xC8, 0x00] = 0x00C8_2A00
+        //   After tailShift: 0x00C8_2A00 << 8 = 0xC82A_0000
+        //   Hmm that gives wrong MSB. Let me re-think.
+        //
+        // Actually let me just trace the code more carefully.
+        // stuffed has 1 word (num_uints = ceil(24/32) = 1).
+        // Bytes to copy: 3.
+        // Loop: i=0, base=cursor.pos+0, end=min(pos+3, pos+4)=pos+3, count=3
+        //   bytes = [data[pos], data[pos+1], data[pos+2], 0]
+        //   word = u32::from_le_bytes(bytes)
+        //
+        // If data bytes after header are [B0, B1, B2]:
+        //   word = u32::from_le_bytes([B0, B1, B2, 0]) = (B2 << 16) | (B1 << 8) | B0
+        //
+        // Tail fix: numBitsTail=24, numBytesTail=3, tailShift=1
+        //   word <<= 8
+        //   => ((B2 << 16) | (B1 << 8) | B0) << 8
+        //   = (B2 << 24) | (B1 << 16) | (B0 << 8)
+        //
+        // Extract val0: word << 0 >> 24 = B2
+        // But we want val0=100... so B2 should be 100=0x64.
+        // val1: bit_pos=8, word << 8 >> 24 = B1. So B1=200=0xC8.
+        // val2: bit_pos=16, word << 16 >> 24 = B0. So B0=42=0x2A.
+        //
+        // So data bytes: [0x2A, 0xC8, 0x64]
+        // First byte: bits67=1 (n=2), numBits=8 => byte = 0b01_001000 = 0x48
+        // numElements as u16 LE: 3, 0
+        let data = [0x48, 0x03, 0x00, 0x2A, 0xC8, 0x64];
+        let mut cursor = Cursor::new(&data);
+        let result = bit_unstuff(&mut cursor).unwrap();
+        assert_eq!(result, vec![100, 200, 42]);
+    }
+
+    #[test]
+    fn bit_unstuff_rejects_32bit() {
+        // numBits=32 should be rejected
+        // First byte: bits67=1 (n=2), numBits=32 => byte = 0b01_100000 = 0x60
+        // numElements as u16 LE: 1, 0
+        let data = [0x60, 0x01, 0x00];
+        let mut cursor = Cursor::new(&data);
+        assert!(bit_unstuff(&mut cursor).is_err());
+    }
+
+    #[test]
     fn read_flt_1byte() {
         let data = [0xFE]; // -2 as i8
         let mut cursor = Cursor::new(&data);
@@ -779,9 +954,325 @@ mod tests {
     }
 
     #[test]
+    fn read_flt_invalid_size() {
+        let data = [0u8; 8];
+        let mut cursor = Cursor::new(&data);
+        assert!(read_flt(&mut cursor, 3).is_err());
+        assert!(read_flt(&mut cursor, 0).is_err());
+    }
+
+    #[test]
+    fn read_f64_le_known_value() {
+        let val = core::f64::consts::PI;
+        let data = val.to_le_bytes();
+        let mut cursor = Cursor::new(&data);
+        let result = cursor.read_f64_le().unwrap();
+        assert_eq!(result, val);
+    }
+
+    #[test]
+    fn read_f64_le_negative() {
+        let val: f64 = -123456.789;
+        let data = val.to_le_bytes();
+        let mut cursor = Cursor::new(&data);
+        let result = cursor.read_f64_le().unwrap();
+        assert_eq!(result, val);
+    }
+
+    #[test]
+    fn read_f64_le_zero() {
+        let data = 0.0f64.to_le_bytes();
+        let mut cursor = Cursor::new(&data);
+        let result = cursor.read_f64_le().unwrap();
+        assert_eq!(result, 0.0);
+    }
+
+    #[test]
+    fn read_f64_le_insufficient_data() {
+        let data = [0u8; 4]; // only 4 bytes, need 8
+        let mut cursor = Cursor::new(&data);
+        assert!(cursor.read_f64_le().is_err());
+    }
+
+    #[test]
     fn is_lerc1_detection() {
         assert!(is_lerc1(b"CntZImage extra data"));
         assert!(!is_lerc1(b"Lerc2 data"));
         assert!(!is_lerc1(b"short"));
+    }
+
+    #[test]
+    fn cursor_remaining_and_check() {
+        let data = [1u8, 2, 3, 4];
+        let mut cursor = Cursor::new(&data);
+        assert_eq!(cursor.remaining(), 4);
+        cursor.pos = 2;
+        assert_eq!(cursor.remaining(), 2);
+        assert!(cursor.check(2).is_ok());
+        assert!(cursor.check(3).is_err());
+    }
+
+    #[test]
+    fn read_uint_1byte() {
+        let data = [0xFF];
+        let mut cursor = Cursor::new(&data);
+        assert_eq!(read_uint(&mut cursor, 1).unwrap(), 255);
+    }
+
+    #[test]
+    fn read_uint_2bytes() {
+        let data = 0x1234u16.to_le_bytes();
+        let mut cursor = Cursor::new(&data);
+        assert_eq!(read_uint(&mut cursor, 2).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn read_uint_4bytes() {
+        let data = 0xDEAD_BEEFu32.to_le_bytes();
+        let mut cursor = Cursor::new(&data);
+        assert_eq!(read_uint(&mut cursor, 4).unwrap(), 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn read_uint_invalid_size() {
+        let data = [0u8; 8];
+        let mut cursor = Cursor::new(&data);
+        assert!(read_uint(&mut cursor, 3).is_err());
+    }
+
+    // ---- decode_z_tile tests (tile types) ----
+
+    /// Helper: build a minimal z-tile payload for type 2 (constant zero).
+    /// byte0 = compr_flag=2, bits67=0 => 0x02
+    fn make_z_tile_type2() -> Vec<u8> {
+        vec![0x02]
+    }
+
+    /// Helper: build a minimal z-tile payload for type 3 (constant value).
+    /// byte0 = compr_flag=3, bits67=1 (n=2 => offset stored as i16) => 0b01_000011 = 0x43
+    /// offset as i16 LE
+    fn make_z_tile_type3(offset: f32) -> Vec<u8> {
+        // Use 4-byte float encoding: bits67=0 => n=4
+        // byte0 = compr_flag=3, bits67=0 => 0x03
+        let mut buf = vec![0x03];
+        buf.extend_from_slice(&offset.to_le_bytes());
+        buf
+    }
+
+    /// Helper: build a minimal z-tile payload for type 0 (uncompressed).
+    /// byte0 = 0x00
+    /// followed by f32 LE values for each valid pixel
+    fn make_z_tile_type0(values: &[f32]) -> Vec<u8> {
+        let mut buf = vec![0x00];
+        for &v in values {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn decode_z_tile_type2_constant_zero() {
+        let tile_data = make_z_tile_type2();
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0f32; 4]; // all valid
+        let mut z = vec![f32::NAN; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,   // i0=0, i1=2, j0=0, j1=2
+            0.0, 100.0, false,
+        ).unwrap();
+
+        assert_eq!(z, vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn decode_z_tile_type2_skips_invalid() {
+        let tile_data = make_z_tile_type2();
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0, 0.0, 0.0, 1.0]; // only corners valid
+        let mut z = vec![f32::NAN; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.0, 100.0, false,
+        ).unwrap();
+
+        assert_eq!(z[0], 0.0);
+        assert!(z[1].is_nan()); // invalid pixel, untouched
+        assert!(z[2].is_nan());
+        assert_eq!(z[3], 0.0);
+    }
+
+    #[test]
+    fn decode_z_tile_type3_constant_value() {
+        let tile_data = make_z_tile_type3(42.5);
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 3;
+        let cnt = vec![1.0f32; 6];
+        let mut z = vec![0.0f32; 6];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 3,
+            0.5, 100.0, false,
+        ).unwrap();
+
+        for &val in &z {
+            assert_eq!(val, 42.5);
+        }
+    }
+
+    #[test]
+    fn decode_z_tile_type3_respects_mask() {
+        let tile_data = make_z_tile_type3(7.0);
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0, 0.0, 0.0, 1.0];
+        let mut z = vec![0.0f32; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.0, 100.0, false,
+        ).unwrap();
+
+        assert_eq!(z[0], 7.0);
+        assert_eq!(z[1], 0.0); // invalid, untouched
+        assert_eq!(z[2], 0.0); // invalid, untouched
+        assert_eq!(z[3], 7.0);
+    }
+
+    #[test]
+    fn decode_z_tile_type0_uncompressed() {
+        let values = [1.0f32, 2.0, 3.0, 4.0];
+        let tile_data = make_z_tile_type0(&values);
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0f32; 4];
+        let mut z = vec![0.0f32; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.0, 100.0, false,
+        ).unwrap();
+
+        assert_eq!(z, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn decode_z_tile_type0_uncompressed_with_mask() {
+        // Only pixels [0] and [3] are valid
+        let values = [10.0f32, 20.0];
+        let tile_data = make_z_tile_type0(&values);
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0, 0.0, 0.0, 1.0];
+        let mut z = vec![0.0f32; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.0, 100.0, false,
+        ).unwrap();
+
+        assert_eq!(z[0], 10.0);
+        assert_eq!(z[3], 20.0);
+    }
+
+    #[test]
+    fn decode_z_tile_invalid_compr_flag() {
+        // compr_flag=5 is invalid
+        let tile_data = [0x05u8];
+        let mut cursor = Cursor::new(&tile_data);
+
+        let width = 2;
+        let cnt = vec![1.0f32; 4];
+        let mut z = vec![0.0f32; 4];
+
+        let result = read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.0, 100.0, false,
+        );
+        assert!(result.is_err());
+    }
+
+    // ---- Bit-stuffed tile (type 1) ----
+
+    #[test]
+    fn decode_z_tile_type1_bit_stuffed() {
+        // Build a bit-stuffed z tile with known values.
+        // 4 pixels, all valid, max_z_error = 0.5 (so inv_scale = 1.0)
+        // Offset = 10.0 (as f32, 4 bytes), quantized values = [0, 1, 2, 3]
+        // Reconstructed: offset + val * inv_scale = [10.0, 11.0, 12.0, 13.0]
+        //
+        // byte0: compr_flag=1, bits67=0 (n=4 for offset) => 0x01
+        // offset: 10.0f32 LE
+        // bit_unstuff header: numBits=2, bits67=1 (n=2), numElements=4
+        //   first_byte = 0b01_000010 = 0x42
+        //   numElements as u16 LE: 4, 0
+        //   data: [0,1,2,3] packed MSB-first at 2 bits each = 00 01 10 11 => 0b00011011 = 0x1B
+        //   1 byte of data
+        let mut buf = vec![0x01u8];
+        buf.extend_from_slice(&10.0f32.to_le_bytes());
+        buf.push(0x42); // numBits=2, bits67=1
+        buf.extend_from_slice(&4u16.to_le_bytes()); // numElements=4
+        buf.push(0x1B); // packed bits
+
+        let mut cursor = Cursor::new(&buf);
+        let width = 2;
+        let cnt = vec![1.0f32; 4];
+        let mut z = vec![0.0f32; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.5,    // max_z_error
+            100.0,  // max_z_in_img
+            false,
+        ).unwrap();
+
+        // inv_scale = 2 * 0.5 = 1.0
+        // z[i] = offset + val * inv_scale = 10.0 + [0,1,2,3] * 1.0
+        assert_eq!(z, vec![10.0, 11.0, 12.0, 13.0]);
+    }
+
+    #[test]
+    fn decode_z_tile_type1_clamped_to_max() {
+        // Same setup but max_z_in_img is low enough to clamp
+        let mut buf = vec![0x01u8];
+        buf.extend_from_slice(&10.0f32.to_le_bytes());
+        buf.push(0x42); // numBits=2, bits67=1
+        buf.extend_from_slice(&4u16.to_le_bytes());
+        buf.push(0x1B); // [0,1,2,3]
+
+        let mut cursor = Cursor::new(&buf);
+        let width = 2;
+        let cnt = vec![1.0f32; 4];
+        let mut z = vec![0.0f32; 4];
+
+        read_z_tile(
+            &mut cursor, &cnt, &mut z, width,
+            0, 2, 0, 2,
+            0.5,
+            11.5, // clamps values > 11.5
+            false,
+        ).unwrap();
+
+        assert_eq!(z[0], 10.0);
+        assert_eq!(z[1], 11.0);
+        assert_eq!(z[2], 11.5); // clamped from 12.0
+        assert_eq!(z[3], 11.5); // clamped from 13.0
     }
 }

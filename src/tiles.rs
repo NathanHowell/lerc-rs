@@ -491,26 +491,18 @@ fn read_tile<T: LercDataType>(
 
 /// Read a typed value from LE bytes, returning as f64.
 pub(crate) fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -> f64 {
-    let size = T::BYTES;
-    let mut bytes = [0u8; 8];
-    bytes[..size].copy_from_slice(&data[*pos..*pos + size]);
-    *pos += size;
+    let s = &data[*pos..];
+    *pos += T::BYTES;
 
     match T::DATA_TYPE {
-        DataType::Char => i8::from_le_bytes([bytes[0]]) as f64,
-        DataType::Byte => bytes[0] as f64,
-        DataType::Short => i16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        DataType::UShort => u16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        DataType::Int => {
-            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::UInt => {
-            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::Float => {
-            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64
-        }
-        DataType::Double => f64::from_le_bytes(bytes),
+        DataType::Char => s[0] as i8 as f64,
+        DataType::Byte => s[0] as f64,
+        DataType::Short => i16::from_le_bytes(s[..2].try_into().unwrap()) as f64,
+        DataType::UShort => u16::from_le_bytes(s[..2].try_into().unwrap()) as f64,
+        DataType::Int => i32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
+        DataType::UInt => u32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
+        DataType::Float => f32::from_le_bytes(s[..4].try_into().unwrap()) as f64,
+        DataType::Double => f64::from_le_bytes(s[..8].try_into().unwrap()),
     }
 }
 

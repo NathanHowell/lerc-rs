@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 /// Helper: create a multi-depth f32 image with some NoData pixels.
 /// Returns (pixels, mask, expected_no_data_value).
@@ -47,7 +47,7 @@ fn round_trip_f32_ndepth3_nodata() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: Some(no_data_val),
     };
 
@@ -66,7 +66,7 @@ fn round_trip_f32_ndepth3_nodata() {
 
     // Check that NoData values are correctly remapped back
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for i in 0..height as usize {
                 for j in 0..width as usize {
                     let k = i * width as usize + j;
@@ -129,7 +129,7 @@ fn round_trip_f32_ndepth3_nodata_lossless() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: Some(no_data_val),
     };
 
@@ -140,7 +140,7 @@ fn round_trip_f32_ndepth3_nodata_lossless() {
     assert_eq!(decoded.no_data_value, Some(no_data_val));
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             // Lossless: all valid values should be exact
             for i in 0..height as usize {
                 for j in 0..width as usize {
@@ -194,7 +194,7 @@ fn round_trip_f64_ndepth2_nodata() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![mask],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: Some(no_data),
     };
 
@@ -204,7 +204,7 @@ fn round_trip_f64_ndepth2_nodata() {
     assert_eq!(decoded.no_data_value, Some(no_data));
 
     match &decoded.data {
-        LercData::F64(dec_pixels) => {
+        SampleData::F64(dec_pixels) => {
             for k in 0..num_pixels {
                 let base = k * n_depth as usize;
                 assert_eq!(
@@ -248,7 +248,7 @@ fn round_trip_i32_ndepth2_nodata() {
         n_bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![mask],
-        data: LercData::I32(pixels.clone()),
+        data: SampleData::I32(pixels.clone()),
         no_data_value: Some(no_data as f64),
     };
 
@@ -258,7 +258,7 @@ fn round_trip_i32_ndepth2_nodata() {
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
 
     match &decoded.data {
-        LercData::I32(dec_pixels) => {
+        SampleData::I32(dec_pixels) => {
             for k in 0..num_pixels {
                 let base = k * n_depth as usize;
                 assert_eq!(
@@ -292,7 +292,7 @@ fn decode_info_reports_nodata() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: Some(no_data_val),
     };
 
@@ -319,7 +319,7 @@ fn no_nodata_when_not_set() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -352,7 +352,7 @@ fn nodata_ndepth1_not_encoded() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: Some(-9999.0),
     };
 
@@ -407,7 +407,7 @@ fn round_trip_multiband_nodata() {
         n_bands,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone(), mask],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: Some(no_data as f64),
     };
 
@@ -417,7 +417,7 @@ fn round_trip_multiband_nodata() {
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for k in 0..band_size * n_bands as usize {
                 assert_eq!(
                     dec_pixels[k], pixels[k],
@@ -461,7 +461,7 @@ fn unsigned_u16_nodata_round_trip() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![mask],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: Some(no_data as f64),
     };
 
@@ -470,7 +470,7 @@ fn unsigned_u16_nodata_round_trip() {
 
     assert_eq!(decoded.no_data_value, Some(no_data as f64));
     match &decoded.data {
-        LercData::U16(dec) => {
+        SampleData::U16(dec) => {
             assert_eq!(dec.len(), pixels.len());
             for (i, (&orig, &dec_val)) in pixels.iter().zip(dec.iter()).enumerate() {
                 assert_eq!(orig, dec_val, "mismatch at pixel {i}");
@@ -509,7 +509,7 @@ fn unsigned_u8_nodata_round_trip() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![mask],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: Some(no_data as f64),
     };
 

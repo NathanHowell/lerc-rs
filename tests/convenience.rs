@@ -203,7 +203,7 @@ fn lossy_round_trip_f64() {
 
 #[test]
 fn decode_slice_rejects_multiband() {
-    use lerc::{DataType, LercData, LercImage};
+    use lerc::{DataType, LercImage, SampleData};
 
     let width = 8u32;
     let height = 8u32;
@@ -217,7 +217,7 @@ fn decode_slice_rejects_multiband() {
         n_bands: 3,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
-        data: LercData::U8(pixels),
+        data: SampleData::U8(pixels),
         no_data_value: None,
     };
 
@@ -236,7 +236,7 @@ fn decode_slice_rejects_multiband() {
 
 #[test]
 fn decode_slice_rejects_multidepth() {
-    use lerc::{DataType, LercData, LercImage};
+    use lerc::{DataType, LercImage, SampleData};
 
     let width = 8u32;
     let height = 8u32;
@@ -249,7 +249,7 @@ fn decode_slice_rejects_multidepth() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -419,7 +419,7 @@ fn lerc_image_from_pixels_wrong_size() {
 
 #[test]
 fn lerc_image_from_pixels_all_types() {
-    // Verify from_pixels works for every LercDataType
+    // Verify from_pixels works for every Sample
     assert!(lerc::LercImage::from_pixels(2, 2, vec![0i8; 4]).is_ok());
     assert!(lerc::LercImage::from_pixels(2, 2, vec![0u8; 4]).is_ok());
     assert!(lerc::LercImage::from_pixels(2, 2, vec![0i16; 4]).is_ok());
@@ -432,7 +432,7 @@ fn lerc_image_from_pixels_all_types() {
 
 #[test]
 fn lerc_image_pixel_multiband_returns_none() {
-    use lerc::{DataType, LercData, LercImage};
+    use lerc::{DataType, LercImage, SampleData};
 
     let image = LercImage {
         width: 2,
@@ -441,7 +441,7 @@ fn lerc_image_pixel_multiband_returns_none() {
         n_bands: 2,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(4)],
-        data: LercData::U8(vec![0; 8]),
+        data: SampleData::U8(vec![0; 8]),
         no_data_value: None,
     };
 

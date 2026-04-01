@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 fn make_f32_gradient(width: usize, height: usize) -> Vec<f32> {
     (0..width * height)
@@ -23,7 +23,7 @@ fn bench_encode_512_lossy(c: &mut Criterion) {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         ..Default::default()
     };
 
@@ -42,7 +42,7 @@ fn bench_encode_512_lossless(c: &mut Criterion) {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         ..Default::default()
     };
 
@@ -63,7 +63,7 @@ fn bench_encode_u8_512(c: &mut Criterion) {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::U8(pixels),
+        data: SampleData::U8(pixels),
         ..Default::default()
     };
 
@@ -82,7 +82,7 @@ fn bench_decode_512_lossy(c: &mut Criterion) {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         ..Default::default()
     };
     let blob = lerc::encode(&image, Precision::Tolerance(0.01)).unwrap();

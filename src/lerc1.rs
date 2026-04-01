@@ -17,7 +17,7 @@ use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::rle;
 use crate::types::TileRect;
-use crate::{DataType, LercData, LercImage, LercInfo};
+use crate::{DataType, LercImage, LercInfo, SampleData};
 
 const LERC1_MAGIC: &[u8; 10] = b"CntZImage ";
 const LERC1_VERSION: i32 = 11;
@@ -710,7 +710,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(z),
+        data: SampleData::F32(z),
         ..Default::default()
     })
 }

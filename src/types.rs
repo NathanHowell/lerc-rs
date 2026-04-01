@@ -49,7 +49,7 @@ pub(crate) mod sealed {
     pub trait Sealed {}
 }
 
-pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt::Debug {
+pub trait Sample: sealed::Sealed + Copy + PartialOrd + Default + core::fmt::Debug {
     const DATA_TYPE: DataType;
     const BYTES: usize;
 
@@ -59,16 +59,16 @@ pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt
     fn from_bits_u64(v: u64) -> Self;
     fn is_integer() -> bool;
 
-    /// Wrap a `Vec<Self>` into the corresponding `LercData` variant.
-    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData;
+    /// Wrap a `Vec<Self>` into the corresponding `SampleData` variant.
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::SampleData;
 
-    /// Try to borrow the pixel slice from a `LercData` if the variant matches.
-    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]>;
+    /// Try to borrow the pixel slice from a `SampleData` if the variant matches.
+    fn try_ref_lerc_data(data: &super::SampleData) -> Option<&[Self]>;
 
-    /// Try to unwrap the pixel vector from a `LercData` if the variant matches.
+    /// Try to unwrap the pixel vector from a `SampleData` if the variant matches.
     fn try_from_lerc_data(
-        data: super::LercData,
-    ) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData>;
+        data: super::SampleData,
+    ) -> core::result::Result<alloc::vec::Vec<Self>, super::SampleData>;
 
     /// Read a value from a little-endian byte slice. The slice must be at least `BYTES` long.
     fn from_le_slice(s: &[u8]) -> Self;
@@ -83,7 +83,7 @@ pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt
 macro_rules! impl_lerc_data_type {
     ($ty:ty, $dt:expr, $is_int:expr, $variant:ident, $n:literal) => {
         impl sealed::Sealed for $ty {}
-        impl LercDataType for $ty {
+        impl Sample for $ty {
             const DATA_TYPE: DataType = $dt;
             const BYTES: usize = $n;
 
@@ -112,22 +112,22 @@ macro_rules! impl_lerc_data_type {
                 $is_int
             }
 
-            fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
-                super::LercData::$variant(v)
+            fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::SampleData {
+                super::SampleData::$variant(v)
             }
 
-            fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+            fn try_ref_lerc_data(data: &super::SampleData) -> Option<&[Self]> {
                 match data {
-                    super::LercData::$variant(v) => Some(v),
+                    super::SampleData::$variant(v) => Some(v),
                     _ => None,
                 }
             }
 
             fn try_from_lerc_data(
-                data: super::LercData,
-            ) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+                data: super::SampleData,
+            ) -> core::result::Result<alloc::vec::Vec<Self>, super::SampleData> {
                 match data {
-                    super::LercData::$variant(v) => Ok(v),
+                    super::SampleData::$variant(v) => Ok(v),
                     other => Err(other),
                 }
             }
@@ -160,7 +160,7 @@ impl_lerc_data_type!(i32, DataType::Int, true, I32, 4);
 impl_lerc_data_type!(u32, DataType::UInt, true, U32, 4);
 
 impl sealed::Sealed for f32 {}
-impl LercDataType for f32 {
+impl Sample for f32 {
     const DATA_TYPE: DataType = DataType::Float;
     const BYTES: usize = 4;
 
@@ -189,22 +189,22 @@ impl LercDataType for f32 {
         false
     }
 
-    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
-        super::LercData::F32(v)
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::SampleData {
+        super::SampleData::F32(v)
     }
 
-    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+    fn try_ref_lerc_data(data: &super::SampleData) -> Option<&[Self]> {
         match data {
-            super::LercData::F32(v) => Some(v),
+            super::SampleData::F32(v) => Some(v),
             _ => None,
         }
     }
 
     fn try_from_lerc_data(
-        data: super::LercData,
-    ) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+        data: super::SampleData,
+    ) -> core::result::Result<alloc::vec::Vec<Self>, super::SampleData> {
         match data {
-            super::LercData::F32(v) => Ok(v),
+            super::SampleData::F32(v) => Ok(v),
             other => Err(other),
         }
     }
@@ -226,7 +226,7 @@ impl LercDataType for f32 {
 }
 
 impl sealed::Sealed for f64 {}
-impl LercDataType for f64 {
+impl Sample for f64 {
     const DATA_TYPE: DataType = DataType::Double;
     const BYTES: usize = 8;
 
@@ -255,22 +255,22 @@ impl LercDataType for f64 {
         false
     }
 
-    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::LercData {
-        super::LercData::F64(v)
+    fn into_lerc_data(v: alloc::vec::Vec<Self>) -> super::SampleData {
+        super::SampleData::F64(v)
     }
 
-    fn try_ref_lerc_data(data: &super::LercData) -> Option<&[Self]> {
+    fn try_ref_lerc_data(data: &super::SampleData) -> Option<&[Self]> {
         match data {
-            super::LercData::F64(v) => Some(v),
+            super::SampleData::F64(v) => Some(v),
             _ => None,
         }
     }
 
     fn try_from_lerc_data(
-        data: super::LercData,
-    ) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData> {
+        data: super::SampleData,
+    ) -> core::result::Result<alloc::vec::Vec<Self>, super::SampleData> {
         match data {
-            super::LercData::F64(v) => Ok(v),
+            super::SampleData::F64(v) => Ok(v),
             other => Err(other),
         }
     }

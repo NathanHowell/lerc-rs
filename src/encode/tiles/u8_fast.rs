@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::error::Result;
 use crate::header::HeaderInfo;
-use crate::types::{LercDataType, TileCompressionMode, TileRect};
+use crate::types::{Sample, TileCompressionMode, TileRect};
 
 use super::ScratchBuffers;
 
@@ -235,7 +235,7 @@ pub(super) fn encode_tiles_u8_fast(
 
 /// Encode a single tile and return its byte count (without appending to blob).
 /// This is used by `select_block_size` for sampling.
-pub(super) fn encode_tile_to_count<T: LercDataType>(
+pub(super) fn encode_tile_to_count<T: Sample>(
     ctx: &super::TileEncodeContext<'_, T>,
     rect: crate::types::TileRect,
     i_depth: usize,

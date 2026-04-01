@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage, LercInfo};
+use lerc::{DataType, LercImage, LercInfo, SampleData};
 
 #[test]
 fn huffman_u8_compression_ratio() {
@@ -19,7 +19,7 @@ fn huffman_u8_compression_ratio() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -37,7 +37,7 @@ fn huffman_u8_compression_ratio() {
     // Verify round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U8(dec_pixels) => {
+        SampleData::U8(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "Huffman u8 round-trip mismatch");
         }
         _ => panic!("expected U8 data"),
@@ -59,7 +59,7 @@ fn round_trip_i8_lossless() {
         n_bands: 1,
         data_type: DataType::Char,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::I8(pixels.clone()),
+        data: SampleData::I8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -67,7 +67,7 @@ fn round_trip_i8_lossless() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::I8(dec_pixels) => {
+        SampleData::I8(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless i8 round-trip mismatch");
         }
         _ => panic!("expected I8 data"),
@@ -105,7 +105,7 @@ fn round_trip_u8_with_mask_huffman() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![mask.clone()],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -114,7 +114,7 @@ fn round_trip_u8_with_mask_huffman() {
 
     let dec_mask = &decoded.valid_masks[0];
     match &decoded.data {
-        LercData::U8(dec_pixels) => {
+        SampleData::U8(dec_pixels) => {
             for k in 0..(width * height) as usize {
                 assert_eq!(
                     mask.is_valid(k),
@@ -152,7 +152,7 @@ fn round_trip_u8_multiband_huffman() {
         n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -160,7 +160,7 @@ fn round_trip_u8_multiband_huffman() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::U8(dec_pixels) => {
+        SampleData::U8(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "multiband u8 round-trip mismatch");
         }
         _ => panic!("expected U8 data"),
@@ -188,7 +188,7 @@ fn decode_california_float() {
     assert_eq!(image.valid_masks.len(), 1);
 
     match &image.data {
-        LercData::F32(pixels) => {
+        SampleData::F32(pixels) => {
             assert_eq!(pixels.len(), 400 * 400);
 
             // Check that valid pixels are within the header's z range
@@ -248,7 +248,7 @@ fn decode_bluemarble_byte() {
     assert_eq!(image.data_type, DataType::Byte);
 
     match &image.data {
-        LercData::U8(pixels) => {
+        SampleData::U8(pixels) => {
             let expected_len = 256 * 256 * image.n_depth as usize * image.n_bands as usize;
             assert_eq!(pixels.len(), expected_len);
 
@@ -286,7 +286,7 @@ fn round_trip_u8_lossless() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -296,7 +296,7 @@ fn round_trip_u8_lossless() {
     assert_eq!(decoded.width, width);
     assert_eq!(decoded.height, height);
     match &decoded.data {
-        LercData::U8(dec_pixels) => {
+        SampleData::U8(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless round-trip mismatch");
         }
         _ => panic!("expected U8 data"),
@@ -319,7 +319,7 @@ fn round_trip_f32_lossy() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -327,7 +327,7 @@ fn round_trip_f32_lossy() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
@@ -356,7 +356,7 @@ fn round_trip_i32_lossless() {
         n_bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::I32(pixels.clone()),
+        data: SampleData::I32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -365,7 +365,7 @@ fn round_trip_i32_lossless() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::I32(dec_pixels) => {
+        SampleData::I32(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless i32 round-trip mismatch");
         }
         _ => panic!("expected I32 data"),
@@ -404,7 +404,7 @@ fn round_trip_with_partial_mask() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -423,7 +423,7 @@ fn round_trip_with_partial_mask() {
 
     // Check valid pixel values
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for k in 0..(width * height) as usize {
                 if mask.is_valid(k) {
                     let diff = (pixels[k] - dec_pixels[k]).abs();
@@ -449,7 +449,7 @@ fn round_trip_f32_lossless() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -461,7 +461,7 @@ fn round_trip_f32_lossless() {
     assert_eq!(decoded.data_type, DataType::Float);
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
@@ -496,7 +496,7 @@ fn round_trip_f32_lossless_varied_data() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -504,7 +504,7 @@ fn round_trip_f32_lossless_varied_data() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
@@ -533,7 +533,7 @@ fn round_trip_f64_lossless() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: None,
     };
 
@@ -545,7 +545,7 @@ fn round_trip_f64_lossless() {
     assert_eq!(decoded.data_type, DataType::Double);
 
     match &decoded.data {
-        LercData::F64(dec_pixels) => {
+        SampleData::F64(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
@@ -580,7 +580,7 @@ fn round_trip_f64_lossless_varied() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: None,
     };
 
@@ -588,7 +588,7 @@ fn round_trip_f64_lossless_varied() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::F64(dec_pixels) => {
+        SampleData::F64(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
@@ -616,7 +616,7 @@ fn round_trip_f32_lossless_constant() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -624,7 +624,7 @@ fn round_trip_f32_lossless_constant() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels);
         }
         _ => panic!("expected F32 data"),
@@ -647,7 +647,7 @@ fn round_trip_f32_lossless_multi_depth() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -656,7 +656,7 @@ fn round_trip_f32_lossless_multi_depth() {
 
     assert_eq!(decoded.n_depth, n_depth);
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
@@ -706,7 +706,7 @@ fn block_size_selection_smooth_gradient_prefers_16() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -720,7 +720,7 @@ fn block_size_selection_smooth_gradient_prefers_16() {
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
@@ -765,7 +765,7 @@ fn block_size_selection_noisy_data_prefers_8() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -779,7 +779,7 @@ fn block_size_selection_noisy_data_prefers_8() {
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
                 // The LERC max_z_error guarantee applies to the quantization;
@@ -816,7 +816,7 @@ fn block_size_16_round_trip_f32_lossy() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -825,7 +825,7 @@ fn block_size_16_round_trip_f32_lossy() {
     // Regardless of which block size was chosen, verify round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
@@ -853,7 +853,7 @@ fn block_size_header_field_is_valid() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -867,7 +867,7 @@ fn block_size_header_field_is_valid() {
     // Verify round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U16(dec_pixels) => {
+        SampleData::U16(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless u16 round-trip mismatch");
         }
         _ => panic!("expected U16 data"),
@@ -908,7 +908,7 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -929,7 +929,7 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
     // Verify round-trip correctness: all decoded values within original maxZError
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
@@ -965,7 +965,7 @@ fn try_raise_max_z_error_improves_compression() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1002,7 +1002,7 @@ fn try_raise_max_z_error_improves_compression() {
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded_raised).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
                 assert!(
@@ -1034,7 +1034,7 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1049,7 +1049,7 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
     // Verify bit-exact round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 assert_eq!(
                     orig.to_bits(),
@@ -1085,7 +1085,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1101,7 +1101,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F64(dec_pixels) => {
+        SampleData::F64(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
                 assert!(
@@ -1128,7 +1128,7 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
         n_bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::I32(pixels.clone()),
+        data: SampleData::I32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1143,7 +1143,7 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::I32(dec_pixels) => {
+        SampleData::I32(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless i32 round-trip mismatch");
         }
         _ => panic!("expected I32 data"),
@@ -1172,7 +1172,7 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1191,7 +1191,7 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
     // Verify round-trip correctness
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F64(dec_pixels) => {
+        SampleData::F64(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
                 assert!(
@@ -1228,7 +1228,7 @@ fn try_raise_max_z_error_already_optimal() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1254,7 +1254,7 @@ fn try_raise_max_z_error_already_optimal() {
     // Verify round-trip correctness with original tolerance
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig - dec).abs();
                 assert!(
@@ -1303,7 +1303,7 @@ fn try_raise_max_z_error_with_partial_mask() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1320,7 +1320,7 @@ fn try_raise_max_z_error_with_partial_mask() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let dec_mask = &decoded.valid_masks[0];
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for k in 0..(width * height) as usize {
                 assert_eq!(
                     mask.is_valid(k),
@@ -1375,7 +1375,7 @@ fn decode_lerc1_world() {
     );
 
     match &image.data {
-        LercData::F32(pixels) => {
+        SampleData::F32(pixels) => {
             assert_eq!(pixels.len(), total);
 
             // Check z range of valid pixels

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::types::{DataType, LercDataType, TileCompressionMode, tile_flags};
+use crate::types::{DataType, Sample, TileCompressionMode, tile_flags};
 
 /// Parameters for encoding a single tile block's payload.
 pub(super) struct TileInnerParams {
@@ -18,7 +18,7 @@ pub(super) struct TileInnerParams {
 /// When `b_diff_enc` is true, bit 2 of the compression flag is set and the
 /// offset data type is forced to Int for integer source types.
 /// `quant_scratch` is a reusable scratch buffer for quantized values.
-pub(super) fn encode_tile_inner<T: LercDataType>(
+pub(super) fn encode_tile_inner<T: Sample>(
     buf: &mut Vec<u8>,
     values: &[f64],
     quant_scratch: &mut Vec<u32>,

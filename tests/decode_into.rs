@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 /// Helper: encode an image, then decode with both `decode()` and `decode_*_into()`,
 /// and verify the results match.
@@ -19,7 +19,7 @@ macro_rules! test_decode_into_matches {
                 n_bands: 1,
                 data_type: $dt,
                 valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-                data: LercData::$variant(pixels.clone()),
+                data: SampleData::$variant(pixels.clone()),
                 no_data_value: None,
             };
 
@@ -28,7 +28,7 @@ macro_rules! test_decode_into_matches {
             // Decode with allocating API
             let decoded = lerc::decode(&encoded).expect("decode failed");
             let expected_pixels = match &decoded.data {
-                LercData::$variant(p) => p.clone(),
+                SampleData::$variant(p) => p.clone(),
                 _ => panic!("unexpected data type from decode()"),
             };
 
@@ -172,7 +172,7 @@ fn decode_into_buffer_too_small() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -203,7 +203,7 @@ fn decode_into_type_mismatch() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -234,7 +234,7 @@ fn decode_into_oversized_buffer_ok() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -250,7 +250,7 @@ fn decode_into_oversized_buffer_ok() {
     // Verify the first (width*height) elements match, rest untouched
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {
-        LercData::U8(p) => p,
+        SampleData::U8(p) => p,
         _ => panic!("expected U8"),
     };
     let total = (width * height) as usize;
@@ -278,7 +278,7 @@ fn decode_into_multiband() {
         n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
-        data: LercData::U8(pixels.clone()),
+        data: SampleData::U8(pixels.clone()),
         no_data_value: None,
     };
 
@@ -287,7 +287,7 @@ fn decode_into_multiband() {
     // Decode with allocating API
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {
-        LercData::U8(p) => p.clone(),
+        SampleData::U8(p) => p.clone(),
         _ => panic!("expected U8"),
     };
 
@@ -330,7 +330,7 @@ fn decode_into_with_mask() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -338,7 +338,7 @@ fn decode_into_with_mask() {
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {
-        LercData::F32(p) => p.clone(),
+        SampleData::F32(p) => p.clone(),
         _ => panic!("expected F32"),
     };
 
@@ -372,7 +372,7 @@ fn decode_into_generic_api() {
         n_bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U32(pixels.clone()),
+        data: SampleData::U32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -385,7 +385,7 @@ fn decode_into_generic_api() {
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     let expected = match &decoded.data {
-        LercData::U32(p) => p,
+        SampleData::U32(p) => p,
         _ => panic!("expected U32"),
     };
     assert_eq!(&output, expected);

@@ -8,7 +8,7 @@
 
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 use lerc_cpp_ref::{self as cpp, DT_DOUBLE, DT_FLOAT, DT_UCHAR};
 
 /// Maximum allowed ratio of Rust output size to C++ output size.
@@ -255,7 +255,7 @@ fn ratio_reference_bluemarble() {
         n_bands,
         data_type: DataType::Byte,
         valid_masks: masks,
-        data: LercData::U8(data.to_vec()),
+        data: SampleData::U8(data.to_vec()),
         no_data_value: None,
     };
     let rust_blob = lerc::encode(&img, Precision::Lossless).unwrap();

@@ -9,7 +9,7 @@
 
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 // ---------------------------------------------------------------------------
 // Reference test data from the C++ LERC SDK
@@ -214,7 +214,7 @@ fn california_detailed_pixel_statistics() {
     assert_eq!(image.n_depth, 1);
 
     let pixels = match &image.data {
-        LercData::F32(p) => p,
+        SampleData::F32(p) => p,
         _ => panic!("expected F32 data"),
     };
 
@@ -319,7 +319,7 @@ fn bluemarble_three_bands_detailed() {
     assert_eq!(image.data_type, DataType::Byte);
 
     let pixels = match &image.data {
-        LercData::U8(p) => p,
+        SampleData::U8(p) => p,
         _ => panic!("expected U8 data"),
     };
 
@@ -388,7 +388,7 @@ fn california_round_trip_lossy() {
     let max_z_error = info.max_z_error;
 
     let pixels_orig = match &image.data {
-        LercData::F32(p) => p.clone(),
+        SampleData::F32(p) => p.clone(),
         _ => panic!("expected F32"),
     };
     let mask_orig = image.valid_masks[0].clone();
@@ -405,7 +405,7 @@ fn california_round_trip_lossy() {
     assert_eq!(image2.data_type, DataType::Float);
 
     let pixels2 = match &image2.data {
-        LercData::F32(p) => p,
+        SampleData::F32(p) => p,
         _ => panic!("expected F32"),
     };
     let mask2 = &image2.valid_masks[0];
@@ -439,7 +439,7 @@ fn bluemarble_round_trip_lossless() {
     let image = lerc::decode(BLUEMARBLE).expect("decode failed");
 
     let pixels_orig = match &image.data {
-        LercData::U8(p) => p.clone(),
+        SampleData::U8(p) => p.clone(),
         _ => panic!("expected U8"),
     };
 
@@ -455,7 +455,7 @@ fn bluemarble_round_trip_lossless() {
     assert_eq!(image2.data_type, DataType::Byte);
 
     let pixels2 = match &image2.data {
-        LercData::U8(p) => p,
+        SampleData::U8(p) => p,
         _ => panic!("expected U8"),
     };
 
@@ -526,7 +526,7 @@ fn encoded_single_band_header_validation() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -563,7 +563,7 @@ fn encoded_multiband_three_concatenated_blobs() {
         n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
-        data: LercData::U8(pixels),
+        data: SampleData::U8(pixels),
         no_data_value: None,
     };
 
@@ -640,7 +640,7 @@ fn encoded_blob_size_matches_header() {
             n_bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(n)],
-            data: LercData::F32(pixels),
+            data: SampleData::F32(pixels),
             no_data_value: None,
         };
         let enc = lerc::encode(&img, Precision::Lossless).unwrap();
@@ -658,7 +658,7 @@ fn encoded_blob_size_matches_header() {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(n)],
-            data: LercData::U8(pixels),
+            data: SampleData::U8(pixels),
             no_data_value: None,
         };
         let enc = lerc::encode(&img, Precision::Lossless).unwrap();
@@ -676,7 +676,7 @@ fn encoded_blob_size_matches_header() {
             n_bands: 1,
             data_type: DataType::Int,
             valid_masks: vec![BitMask::all_valid(n)],
-            data: LercData::I32(pixels),
+            data: SampleData::I32(pixels),
             no_data_value: None,
         };
         let enc = lerc::encode(&img, Precision::Lossless).unwrap();
@@ -694,7 +694,7 @@ fn encoded_blob_size_matches_header() {
             n_bands: 1,
             data_type: DataType::Double,
             valid_masks: vec![BitMask::all_valid(n)],
-            data: LercData::F64(pixels),
+            data: SampleData::F64(pixels),
             no_data_value: None,
         };
         let enc = lerc::encode(&img, Precision::Lossless).unwrap();
@@ -717,7 +717,7 @@ fn encoded_checksum_verified_manually() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(n)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -750,7 +750,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::Byte,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::U8(vec![0u8; n]),
+                data: SampleData::U8(vec![0u8; n]),
                 no_data_value: None,
             },
             1, // Byte
@@ -763,7 +763,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::Short,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::I16(vec![0i16; n]),
+                data: SampleData::I16(vec![0i16; n]),
                 no_data_value: None,
             },
             2, // Short
@@ -776,7 +776,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::UShort,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::U16(vec![0u16; n]),
+                data: SampleData::U16(vec![0u16; n]),
                 no_data_value: None,
             },
             3, // UShort
@@ -789,7 +789,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::Int,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::I32(vec![0i32; n]),
+                data: SampleData::I32(vec![0i32; n]),
                 no_data_value: None,
             },
             4, // Int
@@ -802,7 +802,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::UInt,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::U32(vec![0u32; n]),
+                data: SampleData::U32(vec![0u32; n]),
                 no_data_value: None,
             },
             5, // UInt
@@ -815,7 +815,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::Float,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::F32(vec![0.0f32; n]),
+                data: SampleData::F32(vec![0.0f32; n]),
                 no_data_value: None,
             },
             6, // Float
@@ -828,7 +828,7 @@ fn encoded_data_type_codes_correct() {
                 n_bands: 1,
                 data_type: DataType::Double,
                 valid_masks: vec![BitMask::all_valid(n)],
-                data: LercData::F64(vec![0.0f64; n]),
+                data: SampleData::F64(vec![0.0f64; n]),
                 no_data_value: None,
             },
             7, // Double
@@ -869,7 +869,7 @@ fn deterministic_encoding_f32() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -898,7 +898,7 @@ fn deterministic_encoding_u8_multiband() {
         n_bands: 3,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
-        data: LercData::U8(pixels),
+        data: SampleData::U8(pixels),
         no_data_value: None,
     };
 
@@ -940,7 +940,7 @@ fn deterministic_encoding_with_mask() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -969,7 +969,7 @@ fn self_consistency_all_invalid() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -1004,7 +1004,7 @@ fn self_consistency_single_valid_pixel() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
-        data: LercData::F32(pixels),
+        data: SampleData::F32(pixels),
         no_data_value: None,
     };
 
@@ -1021,7 +1021,7 @@ fn self_consistency_single_valid_pixel() {
     }
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             assert_eq!(
                 dec_pixels[100].to_bits(),
                 42.5f32.to_bits(),
@@ -1047,7 +1047,7 @@ fn self_consistency_constant_image() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(n)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1055,7 +1055,7 @@ fn self_consistency_constant_image() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::F32(dec_pixels) => {
+        SampleData::F32(dec_pixels) => {
             for (k, (&orig, &dec)) in pixels.iter().zip(dec_pixels.iter()).enumerate() {
                 assert_eq!(
                     orig.to_bits(),
@@ -1088,7 +1088,7 @@ fn self_consistency_i16_large_range() {
         n_bands: 1,
         data_type: DataType::Short,
         valid_masks: vec![BitMask::all_valid(n)],
-        data: LercData::I16(pixels.clone()),
+        data: SampleData::I16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1096,7 +1096,7 @@ fn self_consistency_i16_large_range() {
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
     match &decoded.data {
-        LercData::I16(dec_pixels) => {
+        SampleData::I16(dec_pixels) => {
             assert_eq!(*dec_pixels, pixels, "i16 full-range round-trip mismatch");
         }
         _ => panic!("expected I16"),
@@ -1125,7 +1125,7 @@ fn self_consistency_u32_sparse_mask() {
         n_bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![mask.clone()],
-        data: LercData::U32(pixels.clone()),
+        data: SampleData::U32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -1134,7 +1134,7 @@ fn self_consistency_u32_sparse_mask() {
 
     let dec_mask = &decoded.valid_masks[0];
     match &decoded.data {
-        LercData::U32(dec_pixels) => {
+        SampleData::U32(dec_pixels) => {
             for k in 0..n {
                 assert_eq!(
                     mask.is_valid(k),

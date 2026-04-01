@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 /// Build a u16 image where the lower `noisy_bits` are random noise and
 /// the upper bits form a smooth gradient. With enough pixels this should
@@ -90,7 +90,7 @@ fn bit_plane_compression_u16_noisy_low_bits() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -120,7 +120,7 @@ fn bit_plane_compression_u16_noisy_low_bits() {
     // Verify round-trip: decoded values should be within maxZError of originals
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U16(dec_pixels) => {
+        SampleData::U16(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig as i32 - dec as i32).unsigned_abs();
@@ -148,7 +148,7 @@ fn bit_plane_compression_u32_noisy_low_bits() {
         n_bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U32(pixels.clone()),
+        data: SampleData::U32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -163,7 +163,7 @@ fn bit_plane_compression_u32_noisy_low_bits() {
     // Verify round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U32(dec_pixels) => {
+        SampleData::U32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = orig.abs_diff(dec);
@@ -191,7 +191,7 @@ fn bit_plane_compression_i16_noisy_low_bits() {
         n_bands: 1,
         data_type: DataType::Short,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::I16(pixels.clone()),
+        data: SampleData::I16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -205,7 +205,7 @@ fn bit_plane_compression_i16_noisy_low_bits() {
 
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::I16(dec_pixels) => {
+        SampleData::I16(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
                 let diff = (orig as i32 - dec as i32).unsigned_abs();
@@ -233,7 +233,7 @@ fn positive_max_z_error_does_not_trigger_bit_plane() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -248,7 +248,7 @@ fn positive_max_z_error_does_not_trigger_bit_plane() {
     // Verify exact round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U16(dec_pixels) => {
+        SampleData::U16(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "lossless u16 round-trip mismatch");
         }
         _ => panic!("expected U16 data"),
@@ -269,7 +269,7 @@ fn magic_value_777_triggers_bit_plane() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -303,7 +303,7 @@ fn bit_plane_fallback_to_lossless_for_clean_data() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -320,7 +320,7 @@ fn bit_plane_fallback_to_lossless_for_clean_data() {
     // Verify exact round-trip
     let decoded = lerc::decode(&encoded).expect("decode failed");
     match &decoded.data {
-        LercData::U16(dec_pixels) => {
+        SampleData::U16(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "clean data round-trip mismatch");
         }
         _ => panic!("expected U16 data"),
@@ -341,7 +341,7 @@ fn bit_plane_compression_smaller_than_lossless() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 
@@ -374,7 +374,7 @@ fn bit_plane_too_few_pixels_falls_back() {
         n_bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-        data: LercData::U16(pixels.clone()),
+        data: SampleData::U16(pixels.clone()),
         no_data_value: None,
     };
 

@@ -2,7 +2,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::{LercError, Result};
-use crate::types::LercDataType;
+use crate::types::Sample;
 
 mod compression;
 mod predictor;
@@ -22,7 +22,7 @@ impl FplSliceParams {
 }
 
 /// Decode float-point lossless (FPL) Huffman-encoded data.
-pub(crate) fn decode_huffman_flt<T: LercDataType>(
+pub(crate) fn decode_huffman_flt<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     is_double: bool,
@@ -45,7 +45,7 @@ pub(crate) fn decode_huffman_flt<T: LercDataType>(
     Ok(())
 }
 
-fn decode_huffman_flt_slice<T: LercDataType>(
+fn decode_huffman_flt_slice<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     params: &FplSliceParams,
@@ -214,7 +214,7 @@ fn double_transform(a: u64) -> u64 {
 }
 
 /// Encode float-point lossless data.
-pub(crate) fn encode_huffman_flt<T: LercDataType>(
+pub(crate) fn encode_huffman_flt<T: Sample>(
     input: &[T],
     is_double: bool,
     width: usize,
@@ -233,7 +233,7 @@ pub(crate) fn encode_huffman_flt<T: LercDataType>(
     Ok(result)
 }
 
-fn encode_huffman_flt_slice<T: LercDataType>(
+fn encode_huffman_flt_slice<T: Sample>(
     input: &[T],
     is_double: bool,
     width: usize,

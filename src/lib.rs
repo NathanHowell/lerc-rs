@@ -31,7 +31,7 @@ pub(crate) mod lerc1;
 pub(crate) mod tiles;
 
 pub use error::{LercError, Result};
-pub use types::{DataType, LercDataType};
+pub use types::{DataType, Sample};
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -88,7 +88,7 @@ pub struct LercImage {
     pub n_bands: u32,
     pub data_type: DataType,
     pub valid_masks: Vec<BitMask>,
-    pub data: LercData,
+    pub data: SampleData,
     /// The original NoData value, if any. When set during encoding with nDepth > 1,
     /// pixels matching this value in invalid depth slices are encoded with a sentinel.
     /// On decode, the sentinel is remapped back to this value.
@@ -104,14 +104,14 @@ impl Default for LercImage {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: Vec::new(),
-            data: LercData::U8(Vec::new()),
+            data: SampleData::U8(Vec::new()),
             no_data_value: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum LercData {
+pub enum SampleData {
     I8(Vec<i8>),
     U8(Vec<u8>),
     I16(Vec<i16>),
@@ -150,9 +150,9 @@ pub fn encode(image: &LercImage, precision: Precision<f64>) -> Result<Vec<u8>> {
 
 /// Encode a single-band image with all pixels valid.
 ///
-/// The pixel type `T` determines the LERC data type automatically via `LercDataType`.
+/// The pixel type `T` determines the LERC data type automatically via `Sample`.
 /// Returns an error if `data.len() != width * height`.
-pub fn encode_slice<T: LercDataType>(
+pub fn encode_slice<T: Sample>(
     width: u32,
     height: u32,
     data: &[T],
@@ -190,9 +190,9 @@ pub fn encode_slice<T: LercDataType>(
 
 /// Encode a single-band image with a validity mask.
 ///
-/// The pixel type `T` determines the LERC data type automatically via `LercDataType`.
+/// The pixel type `T` determines the LERC data type automatically via `Sample`.
 /// Returns an error if `data.len() != width * height` or if the mask size does not match.
-pub fn encode_slice_masked<T: LercDataType>(
+pub fn encode_slice_masked<T: Sample>(
     width: u32,
     height: u32,
     data: &[T],
@@ -241,7 +241,7 @@ pub fn encode_slice_masked<T: LercDataType>(
 /// The pixel type `T` must match the blob's data type. Returns an error on type
 /// mismatch or if the blob contains multiple bands or depths (use [`decode`] for
 /// multi-band/multi-depth blobs to get full shape and per-band masks).
-pub fn decode_slice<T: LercDataType>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
+pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
     let image = decode::decode(blob)?;
     if image.n_bands > 1 {
         return Err(LercError::InvalidData(alloc::format!(
@@ -280,7 +280,7 @@ impl LercImage {
     /// Try to borrow the pixel data as `&[T]`.
     ///
     /// Returns `None` if the image's data type does not match `T`.
-    pub fn as_typed<T: LercDataType>(&self) -> Option<&[T]> {
+    pub fn as_typed<T: Sample>(&self) -> Option<&[T]> {
         T::try_ref_lerc_data(&self.data)
     }
 
@@ -293,7 +293,7 @@ impl LercImage {
     ///
     /// Returns `None` if the data type does not match `T`, if `n_bands > 1` or
     /// `n_depth > 1`, or if the coordinates are out of bounds.
-    pub fn pixel<T: LercDataType>(&self, row: u32, col: u32) -> Option<T> {
+    pub fn pixel<T: Sample>(&self, row: u32, col: u32) -> Option<T> {
         if self.n_bands != 1 || self.n_depth != 1 {
             return None;
         }
@@ -310,7 +310,7 @@ impl LercImage {
     /// Only works for single-band, single-depth images. Returns `None` if the data
     /// type does not match `T` or if `n_bands > 1` or `n_depth > 1`.
     /// The iterator respects the validity mask, skipping invalid pixels.
-    pub fn valid_pixels<'a, T: LercDataType + 'a>(
+    pub fn valid_pixels<'a, T: Sample + 'a>(
         &'a self,
     ) -> Option<impl Iterator<Item = (u32, u32, T)> + 'a> {
         if self.n_bands != 1 || self.n_depth != 1 {
@@ -359,7 +359,7 @@ impl LercImage {
     /// and dimensions.
     ///
     /// Returns an error if `data.len() != width * height`.
-    pub fn from_pixels<T: LercDataType>(width: u32, height: u32, data: Vec<T>) -> Result<Self> {
+    pub fn from_pixels<T: Sample>(width: u32, height: u32, data: Vec<T>) -> Result<Self> {
         let expected = width as usize * height as usize;
         if data.len() != expected {
             return Err(LercError::InvalidData(alloc::format!(
@@ -391,7 +391,7 @@ impl LercImage {
 ///
 /// Returns `LercError::TypeMismatch` if `T` does not match the blob's data type.
 /// Returns `LercError::OutputBufferTooSmall` if the buffer is too small.
-pub fn decode_into<T: LercDataType>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
+pub fn decode_into<T: Sample>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
     decode::decode_into(data, output)
 }
 

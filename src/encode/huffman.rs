@@ -3,12 +3,12 @@ use alloc::vec::Vec;
 use crate::bitmask::BitMask;
 use crate::header::HeaderInfo;
 use crate::huffman::HuffmanCodec;
-use crate::types::{DataType, ImageEncodeMode, LercDataType};
+use crate::types::{DataType, ImageEncodeMode, Sample};
 
 /// Quick check whether 8-bit integer data has high entropy (nearly all 256
 /// byte values present with roughly uniform distribution). When this is true,
 /// Huffman encoding cannot beat tiling, so we skip the expensive Huffman attempt.
-pub(super) fn is_high_entropy_u8<T: LercDataType>(
+pub(super) fn is_high_entropy_u8<T: Sample>(
     data: &[T],
     mask: &BitMask,
     header: &HeaderInfo,
@@ -135,7 +135,7 @@ pub(super) fn is_high_entropy_u8<T: LercDataType>(
 /// Compute histograms for Huffman encoding of 8-bit data.
 /// Returns (direct_histogram, delta_histogram) each of size 256.
 /// The offset is 128 for i8 (DT_Char) and 0 for u8 (DT_Byte).
-fn compute_histo_for_huffman<T: LercDataType>(
+fn compute_histo_for_huffman<T: Sample>(
     data: &[T],
     mask: &BitMask,
     header: &HeaderInfo,
@@ -196,7 +196,7 @@ fn compute_histo_for_huffman<T: LercDataType>(
 
 /// Try Huffman encoding for 8-bit integer data (u8/i8).
 /// Returns Some(bytes) with the mode flag + Huffman data if beneficial, or None.
-pub(super) fn try_encode_huffman_int<T: LercDataType>(
+pub(super) fn try_encode_huffman_int<T: Sample>(
     data: &[T],
     mask: &BitMask,
     header: &HeaderInfo,

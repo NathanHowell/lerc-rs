@@ -10,8 +10,8 @@ use crate::error::{LercError, Result};
 use crate::fpl;
 use crate::header::{self, HeaderInfo};
 use crate::rle;
-use crate::types::{DataType, ImageEncodeMode, LercDataType};
-use crate::{LercData, LercImage};
+use crate::types::{DataType, ImageEncodeMode, Sample};
+use crate::{LercImage, SampleData};
 
 use huffman::{is_high_entropy_u8, try_encode_huffman_int};
 use optimizations::{compute_no_data_sentinel, try_bit_plane_compression, try_raise_max_z_error};
@@ -19,22 +19,18 @@ use tiles::{encode_tiles, select_block_size};
 
 pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
     match &image.data {
-        LercData::I8(d) => encode_slice(image, d, max_z_error),
-        LercData::U8(d) => encode_slice(image, d, max_z_error),
-        LercData::I16(d) => encode_slice(image, d, max_z_error),
-        LercData::U16(d) => encode_slice(image, d, max_z_error),
-        LercData::I32(d) => encode_slice(image, d, max_z_error),
-        LercData::U32(d) => encode_slice(image, d, max_z_error),
-        LercData::F32(d) => encode_slice(image, d, max_z_error),
-        LercData::F64(d) => encode_slice(image, d, max_z_error),
+        SampleData::I8(d) => encode_slice(image, d, max_z_error),
+        SampleData::U8(d) => encode_slice(image, d, max_z_error),
+        SampleData::I16(d) => encode_slice(image, d, max_z_error),
+        SampleData::U16(d) => encode_slice(image, d, max_z_error),
+        SampleData::I32(d) => encode_slice(image, d, max_z_error),
+        SampleData::U32(d) => encode_slice(image, d, max_z_error),
+        SampleData::F32(d) => encode_slice(image, d, max_z_error),
+        SampleData::F64(d) => encode_slice(image, d, max_z_error),
     }
 }
 
-fn encode_slice<T: LercDataType>(
-    image: &LercImage,
-    data: &[T],
-    max_z_error: f64,
-) -> Result<Vec<u8>> {
+fn encode_slice<T: Sample>(image: &LercImage, data: &[T], max_z_error: f64) -> Result<Vec<u8>> {
     let width = image.width as usize;
     let height = image.height as usize;
     let n_depth = image.n_depth as usize;
@@ -112,7 +108,7 @@ fn encode_slice<T: LercDataType>(
 
 /// Iterate over all valid pixel values, calling a visitor for each.
 #[inline(always)]
-fn for_each_valid_pixel<T: LercDataType>(
+fn for_each_valid_pixel<T: Sample>(
     data: &[T],
     mask: &BitMask,
     width: usize,
@@ -153,7 +149,7 @@ struct BandStats {
 
 /// Gather per-depth min/max, overall range, valid-only min, and mixed NoData
 /// detection in a single traversal of valid pixels.
-fn compute_band_stats<T: LercDataType>(
+fn compute_band_stats<T: Sample>(
     data: &[T],
     mask: &BitMask,
     width: usize,
@@ -251,7 +247,7 @@ struct NoDataInput {
 }
 
 /// Compute the NoData sentinel and remap data if needed.
-fn process_no_data<T: LercDataType>(
+fn process_no_data<T: Sample>(
     data: &[T],
     mask: &BitMask,
     input: &NoDataInput,
@@ -326,7 +322,7 @@ fn process_no_data<T: LercDataType>(
 }
 
 /// Write the blob payload: mask, ranges, and encoded pixel data.
-fn write_blob_payload<T: LercDataType>(
+fn write_blob_payload<T: Sample>(
     blob: &mut Vec<u8>,
     encode_data: &[T],
     mask: &BitMask,
@@ -412,7 +408,7 @@ fn write_blob_payload<T: LercDataType>(
     Ok(())
 }
 
-fn encode_one_band<T: LercDataType>(
+fn encode_one_band<T: Sample>(
     data: &[T],
     mask: &BitMask,
     image: &LercImage,

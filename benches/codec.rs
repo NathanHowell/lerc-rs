@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 use lerc_cpp_ref as cpp;
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ fn bench_encode_f32(c: &mut Criterion) {
             n_bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(size * size)],
-            data: LercData::F32(pixels.clone()),
+            data: SampleData::F32(pixels.clone()),
             ..Default::default()
         };
 
@@ -183,7 +183,7 @@ fn bench_encode_u8(c: &mut Criterion) {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(size * size)],
-            data: LercData::U8(pixels.clone()),
+            data: SampleData::U8(pixels.clone()),
             ..Default::default()
         };
 
@@ -227,7 +227,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
             n_bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(size * size)],
-            data: LercData::F32(pixels.clone()),
+            data: SampleData::F32(pixels.clone()),
             ..Default::default()
         };
         let rust_blob = lerc::encode(&image, Precision::Tolerance(0.01)).unwrap();
@@ -301,7 +301,7 @@ fn bench_decode_f64_lossless(c: &mut Criterion) {
             n_bands: 1,
             data_type: DataType::Double,
             valid_masks: vec![BitMask::all_valid(size * size)],
-            data: LercData::F64(pixels.clone()),
+            data: SampleData::F64(pixels.clone()),
             ..Default::default()
         };
         let rust_blob = lerc::encode(&image, Precision::Lossless).unwrap();

@@ -8,8 +8,8 @@ use crate::header::{self, HeaderInfo};
 use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
-use crate::types::{DataType, LercDataType};
-use crate::{DecodeResult, LercData, LercImage, LercInfo};
+use crate::types::{DataType, Sample};
+use crate::{DecodeResult, LercImage, LercInfo, SampleData};
 
 use crate::types::ImageEncodeMode;
 
@@ -86,7 +86,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
                 n_bands,
                 data_type: dt,
                 valid_masks: result.valid_masks,
-                data: LercData::$variant(output),
+                data: SampleData::$variant(output),
                 no_data_value,
             })
         }};
@@ -107,7 +107,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
 /// Decode LERC2 data into a pre-allocated typed buffer, returning metadata.
 /// The buffer must have at least `width * height * n_depth * n_bands` elements.
 /// The data type `T` must match the blob's data type.
-pub fn decode_into<T: LercDataType>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
+pub fn decode_into<T: Sample>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
     if crate::lerc1::is_lerc1(data) {
         return Err(LercError::InvalidData(
             "decode_into does not support Lerc1 format".into(),
@@ -139,7 +139,7 @@ pub fn decode_into<T: LercDataType>(data: &[u8], output: &mut [T]) -> Result<Dec
 }
 
 /// Shared implementation: decode all bands from LERC2 data into a pre-allocated buffer.
-fn decode_bands_into<T: LercDataType>(
+fn decode_bands_into<T: Sample>(
     data: &[u8],
     info: &LercInfo,
     output: &mut [T],
@@ -184,7 +184,7 @@ fn decode_bands_into<T: LercDataType>(
 
 /// Remap noData sentinel values from the internal encoding value back to the
 /// original user-specified noData value. This mirrors the C++ `RemapNoData`.
-fn remap_no_data<T: LercDataType>(output: &mut [T], mask: &BitMask, hd: &HeaderInfo) {
+fn remap_no_data<T: Sample>(output: &mut [T], mask: &BitMask, hd: &HeaderInfo) {
     let n_cols = hd.n_cols as usize;
     let n_rows = hd.n_rows as usize;
     let n_depth = hd.n_depth as usize;
@@ -209,7 +209,7 @@ fn remap_no_data<T: LercDataType>(output: &mut [T], mask: &BitMask, hd: &HeaderI
 }
 
 /// Decode one band blob, returning the mask, header info, and number of bytes consumed.
-fn decode_one_band<T: LercDataType>(
+fn decode_one_band<T: Sample>(
     blob: &[u8],
     output: &mut [T],
     prev_mask: Option<&BitMask>,
@@ -386,7 +386,7 @@ fn read_mask(
     Ok(BitMask::from_bytes(mask_bytes, num_pixels))
 }
 
-fn read_min_max_ranges<T: LercDataType>(
+fn read_min_max_ranges<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
@@ -419,7 +419,7 @@ fn read_min_max_ranges<T: LercDataType>(
 
 use crate::tiles::{read_typed_as_f64, read_typed_value};
 
-fn fill_const_image<T: LercDataType>(
+fn fill_const_image<T: Sample>(
     header: &HeaderInfo,
     mask: &BitMask,
     z_min_vec: &[f64],
@@ -458,7 +458,7 @@ fn fill_const_image<T: LercDataType>(
     Ok(())
 }
 
-fn read_data_one_sweep<T: LercDataType>(
+fn read_data_one_sweep<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
@@ -491,7 +491,7 @@ fn read_data_one_sweep<T: LercDataType>(
     Ok(())
 }
 
-fn decode_huffman<T: LercDataType>(
+fn decode_huffman<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
@@ -1093,13 +1093,13 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-            data: crate::LercData::U8(pixels.to_vec()),
+            data: crate::SampleData::U8(pixels.to_vec()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Tolerance(max_z_error)).unwrap();
         let decoded = crate::decode(&blob).unwrap();
         match decoded.data {
-            crate::LercData::U8(v) => v,
+            crate::SampleData::U8(v) => v,
             _ => panic!("expected U8 data"),
         }
     }
@@ -1113,13 +1113,13 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Char,
             valid_masks: vec![BitMask::all_valid((width * height) as usize)],
-            data: crate::LercData::I8(pixels.to_vec()),
+            data: crate::SampleData::I8(pixels.to_vec()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Tolerance(max_z_error)).unwrap();
         let decoded = crate::decode(&blob).unwrap();
         match decoded.data {
-            crate::LercData::I8(v) => v,
+            crate::SampleData::I8(v) => v,
             _ => panic!("expected I8 data"),
         }
     }
@@ -1224,7 +1224,7 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(16)],
-            data: crate::LercData::U8(pixels.clone()),
+            data: crate::SampleData::U8(pixels.clone()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1249,7 +1249,7 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(16)],
-            data: crate::LercData::F32(pixels.clone()),
+            data: crate::SampleData::F32(pixels.clone()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1273,7 +1273,7 @@ mod tests {
             n_bands: 1,
             data_type: DataType::UShort,
             valid_masks: vec![BitMask::all_valid(9)],
-            data: crate::LercData::U16(pixels.clone()),
+            data: crate::SampleData::U16(pixels.clone()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1296,7 +1296,7 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::new(4)],
-            data: crate::LercData::U8(pixels),
+            data: crate::SampleData::U8(pixels),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1329,7 +1329,7 @@ mod tests {
             n_bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![mask.clone()],
-            data: crate::LercData::U8(pixels.clone()),
+            data: crate::SampleData::U8(pixels.clone()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1449,7 +1449,7 @@ mod tests {
             n_bands: 2,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(n), BitMask::all_valid(n)],
-            data: crate::LercData::U8(all_pixels.clone()),
+            data: crate::SampleData::U8(all_pixels.clone()),
             no_data_value: None,
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
@@ -1457,7 +1457,7 @@ mod tests {
         assert_eq!(decoded.n_bands, 2);
         assert_eq!(decoded.valid_masks.len(), 2);
         match decoded.data {
-            crate::LercData::U8(v) => assert_eq!(v, all_pixels),
+            crate::SampleData::U8(v) => assert_eq!(v, all_pixels),
             _ => panic!("expected U8 data"),
         }
     }
@@ -1621,7 +1621,7 @@ mod tests {
         assert_eq!(decoded.width, 3);
         assert_eq!(decoded.height, 2);
         match decoded.data {
-            crate::LercData::U8(v) => assert_eq!(v, pixels),
+            crate::SampleData::U8(v) => assert_eq!(v, pixels),
             _ => panic!("expected U8 data"),
         }
     }

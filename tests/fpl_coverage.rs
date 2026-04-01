@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 
 // ---------------------------------------------------------------------------
 // Helper: verify that FPL encoding was used (IEM_DeltaDeltaHuffman = 3)
@@ -414,7 +414,7 @@ fn fpl_f32_multi_depth() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((w * h) as usize)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         no_data_value: None,
     };
 
@@ -563,7 +563,7 @@ fn fpl_f64_multi_depth() {
         n_bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((w * h) as usize)],
-        data: LercData::F64(pixels.clone()),
+        data: SampleData::F64(pixels.clone()),
         no_data_value: None,
     };
 

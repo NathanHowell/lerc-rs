@@ -4,7 +4,7 @@ use crate::bitmask::BitMask;
 use crate::bitstuffer;
 use crate::error::{LercError, Result};
 use crate::header::HeaderInfo;
-use crate::types::{DataType, LercDataType, TileCompressionMode, TileRect, tile_flags};
+use crate::types::{DataType, Sample, TileCompressionMode, TileRect, tile_flags};
 
 /// A depth-slice identifier: the depth index plus the z_max for that depth.
 struct DepthSlice {
@@ -106,7 +106,7 @@ fn get_data_type_used(dt: DataType, tc: i32) -> Option<DataType> {
 }
 
 /// Reduce a data type for storing the offset value more compactly.
-pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType, i32) {
+pub(crate) fn reduce_data_type<T: Sample>(z: T, dt: DataType) -> (DataType, i32) {
     let zf = z.to_f64();
     match dt {
         DataType::Short => {
@@ -235,7 +235,7 @@ pub(crate) fn reduce_data_type<T: LercDataType>(z: T, dt: DataType) -> (DataType
 }
 
 /// Decode all tiles for a typed data array.
-pub(crate) fn read_tiles<T: LercDataType>(
+pub(crate) fn read_tiles<T: Sample>(
     data_buf: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
@@ -279,7 +279,7 @@ pub(crate) fn read_tiles<T: LercDataType>(
     Ok(())
 }
 
-fn read_tile<T: LercDataType>(
+fn read_tile<T: Sample>(
     data: &[u8],
     pos: &mut usize,
     header: &HeaderInfo,
@@ -499,14 +499,14 @@ fn read_tile<T: LercDataType>(
 }
 
 /// Read a typed value from LE bytes, returning as f64.
-pub(crate) fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -> f64 {
+pub(crate) fn read_typed_as_f64<T: Sample>(data: &[u8], pos: &mut usize) -> f64 {
     let v = T::from_le_slice(&data[*pos..]);
     *pos += T::BYTES;
     v.to_f64()
 }
 
 /// Read a typed value from LE bytes, returning as T.
-pub(crate) fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) -> T {
+pub(crate) fn read_typed_value<T: Sample>(data: &[u8], pos: &mut usize) -> T {
     let v = T::from_le_slice(&data[*pos..]);
     *pos += T::BYTES;
     v

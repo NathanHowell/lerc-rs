@@ -3,7 +3,7 @@
 
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 use lerc_cpp_ref::{
     self as cpp, DT_CHAR, DT_DOUBLE, DT_FLOAT, DT_INT, DT_SHORT, DT_UCHAR, DT_UINT, DT_USHORT,
     INFO_DATA_TYPE, INFO_N_BANDS, INFO_N_COLS, INFO_N_ROWS, RANGE_MAX_Z_ERR_USED,
@@ -566,7 +566,7 @@ fn rust_encode_cpp_decode_multiband_f32() {
         n_bands,
         data_type: DataType::Float,
         valid_masks: masks,
-        data: LercData::F32(data.clone()),
+        data: SampleData::F32(data.clone()),
         no_data_value: None,
     };
 
@@ -897,7 +897,7 @@ fn rust_encode_cpp_decode_multi_depth_f32_lossy() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
-        data: LercData::F32(data.clone()),
+        data: SampleData::F32(data.clone()),
         no_data_value: None,
     };
 
@@ -982,7 +982,7 @@ fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
-        data: LercData::F32(data.clone()),
+        data: SampleData::F32(data.clone()),
         no_data_value: None,
     };
 

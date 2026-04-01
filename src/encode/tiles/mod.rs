@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use crate::bitmask::BitMask;
 use crate::error::Result;
 use crate::header::HeaderInfo;
-use crate::types::{DataType, LercDataType};
+use crate::types::{DataType, Sample};
 
 use inner::{TileInnerParams, encode_tile_inner};
 use u8_fast::{encode_tile_to_count, encode_tiles_u8_fast, select_block_size_u8_fast};
@@ -50,7 +50,7 @@ fn sample_tile_positions(
 /// Try encoding a sample of tiles at both block sizes 8 and 16, return whichever
 /// produces smaller output. Instead of encoding ALL tiles twice, we sample a
 /// small number of representative tiles to make the decision.
-pub(super) fn select_block_size<T: LercDataType>(
+pub(super) fn select_block_size<T: Sample>(
     data: &[T],
     mask: &BitMask,
     hd: &HeaderInfo,
@@ -182,7 +182,7 @@ struct TileEncodeContext<'a, T> {
     z_max_vec: &'a [f64],
 }
 
-pub(super) fn encode_tiles<T: LercDataType>(
+pub(super) fn encode_tiles<T: Sample>(
     blob: &mut Vec<u8>,
     data: &[T],
     mask: &BitMask,
@@ -275,7 +275,7 @@ pub(super) fn encode_tiles<T: LercDataType>(
 /// Diffs are computed against these reconstructed values instead of the original
 /// data. After encoding, the buffer is updated with this depth slice's
 /// reconstructed values so it is ready for the next depth.
-fn encode_tile<T: LercDataType>(
+fn encode_tile<T: Sample>(
     blob: &mut Vec<u8>,
     ctx: &TileEncodeContext<'_, T>,
     rect: crate::types::TileRect,

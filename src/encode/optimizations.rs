@@ -2,7 +2,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::bitmask::BitMask;
-use crate::types::{DataType, LercDataType};
+use crate::types::{DataType, Sample};
 
 /// Try to raise `max_z_error` for float data without introducing additional loss.
 ///
@@ -11,7 +11,7 @@ use crate::types::{DataType, LercDataType};
 /// inherent rounding error is already bounded by the original maxZError.
 ///
 /// This mirrors the C++ `Lerc2::TryRaiseMaxZError` algorithm.
-pub(super) fn try_raise_max_z_error<T: LercDataType>(
+pub(super) fn try_raise_max_z_error<T: Sample>(
     data: &[T],
     mask: &BitMask,
     width: usize,
@@ -175,7 +175,7 @@ fn add_int_to_counts(counts: &mut [i32], mut val: i32, n_bits: usize) {
 /// neighboring pixels to find bit planes that look like random noise (1-bit
 /// frequency close to 0.5). Returns `Some(new_max_z_error)` if noisy bit planes
 /// were found, or `None` if the data doesn't qualify.
-pub(super) fn try_bit_plane_compression<T: LercDataType>(
+pub(super) fn try_bit_plane_compression<T: Sample>(
     data: &[T],
     valid_masks: &[BitMask],
     width: usize,
@@ -345,10 +345,7 @@ pub(super) fn try_bit_plane_compression<T: LercDataType>(
 
 /// Compute an internal noData sentinel value that lies below the valid data range.
 /// This mirrors the C++ approach of picking a value below `zMin - 2 * maxZError`.
-pub(super) fn compute_no_data_sentinel<T: LercDataType>(
-    min_val: f64,
-    max_z_error: f64,
-) -> Option<f64> {
+pub(super) fn compute_no_data_sentinel<T: Sample>(min_val: f64, max_z_error: f64) -> Option<f64> {
     let is_int = T::is_integer();
 
     if is_int {

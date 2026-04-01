@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercData, LercImage};
+use lerc::{DataType, LercImage, SampleData};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -24,7 +24,7 @@ fn main() {
         n_bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::F32(pixels.clone()),
+        data: SampleData::F32(pixels.clone()),
         ..Default::default()
     };
 
@@ -38,7 +38,7 @@ fn main() {
         n_bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(size * size)],
-        data: LercData::U8(u8_pixels),
+        data: SampleData::U8(u8_pixels),
         ..Default::default()
     };
 

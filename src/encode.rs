@@ -669,40 +669,29 @@ fn encode_one_band<T: LercDataType>(
     let n_depth = image.n_depth as usize;
     let num_valid = mask.count_valid().min(width * height);
 
-    // Compute per-depth min/max
-    let mut z_min_vec = vec![f64::MAX; n_depth];
-    let mut z_max_vec = vec![f64::MIN; n_depth];
-    let mut overall_min = f64::MAX;
-    let mut overall_max = f64::MIN;
-
-    let all_valid = num_valid == width * height;
-    if all_valid && n_depth == 1 {
-        // Fast path: single depth, all valid — scan without mask checks or depth loops
-        for &val in data.iter() {
-            let v = val.to_f64();
-            if v < overall_min { overall_min = v; }
-            if v > overall_max { overall_max = v; }
-        }
-        z_min_vec[0] = overall_min;
-        z_max_vec[0] = overall_max;
-    } else {
-        for i in 0..height {
-            for j in 0..width {
-                let k = i * width + j;
-                if mask.is_valid(k) {
-                    for m in 0..n_depth {
-                        let val = data[k * n_depth + m].to_f64();
-                        if val < z_min_vec[m] {
-                            z_min_vec[m] = val;
-                        }
-                        if val > z_max_vec[m] {
-                            z_max_vec[m] = val;
-                        }
-                        if val < overall_min {
-                            overall_min = val;
-                        }
-                        if val > overall_max {
-                            overall_max = val;
+    // Iterate over all valid pixel values, calling a visitor for each.
+    // This is the single traversal pattern used for statistics gathering.
+    #[inline(always)]
+    fn for_each_valid_pixel<T: LercDataType>(
+        data: &[T],
+        mask: &BitMask,
+        width: usize,
+        height: usize,
+        n_depth: usize,
+        mut f: impl FnMut(usize, usize, f64), // (pixel_k, depth_m, value)
+    ) {
+        let all_valid = mask.count_valid() >= width * height;
+        if all_valid && n_depth == 1 {
+            for (k, val) in data.iter().enumerate() {
+                f(k, 0, val.to_f64());
+            }
+        } else {
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    if all_valid || mask.is_valid(k) {
+                        for m in 0..n_depth {
+                            f(k, m, data[k * n_depth + m].to_f64());
                         }
                     }
                 }
@@ -710,15 +699,74 @@ fn encode_one_band<T: LercDataType>(
         }
     }
 
+    // Determine NoData value (if any) for filtering during the scan.
+    let nd_f64 = image
+        .no_data_value
+        .filter(|_| n_depth > 1)
+        .map(|nd| T::from_f64(nd).to_f64());
+
+    // Single pass: compute min/max stats, valid-only min (excluding NoData),
+    // and detect mixed NoData pixels — all in one traversal.
+    let mut z_min_vec = vec![f64::MAX; n_depth];
+    let mut z_max_vec = vec![f64::MIN; n_depth];
+    let mut overall_min = f64::MAX;
+    let mut overall_max = f64::MIN;
+    let mut valid_min = f64::MAX; // min excluding NoData values
+    let mut needs_no_data = false;
+    let mut prev_k = usize::MAX;
+    let mut nd_count_at_pixel = 0usize;
+    let mut depth_count_at_pixel = 0usize;
+
+    for_each_valid_pixel(data, mask, width, height, n_depth, |k, m, val| {
+        // Track min/max (all values including NoData)
+        if val < z_min_vec[m] { z_min_vec[m] = val; }
+        if val > z_max_vec[m] { z_max_vec[m] = val; }
+        if val < overall_min { overall_min = val; }
+        if val > overall_max { overall_max = val; }
+
+        // Track valid-only min and mixed NoData detection
+        if let Some(nd) = nd_f64 {
+            // Reset per-pixel counters when we move to a new pixel
+            if k != prev_k {
+                // Check previous pixel for mixed NoData
+                if prev_k != usize::MAX
+                    && nd_count_at_pixel > 0
+                    && nd_count_at_pixel < depth_count_at_pixel
+                {
+                    needs_no_data = true;
+                }
+                prev_k = k;
+                nd_count_at_pixel = 0;
+                depth_count_at_pixel = 0;
+            }
+            depth_count_at_pixel += 1;
+            if val == nd {
+                nd_count_at_pixel += 1;
+            } else if val < valid_min {
+                valid_min = val;
+            }
+        }
+    });
+
+    // Check the last pixel for mixed NoData
+    if nd_f64.is_some()
+        && prev_k != usize::MAX
+        && nd_count_at_pixel > 0
+        && nd_count_at_pixel < depth_count_at_pixel
+    {
+        needs_no_data = true;
+    }
+
     if num_valid == 0 {
         overall_min = 0.0;
         overall_max = 0.0;
     }
 
+    if valid_min == f64::MAX {
+        valid_min = overall_min;
+    }
+
     // Handle NoData values for nDepth > 1.
-    // When the user specifies a no_data_value and nDepth > 1, we need to check
-    // if any valid pixels have the nodata value at some (but not all) depth slices.
-    // If so, we compute an internal sentinel below the valid range and remap.
     let mut pass_no_data = false;
     let mut no_data_val_internal = 0.0;
     let mut no_data_val_orig = 0.0;
@@ -727,55 +775,11 @@ fn encode_one_band<T: LercDataType>(
     if let Some(nd_orig) = image.no_data_value
         && n_depth > 1
         && num_valid > 0
+        && nd_f64.is_some()
     {
-        let nd_t = T::from_f64(nd_orig);
-        let nd_f64 = nd_t.to_f64();
-
-        // Check if any valid pixel has nodata at some but not all depths
-        let mut needs_no_data = false;
-        for i in 0..height {
-            for j in 0..width {
-                let k = i * width + j;
-                if mask.is_valid(k) {
-                    let base = k * n_depth;
-                    let mut cnt_nd = 0;
-                    for m in 0..n_depth {
-                        if data[base + m].to_f64() == nd_f64 {
-                            cnt_nd += 1;
-                        }
-                    }
-                    // Mixed: some depths are nodata, some are valid
-                    if cnt_nd > 0 && cnt_nd < n_depth {
-                        needs_no_data = true;
-                        break;
-                    }
-                }
-            }
-            if needs_no_data {
-                break;
-            }
-        }
+        let nd_f64_val = nd_f64.unwrap();
 
         if needs_no_data {
-            // Compute min excluding NoData values for sentinel range
-            let mut valid_min = f64::MAX;
-            for i in 0..height {
-                for j in 0..width {
-                    let k = i * width + j;
-                    if mask.is_valid(k) {
-                        let base = k * n_depth;
-                        for m in 0..n_depth {
-                            let val = data[base + m].to_f64();
-                            if val != nd_f64 && val < valid_min {
-                                valid_min = val;
-                            }
-                        }
-                    }
-                }
-            }
-            if valid_min == f64::MAX {
-                valid_min = overall_min;
-            }
 
             // Compute an internal sentinel below the valid (non-NoData) range
             let sentinel = compute_no_data_sentinel::<T>(valid_min, max_z_error)
@@ -783,34 +787,34 @@ fn encode_one_band<T: LercDataType>(
                     "cannot find a NoData sentinel value below the valid data range for this type".into(),
                 ))?;
             pass_no_data = true;
-                no_data_val_orig = nd_orig;
+            no_data_val_orig = nd_orig;
 
-                if sentinel != nd_f64 {
-                    no_data_val_internal = sentinel;
-                    // Remap: replace original nodata with sentinel in a copy
-                    let mut buf = data.to_vec();
-                    for i in 0..height {
-                        for j in 0..width {
-                            let k = i * width + j;
-                            if mask.is_valid(k) {
-                                let base = k * n_depth;
-                                for m in 0..n_depth {
-                                    if buf[base + m].to_f64() == nd_f64 {
-                                        buf[base + m] = T::from_f64(sentinel);
-                                    }
+            if sentinel != nd_f64_val {
+                no_data_val_internal = sentinel;
+                // Remap: replace original nodata with sentinel in a copy
+                let mut buf = data.to_vec();
+                for i in 0..height {
+                    for j in 0..width {
+                        let k = i * width + j;
+                        if mask.is_valid(k) {
+                            let base = k * n_depth;
+                            for m in 0..n_depth {
+                                if buf[base + m].to_f64() == nd_f64_val {
+                                    buf[base + m] = T::from_f64(sentinel);
                                 }
                             }
                         }
                     }
-                    // Update min/max to include sentinel
-                    overall_min = overall_min.min(sentinel);
-                    for val in &mut z_min_vec[..n_depth] {
-                        *val = val.min(sentinel);
-                    }
-                    data_buf = Some(buf);
-                } else {
-                    no_data_val_internal = nd_orig;
                 }
+                // Update min/max to include sentinel
+                overall_min = overall_min.min(sentinel);
+                for val in &mut z_min_vec[..n_depth] {
+                    *val = val.min(sentinel);
+                }
+                data_buf = Some(buf);
+            } else {
+                no_data_val_internal = nd_orig;
+            }
         } else {
             // NoData value provided but not needed (all depths are either
             // all-nodata or all-valid). Still pass it through for info.

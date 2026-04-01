@@ -491,22 +491,14 @@ fn read_tile<T: LercDataType>(
 
 /// Read a typed value from LE bytes, returning as f64.
 pub(crate) fn read_typed_as_f64<T: LercDataType>(data: &[u8], pos: &mut usize) -> f64 {
-    let s = &data[*pos..];
+    let v = T::from_le_slice(&data[*pos..]);
     *pos += T::BYTES;
-
-    match T::DATA_TYPE {
-        DataType::Char => s[0] as i8 as f64,
-        DataType::Byte => s[0] as f64,
-        DataType::Short => i16::from_le_bytes([s[0], s[1]]) as f64,
-        DataType::UShort => u16::from_le_bytes([s[0], s[1]]) as f64,
-        DataType::Int => i32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
-        DataType::UInt => u32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
-        DataType::Float => f32::from_le_bytes([s[0], s[1], s[2], s[3]]) as f64,
-        DataType::Double => f64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]),
-    }
+    v.to_f64()
 }
 
 /// Read a typed value from LE bytes, returning as T.
 pub(crate) fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) -> T {
-    T::from_f64(read_typed_as_f64::<T>(data, pos))
+    let v = T::from_le_slice(&data[*pos..]);
+    *pos += T::BYTES;
+    v
 }

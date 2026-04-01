@@ -67,14 +67,17 @@ pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt
 
     /// Try to unwrap the pixel vector from a `LercData` if the variant matches.
     fn try_from_lerc_data(data: super::LercData) -> core::result::Result<alloc::vec::Vec<Self>, super::LercData>;
+
+    /// Read a value from a little-endian byte slice. The slice must be at least `BYTES` long.
+    fn from_le_slice(s: &[u8]) -> Self;
 }
 
 macro_rules! impl_lerc_data_type {
-    ($ty:ty, $dt:expr, $is_int:expr, $variant:ident) => {
+    ($ty:ty, $dt:expr, $is_int:expr, $variant:ident, $n:literal) => {
         impl sealed::Sealed for $ty {}
         impl LercDataType for $ty {
             const DATA_TYPE: DataType = $dt;
-            const BYTES: usize = core::mem::size_of::<$ty>();
+            const BYTES: usize = $n;
 
             #[inline]
             fn to_f64(self) -> f64 {
@@ -118,16 +121,24 @@ macro_rules! impl_lerc_data_type {
                     other => Err(other),
                 }
             }
+
+            #[inline]
+            fn from_le_slice(s: &[u8]) -> Self {
+                let mut buf = [0u8; $n];
+                buf.copy_from_slice(&s[..$n]);
+                <$ty>::from_le_bytes(buf)
+            }
         }
     };
 }
 
-impl_lerc_data_type!(i8, DataType::Char, true, I8);
-impl_lerc_data_type!(u8, DataType::Byte, true, U8);
-impl_lerc_data_type!(i16, DataType::Short, true, I16);
-impl_lerc_data_type!(u16, DataType::UShort, true, U16);
-impl_lerc_data_type!(i32, DataType::Int, true, I32);
-impl_lerc_data_type!(u32, DataType::UInt, true, U32);
+impl_lerc_data_type!(i8, DataType::Char, true, I8, 1);
+impl_lerc_data_type!(u8, DataType::Byte, true, U8, 1);
+impl_lerc_data_type!(i16, DataType::Short, true, I16, 2);
+impl_lerc_data_type!(u16, DataType::UShort, true, U16, 2);
+impl_lerc_data_type!(i32, DataType::Int, true, I32, 4);
+impl_lerc_data_type!(u32, DataType::UInt, true, U32, 4);
+
 
 impl sealed::Sealed for f32 {}
 impl LercDataType for f32 {
@@ -175,6 +186,11 @@ impl LercDataType for f32 {
             super::LercData::F32(v) => Ok(v),
             other => Err(other),
         }
+    }
+
+    #[inline]
+    fn from_le_slice(s: &[u8]) -> Self {
+        Self::from_bits(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
     }
 }
 
@@ -224,6 +240,11 @@ impl LercDataType for f64 {
             super::LercData::F64(v) => Ok(v),
             other => Err(other),
         }
+    }
+
+    #[inline]
+    fn from_le_slice(s: &[u8]) -> Self {
+        Self::from_bits(u64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]))
     }
 }
 

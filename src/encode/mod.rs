@@ -460,3 +460,201 @@ fn encode_one_band<T: LercDataType>(
     header::finalize_blob(&mut blob);
     Ok(blob)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- compute_band_stats ----
+
+    #[test]
+    fn band_stats_single_depth_all_valid() {
+        let width = 4;
+        let height = 3;
+        let data: Vec<f32> = vec![
+            1.0, 2.0, 3.0, 4.0,
+            5.0, 6.0, 7.0, 8.0,
+            9.0, 10.0, 11.0, 12.0,
+        ];
+        let mask = BitMask::all_valid(width * height);
+        let stats = compute_band_stats(&data, &mask, width, height, 1, width * height, None);
+        assert_eq!(stats.overall_min, 1.0);
+        assert_eq!(stats.overall_max, 12.0);
+        assert_eq!(stats.z_min_vec[0], 1.0);
+        assert_eq!(stats.z_max_vec[0], 12.0);
+        assert!(!stats.needs_no_data);
+    }
+
+    #[test]
+    fn band_stats_multi_depth() {
+        // 2x2 image, 2 depths: [pixel0_d0, pixel0_d1, pixel1_d0, pixel1_d1, ...]
+        let width = 2;
+        let height = 2;
+        let n_depth = 2;
+        let data: Vec<f32> = vec![
+            1.0, 100.0,  // pixel (0,0): depth0=1, depth1=100
+            2.0, 200.0,  // pixel (1,0): depth0=2, depth1=200
+            3.0, 50.0,   // pixel (0,1): depth0=3, depth1=50
+            4.0, 150.0,  // pixel (1,1): depth0=4, depth1=150
+        ];
+        let mask = BitMask::all_valid(width * height);
+        let stats = compute_band_stats(&data, &mask, width, height, n_depth, width * height, None);
+        // depth 0: min=1, max=4
+        assert_eq!(stats.z_min_vec[0], 1.0);
+        assert_eq!(stats.z_max_vec[0], 4.0);
+        // depth 1: min=50, max=200
+        assert_eq!(stats.z_min_vec[1], 50.0);
+        assert_eq!(stats.z_max_vec[1], 200.0);
+        // overall
+        assert_eq!(stats.overall_min, 1.0);
+        assert_eq!(stats.overall_max, 200.0);
+    }
+
+    #[test]
+    fn band_stats_with_nodata() {
+        // 3x1 image, 2 depths, NoData = -9999.0
+        // pixel 0: [5.0, -9999.0] — mixed NoData across depths
+        // pixel 1: [10.0, 20.0]   — all valid
+        // pixel 2: [15.0, 25.0]   — all valid
+        let width = 3;
+        let height = 1;
+        let n_depth = 2;
+        let nd = -9999.0_f64;
+        let data: Vec<f64> = vec![
+            5.0, nd,
+            10.0, 20.0,
+            15.0, 25.0,
+        ];
+        let mask = BitMask::all_valid(width * height);
+        let stats = compute_band_stats(&data, &mask, width, height, n_depth, width * height, Some(nd));
+        assert!(stats.needs_no_data, "mixed NoData across depths should set needs_no_data");
+        // valid_min should exclude the NoData value
+        assert!(stats.valid_min > nd, "valid_min should exclude NoData");
+        assert_eq!(stats.valid_min, 5.0);
+    }
+
+    #[test]
+    fn band_stats_all_invalid() {
+        let width = 3;
+        let height = 2;
+        let data: Vec<f32> = vec![1.0; width * height];
+        let mask = BitMask::new(width * height); // all invalid
+        let stats = compute_band_stats(&data, &mask, width, height, 1, 0, None);
+        // When num_valid=0, defaults apply
+        assert_eq!(stats.overall_min, 0.0);
+        assert_eq!(stats.overall_max, 0.0);
+    }
+
+    #[test]
+    fn band_stats_with_mask() {
+        // 4x1 image, only pixels 1 and 2 valid
+        let width = 4;
+        let height = 1;
+        let data: Vec<f32> = vec![100.0, 5.0, 10.0, 200.0];
+        let mut mask = BitMask::new(width * height);
+        mask.set_valid(1);
+        mask.set_valid(2);
+        let stats = compute_band_stats(&data, &mask, width, height, 1, 2, None);
+        assert_eq!(stats.overall_min, 5.0);
+        assert_eq!(stats.overall_max, 10.0);
+    }
+
+    // ---- for_each_valid_pixel ----
+
+    #[test]
+    fn for_each_all_valid_single_depth() {
+        let width = 3;
+        let height = 2;
+        let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mask = BitMask::all_valid(width * height);
+        let mut count = 0usize;
+        let mut sum = 0.0f64;
+        for_each_valid_pixel(&data, &mask, width, height, 1, |_k, _m, val| {
+            count += 1;
+            sum += val;
+        });
+        assert_eq!(count, 6);
+        assert_eq!(sum, 21.0);
+    }
+
+    #[test]
+    fn for_each_with_mask() {
+        let width = 4;
+        let height = 1;
+        let data: Vec<f32> = vec![10.0, 20.0, 30.0, 40.0];
+        let mut mask = BitMask::new(width * height);
+        mask.set_valid(0);
+        mask.set_valid(2);
+        let mut count = 0usize;
+        for_each_valid_pixel(&data, &mask, width, height, 1, |_k, _m, _val| {
+            count += 1;
+        });
+        assert_eq!(count, 2, "only 2 valid pixels");
+    }
+
+    #[test]
+    fn for_each_multi_depth() {
+        // 2x1 image, 3 depths
+        let width = 2;
+        let height = 1;
+        let n_depth = 3;
+        let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mask = BitMask::all_valid(width * height);
+        let mut count = 0usize;
+        for_each_valid_pixel(&data, &mask, width, height, n_depth, |_k, _m, _val| {
+            count += 1;
+        });
+        assert_eq!(count, 6, "2 pixels * 3 depths = 6 visits");
+    }
+
+    #[test]
+    fn for_each_fast_and_general_paths_agree() {
+        // Test that the fast path (all_valid, n_depth=1) produces the same
+        // results as the general path by comparing against a masked version
+        // where all pixels are valid.
+        let width = 5;
+        let height = 4;
+        let data: Vec<f32> = (0..20).map(|i| i as f32 * 1.5).collect();
+        let mask_fast = BitMask::all_valid(width * height);
+
+        // General path: create a mask with all bits set manually
+        let mut mask_general = BitMask::new(width * height);
+        for k in 0..width * height {
+            mask_general.set_valid(k);
+        }
+
+        let mut vals_fast = Vec::new();
+        for_each_valid_pixel(&data, &mask_fast, width, height, 1, |k, m, val| {
+            vals_fast.push((k, m, val));
+        });
+
+        // For the general path, use n_depth=2 to force general path, then use n_depth=1 with mask
+        // Actually, to truly test both paths: fast path is all_valid && n_depth==1.
+        // General path triggered when n_depth > 1 or not all_valid.
+        // Use n_depth=1 with the manually-set mask (count_valid still equals width*height).
+        let mut vals_general = Vec::new();
+        for_each_valid_pixel(&data, &mask_general, width, height, 1, |k, m, val| {
+            vals_general.push((k, m, val));
+        });
+
+        assert_eq!(vals_fast, vals_general);
+    }
+
+    #[test]
+    fn for_each_multi_depth_with_mask() {
+        // 3x1 image, 2 depths, only pixel 1 valid
+        let width = 3;
+        let height = 1;
+        let n_depth = 2;
+        let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mut mask = BitMask::new(width * height);
+        mask.set_valid(1);
+        let mut visited = Vec::new();
+        for_each_valid_pixel(&data, &mask, width, height, n_depth, |k, m, val| {
+            visited.push((k, m, val));
+        });
+        assert_eq!(visited.len(), 2, "1 valid pixel * 2 depths = 2 visits");
+        assert_eq!(visited[0], (1, 0, 3.0)); // pixel 1, depth 0
+        assert_eq!(visited[1], (1, 1, 4.0)); // pixel 1, depth 1
+    }
+}

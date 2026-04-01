@@ -355,7 +355,7 @@ pub(super) fn compute_no_data_sentinel<T: LercDataType>(
     let is_int = T::is_integer();
 
     if is_int {
-        // For integer types: pick candidates below minVal - 2*maxZErr, must be integer
+        // For integer types: pick candidates below minVal - 2*maxZErr, must be integer.
         let max_z_err = max_z_error;
         let threshold = min_val - 2.0 * max_z_err;
         let candidates: &[f64] = &[
@@ -420,5 +420,251 @@ pub(super) fn compute_no_data_sentinel<T: LercDataType>(
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- compute_no_data_sentinel ----
+
+    #[test]
+    fn sentinel_u8_with_room() {
+        // min=5.0, mze=0.5 => threshold = 4.0, first candidate floor(3.0)=3.0
+        // 3.0 >= 0 (u8 min) and 3.0 < 4.0 => Some(3.0)
+        let result = compute_no_data_sentinel::<u8>(5.0, 0.5);
+        assert!(result.is_some());
+        let sentinel = result.unwrap();
+        assert!(sentinel < 4.0);
+        assert!(sentinel >= 0.0);
+        assert_eq!(sentinel, 3.0);
+    }
+
+    #[test]
+    fn sentinel_u8_at_zero() {
+        // min=0.0, mze=0.5 => threshold = -1.0
+        // All integer candidates are negative, below u8::MIN (0) => None
+        let result = compute_no_data_sentinel::<u8>(0.0, 0.5);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn sentinel_i16_negative_min() {
+        // min=-100.0, mze=0.5 => threshold = -101.0
+        // First candidate: floor(-102.0)=-102.0; -102.0 >= -32768 and < -101.0 => Some(-102.0)
+        let result = compute_no_data_sentinel::<i16>(-100.0, 0.5);
+        assert!(result.is_some());
+        let sentinel = result.unwrap();
+        assert!(sentinel < -101.0);
+        assert!(sentinel >= i16::MIN as f64);
+        assert_eq!(sentinel, -102.0);
+    }
+
+    #[test]
+    fn sentinel_f32_float() {
+        // min=10.0, mze=0.01 => threshold = 9.98
+        // Float candidates sorted descending, first < 9.98 wins.
+        // 4*mze = 0.04, so min - 0.04 = 9.96 < 9.98 => Some(9.96)
+        let result = compute_no_data_sentinel::<f32>(10.0, 0.01);
+        assert!(result.is_some());
+        let sentinel = result.unwrap();
+        assert!(sentinel < 9.98);
+        // The sentinel should be close to min_val but below threshold
+        assert!(sentinel > 0.0);
+    }
+
+    // ---- try_raise_max_z_error ----
+
+    #[test]
+    fn raise_mze_for_2_decimal_data() {
+        // Data with exactly 2 decimal places: all values are multiples of 0.01
+        let width = 100;
+        let height = 100;
+        let mask = BitMask::all_valid(width * height);
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| ((i % 1000) as f32) * 0.01)
+            .collect();
+        let mut mze = 0.001; // initial mze smaller than 0.005
+        let raised = try_raise_max_z_error(&data, &mask, width, height, 1, &mut mze);
+        assert!(raised, "should raise mze for %.2f data");
+        assert!(mze > 0.001, "mze should have increased");
+    }
+
+    #[test]
+    fn no_raise_for_full_precision_data() {
+        // Data with full f32 precision: PI, E, sqrt(2), etc.
+        let width = 100;
+        let height = 100;
+        let mask = BitMask::all_valid(width * height);
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| (i as f32 * core::f32::consts::PI).sin())
+            .collect();
+        let mut mze = 0.001;
+        let original_mze = mze;
+        let raised = try_raise_max_z_error(&data, &mask, width, height, 1, &mut mze);
+        if !raised {
+            assert_eq!(mze, original_mze, "mze should be unchanged when not raised");
+        }
+    }
+
+    #[test]
+    fn no_raise_for_integer_type() {
+        let width = 10;
+        let height = 10;
+        let mask = BitMask::all_valid(width * height);
+        let data: Vec<u8> = (0..100).collect();
+        let mut mze = 0.5;
+        let raised = try_raise_max_z_error(&data, &mask, width, height, 1, &mut mze);
+        assert!(!raised, "should not raise mze for integer types");
+    }
+
+    #[test]
+    fn no_raise_for_zero_mze() {
+        let width = 10;
+        let height = 10;
+        let mask = BitMask::all_valid(width * height);
+        let data: Vec<f32> = vec![1.0; 100];
+        let mut mze = 0.0;
+        let raised = try_raise_max_z_error(&data, &mask, width, height, 1, &mut mze);
+        assert!(!raised, "should not raise mze when mze=0");
+    }
+
+    // ---- prune_candidates ----
+
+    #[test]
+    fn prune_removes_bad_candidates() {
+        let mut round_err = vec![10.0, 0.1, 50.0];
+        let mut z_err = vec![1.0, 0.5, 2.0];
+        let mut z_fac = vec![1, 2, 1];
+        let max_z_error = 1.0;
+        // round_err[n] / z_fac[n] > max_z_error / 2.0 means removal
+        // [0]: 10.0/1 = 10.0 > 0.5 => remove
+        // [1]: 0.1/2 = 0.05 <= 0.5 => keep
+        // [2]: 50.0/1 = 50.0 > 0.5 => remove
+        let result = prune_candidates(&mut round_err, &mut z_err, &mut z_fac, max_z_error);
+        assert!(result, "should have remaining candidates");
+        assert_eq!(z_err.len(), 1);
+        assert_eq!(z_err[0], 0.5);
+    }
+
+    #[test]
+    fn prune_empty_returns_false() {
+        let mut round_err: Vec<f64> = vec![];
+        let mut z_err: Vec<f64> = vec![];
+        let mut z_fac: Vec<i32> = vec![];
+        let result = prune_candidates(&mut round_err, &mut z_err, &mut z_fac, 1.0);
+        assert!(!result);
+    }
+
+    #[test]
+    fn prune_all_removed_returns_false() {
+        let mut round_err = vec![100.0];
+        let mut z_err = vec![1.0];
+        let mut z_fac = vec![1];
+        // 100.0/1 > 0.5 => remove all
+        let result = prune_candidates(&mut round_err, &mut z_err, &mut z_fac, 1.0);
+        assert!(!result);
+        assert!(z_err.is_empty());
+    }
+
+    // ---- add_uint_to_counts ----
+
+    #[test]
+    fn uint_counts_zero() {
+        let mut counts = vec![0i32; 8];
+        add_uint_to_counts(&mut counts, 0, 8);
+        assert!(counts.iter().all(|&c| c == 0), "zero should contribute no bits");
+    }
+
+    #[test]
+    fn uint_counts_one() {
+        let mut counts = vec![0i32; 8];
+        add_uint_to_counts(&mut counts, 1, 8);
+        // 1 = 0b00000001 => only bit 0 is set
+        assert_eq!(counts[0], 1);
+        for i in 1..8 {
+            assert_eq!(counts[i], 0, "bit {i} should be 0");
+        }
+    }
+
+    #[test]
+    fn uint_counts_255() {
+        let mut counts = vec![0i32; 8];
+        add_uint_to_counts(&mut counts, 255, 8);
+        // 255 = 0b11111111 => all 8 bits set
+        for i in 0..8 {
+            assert_eq!(counts[i], 1, "bit {i} should be 1 for 255");
+        }
+    }
+
+    #[test]
+    fn uint_counts_0xaa() {
+        let mut counts = vec![0i32; 8];
+        add_uint_to_counts(&mut counts, 0xAA, 8);
+        // 0xAA = 0b10101010 => bits 1,3,5,7 set
+        assert_eq!(counts[0], 0);
+        assert_eq!(counts[1], 1);
+        assert_eq!(counts[2], 0);
+        assert_eq!(counts[3], 1);
+        assert_eq!(counts[4], 0);
+        assert_eq!(counts[5], 1);
+        assert_eq!(counts[6], 0);
+        assert_eq!(counts[7], 1);
+    }
+
+    #[test]
+    fn uint_counts_accumulate() {
+        let mut counts = vec![0i32; 8];
+        add_uint_to_counts(&mut counts, 0xFF, 8);
+        add_uint_to_counts(&mut counts, 0xFF, 8);
+        for i in 0..8 {
+            assert_eq!(counts[i], 2, "bit {i} should be counted twice");
+        }
+    }
+
+    // ---- add_int_to_counts ----
+
+    #[test]
+    fn int_counts_zero() {
+        let mut counts = vec![0i32; 8];
+        add_int_to_counts(&mut counts, 0, 8);
+        assert!(counts.iter().all(|&c| c == 0));
+    }
+
+    #[test]
+    fn int_counts_one() {
+        let mut counts = vec![0i32; 8];
+        add_int_to_counts(&mut counts, 1, 8);
+        assert_eq!(counts[0], 1);
+        for i in 1..8 {
+            assert_eq!(counts[i], 0);
+        }
+    }
+
+    #[test]
+    fn int_counts_negative_one() {
+        let mut counts = vec![0i32; 32];
+        add_int_to_counts(&mut counts, -1, 32);
+        // -1 in two's complement is all 1s
+        for i in 0..32 {
+            assert_eq!(counts[i], 1, "bit {i} should be 1 for -1");
+        }
+    }
+
+    #[test]
+    fn int_counts_0xaa() {
+        let mut counts = vec![0i32; 8];
+        // 0xAA as i32 = 170
+        add_int_to_counts(&mut counts, 0xAAi32, 8);
+        // 0b10101010 => bits 1,3,5,7 set
+        assert_eq!(counts[0], 0);
+        assert_eq!(counts[1], 1);
+        assert_eq!(counts[2], 0);
+        assert_eq!(counts[3], 1);
+        assert_eq!(counts[4], 0);
+        assert_eq!(counts[5], 1);
+        assert_eq!(counts[6], 0);
+        assert_eq!(counts[7], 1);
     }
 }

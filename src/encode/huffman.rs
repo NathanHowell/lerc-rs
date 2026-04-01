@@ -400,3 +400,122 @@ pub(super) fn try_encode_huffman_int<T: LercDataType>(
     buf.extend_from_slice(&encoded);
     Some(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to build a HeaderInfo for u8 data (DataType::Byte).
+    fn make_header_byte(width: usize, height: usize, n_depth: usize, num_valid: usize) -> HeaderInfo {
+        HeaderInfo {
+            version: 6,
+            n_rows: height as i32,
+            n_cols: width as i32,
+            n_depth: n_depth as i32,
+            num_valid_pixel: num_valid as i32,
+            data_type: DataType::Byte,
+            ..HeaderInfo::default()
+        }
+    }
+
+    // ---- is_high_entropy_u8 ----
+
+    #[test]
+    fn high_entropy_uniform_data() {
+        // Create pseudo-random data where all 256 byte values are roughly uniform
+        // and deltas are also high entropy (many distinct delta values).
+        // Use a simple LCG to generate pseudo-random bytes.
+        let width = 256;
+        let height = 256;
+        let n = width * height;
+        let mut data = Vec::with_capacity(n);
+        let mut state: u32 = 12345;
+        for _ in 0..n {
+            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            data.push((state >> 16) as u8);
+        }
+        let mask = BitMask::all_valid(n);
+        let header = make_header_byte(width, height, 1, n);
+        assert!(is_high_entropy_u8(&data, &mask, &header));
+    }
+
+    #[test]
+    fn low_entropy_constant_data() {
+        // All same value => 1 distinct value, not high entropy
+        let width = 32;
+        let height = 32;
+        let n = width * height;
+        let data = vec![42u8; n];
+        let mask = BitMask::all_valid(n);
+        let header = make_header_byte(width, height, 1, n);
+        assert!(!is_high_entropy_u8(&data, &mask, &header));
+    }
+
+    #[test]
+    fn low_entropy_constant_stride() {
+        // Data with a constant stride: (i*7)%256 — direct histogram is uniform
+        // but delta is highly compressible (constant delta of 7).
+        // This should return false because delta-Huffman can compress it.
+        let width = 128;
+        let height = 128;
+        let n = width * height;
+        let data: Vec<u8> = (0..n).map(|i| ((i * 7) % 256) as u8).collect();
+        let mask = BitMask::all_valid(n);
+        let header = make_header_byte(width, height, 1, n);
+        // The delta histogram should be concentrated (mostly value 7),
+        // so is_high_entropy_u8 should return false.
+        assert!(!is_high_entropy_u8(&data, &mask, &header));
+    }
+
+    // ---- compute_histo_for_huffman ----
+
+    #[test]
+    fn direct_histo_known_data() {
+        // 4x1 image with known byte values
+        let width = 4;
+        let height = 1;
+        let data: Vec<u8> = vec![0, 1, 1, 2];
+        let mask = BitMask::all_valid(width * height);
+        let header = make_header_byte(width, height, 1, width * height);
+        let (histo, _delta_histo) = compute_histo_for_huffman(&data, &mask, &header);
+        assert_eq!(histo[0], 1); // one 0
+        assert_eq!(histo[1], 2); // two 1s
+        assert_eq!(histo[2], 1); // one 2
+        // All other bins should be 0
+        let sum: i32 = histo.iter().sum();
+        assert_eq!(sum, 4);
+    }
+
+    #[test]
+    fn delta_histo_constant_stride() {
+        // Constant-stride data: 0, 3, 6, 9, 12, ...
+        // Delta should be mostly 3 (except the first pixel of each row).
+        let width = 8;
+        let height = 4;
+        let n = width * height;
+        let data: Vec<u8> = (0..n).map(|i| ((i * 3) % 256) as u8).collect();
+        let mask = BitMask::all_valid(n);
+        let header = make_header_byte(width, height, 1, n);
+        let (_histo, delta_histo) = compute_histo_for_huffman(&data, &mask, &header);
+        // The delta value 3 should be the most common entry in delta_histo.
+        let max_bin = delta_histo.iter().enumerate().max_by_key(|(_i, c)| *c).unwrap().0;
+        assert_eq!(max_bin, 3, "delta of 3 should be most frequent");
+    }
+
+    #[test]
+    fn histo_with_mask() {
+        // 4x1 image, only first 2 pixels valid
+        let width = 4;
+        let height = 1;
+        let data: Vec<u8> = vec![10, 20, 30, 40];
+        let mut mask = BitMask::new(width * height);
+        mask.set_valid(0);
+        mask.set_valid(1);
+        let header = make_header_byte(width, height, 1, 2);
+        let (histo, _) = compute_histo_for_huffman(&data, &mask, &header);
+        let sum: i32 = histo.iter().sum();
+        assert_eq!(sum, 2, "only 2 valid pixels should be counted");
+        assert_eq!(histo[10], 1);
+        assert_eq!(histo[20], 1);
+    }
+}

@@ -70,6 +70,12 @@ pub trait LercDataType: sealed::Sealed + Copy + PartialOrd + Default + core::fmt
 
     /// Read a value from a little-endian byte slice. The slice must be at least `BYTES` long.
     fn from_le_slice(s: &[u8]) -> Self;
+
+    /// Write this value as little-endian bytes to a Vec.
+    fn extend_le_bytes(self, buf: &mut alloc::vec::Vec<u8>);
+
+    /// The minimum representable value for this type as f64.
+    fn min_representable() -> f64;
 }
 
 macro_rules! impl_lerc_data_type {
@@ -127,6 +133,16 @@ macro_rules! impl_lerc_data_type {
                 let mut buf = [0u8; $n];
                 buf.copy_from_slice(&s[..$n]);
                 <$ty>::from_le_bytes(buf)
+            }
+
+            #[inline]
+            fn extend_le_bytes(self, buf: &mut alloc::vec::Vec<u8>) {
+                buf.extend_from_slice(&self.to_le_bytes());
+            }
+
+            #[inline]
+            fn min_representable() -> f64 {
+                <$ty>::MIN as f64
             }
         }
     };
@@ -192,6 +208,16 @@ impl LercDataType for f32 {
     fn from_le_slice(s: &[u8]) -> Self {
         Self::from_bits(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
     }
+
+    #[inline]
+    fn extend_le_bytes(self, buf: &mut alloc::vec::Vec<u8>) {
+        buf.extend_from_slice(&self.to_le_bytes());
+    }
+
+    #[inline]
+    fn min_representable() -> f64 {
+        f64::MIN
+    }
 }
 
 impl sealed::Sealed for f64 {}
@@ -245,6 +271,16 @@ impl LercDataType for f64 {
     #[inline]
     fn from_le_slice(s: &[u8]) -> Self {
         Self::from_bits(u64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]))
+    }
+
+    #[inline]
+    fn extend_le_bytes(self, buf: &mut alloc::vec::Vec<u8>) {
+        buf.extend_from_slice(&self.to_le_bytes());
+    }
+
+    #[inline]
+    fn min_representable() -> f64 {
+        f64::MIN
     }
 }
 

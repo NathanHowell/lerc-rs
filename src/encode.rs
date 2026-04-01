@@ -473,16 +473,7 @@ fn compute_no_data_sentinel<T: LercDataType>(
             threshold - 1000.0,
         ];
 
-        // low int limit depends on type size
-        let low_limit = match T::DATA_TYPE {
-            DataType::Char => i8::MIN as f64,
-            DataType::Byte => u8::MIN as f64,
-            DataType::Short => i16::MIN as f64,
-            DataType::UShort => u16::MIN as f64,
-            DataType::Int => i32::MIN as f64,
-            DataType::UInt => u32::MIN as f64,
-            _ => f64::MIN,
-        };
+        let low_limit = T::min_representable();
 
         for &c in candidates {
             let c = c.floor();
@@ -2284,22 +2275,5 @@ fn write_typed_value<T: LercDataType>(blob: &mut Vec<u8>, val: f64) {
 }
 
 fn write_typed_value_raw<T: LercDataType>(blob: &mut Vec<u8>, val: T) {
-    match T::DATA_TYPE {
-        DataType::Char => blob.push(T::from_f64(val.to_f64()).to_f64() as i8 as u8),
-        DataType::Byte => blob.push(val.to_f64() as u8),
-        DataType::Short => {
-            blob.extend_from_slice(&(val.to_f64() as i16).to_le_bytes())
-        }
-        DataType::UShort => {
-            blob.extend_from_slice(&(val.to_f64() as u16).to_le_bytes())
-        }
-        DataType::Int => blob.extend_from_slice(&(val.to_f64() as i32).to_le_bytes()),
-        DataType::UInt => {
-            blob.extend_from_slice(&(val.to_f64() as u32).to_le_bytes())
-        }
-        DataType::Float => {
-            blob.extend_from_slice(&(val.to_f64() as f32).to_le_bytes())
-        }
-        DataType::Double => blob.extend_from_slice(&val.to_f64().to_le_bytes()),
-    }
+    val.extend_le_bytes(blob);
 }

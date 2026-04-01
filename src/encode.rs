@@ -2,7 +2,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::bitmask::BitMask;
-use crate::error::Result;
+use crate::error::{LercError, Result};
 use crate::fpl;
 use crate::header::{self, HeaderInfo};
 use crate::huffman::HuffmanCodec;
@@ -486,10 +486,11 @@ fn compute_no_data_sentinel<T: LercDataType>(
 
         for &c in candidates {
             let c = c.floor();
-            if c > low_limit && c < threshold && c == (c as i64) as f64 {
+            if c >= low_limit && c < threshold && c == (c as i64) as f64 {
                 return Some(c);
             }
         }
+        // No sentinel found — cannot represent NoData for this type/range combination
         None
     } else {
         // For float/double: pick candidates below minVal - 2*maxZErr
@@ -756,9 +757,32 @@ fn encode_one_band<T: LercDataType>(
         }
 
         if needs_no_data {
-            // Compute an internal sentinel below the valid range
-            if let Some(sentinel) = compute_no_data_sentinel::<T>(overall_min, max_z_error) {
-                pass_no_data = true;
+            // Compute min excluding NoData values for sentinel range
+            let mut valid_min = f64::MAX;
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    if mask.is_valid(k) {
+                        let base = k * n_depth;
+                        for m in 0..n_depth {
+                            let val = data[base + m].to_f64();
+                            if val != nd_f64 && val < valid_min {
+                                valid_min = val;
+                            }
+                        }
+                    }
+                }
+            }
+            if valid_min == f64::MAX {
+                valid_min = overall_min;
+            }
+
+            // Compute an internal sentinel below the valid (non-NoData) range
+            let sentinel = compute_no_data_sentinel::<T>(valid_min, max_z_error)
+                .ok_or_else(|| LercError::InvalidData(
+                    "cannot find a NoData sentinel value below the valid data range for this type".into(),
+                ))?;
+            pass_no_data = true;
                 no_data_val_orig = nd_orig;
 
                 if sentinel != nd_f64 {
@@ -787,7 +811,6 @@ fn encode_one_band<T: LercDataType>(
                 } else {
                     no_data_val_internal = nd_orig;
                 }
-            }
         } else {
             // NoData value provided but not needed (all depths are either
             // all-nodata or all-valid). Still pass it through for info.

@@ -386,3 +386,91 @@ fn round_trip_multiband_nodata() {
         _ => panic!("expected F32 data"),
     }
 }
+
+#[test]
+fn unsigned_u16_nodata_round_trip() {
+    // Regression test: unsigned types must be able to use 0 as sentinel
+    // when data minimum is > 0.
+    let width = 8u32;
+    let height = 8u32;
+    let n_depth = 2u32;
+    let no_data: u16 = 0;
+    let mut pixels = Vec::with_capacity((width * height * n_depth) as usize);
+    let mask = BitMask::all_valid((width * height) as usize);
+
+    for i in 0..height {
+        for j in 0..width {
+            let base = (i * width + j) as u16 + 10; // min valid value is 10
+            pixels.push(base);
+            // depth 1: some pixels are NoData
+            if (i + j) % 3 == 0 {
+                pixels.push(no_data);
+            } else {
+                pixels.push(base + 5);
+            }
+        }
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::UShort,
+        valid_masks: vec![mask],
+        data: LercData::U16(pixels.clone()),
+        no_data_value: Some(no_data as f64),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    assert_eq!(decoded.no_data_value, Some(no_data as f64));
+    match &decoded.data {
+        LercData::U16(dec) => {
+            assert_eq!(dec.len(), pixels.len());
+            for (i, (&orig, &dec_val)) in pixels.iter().zip(dec.iter()).enumerate() {
+                assert_eq!(orig, dec_val, "mismatch at pixel {i}");
+            }
+        }
+        _ => panic!("expected U16 data"),
+    }
+}
+
+#[test]
+fn unsigned_u8_nodata_round_trip() {
+    // Regression test: u8 with min valid value > 0 should find sentinel at 0.
+    let width = 8u32;
+    let height = 8u32;
+    let n_depth = 2u32;
+    let no_data: u8 = 0;
+    let mut pixels = Vec::with_capacity((width * height * n_depth) as usize);
+    let mask = BitMask::all_valid((width * height) as usize);
+
+    for i in 0..height {
+        for j in 0..width {
+            let base = ((i * width + j) % 200) as u8 + 5; // min valid = 5
+            pixels.push(base);
+            if (i + j) % 4 == 0 {
+                pixels.push(no_data);
+            } else {
+                pixels.push(base.wrapping_add(1));
+            }
+        }
+    }
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth,
+        n_bands: 1,
+        data_type: DataType::Byte,
+        valid_masks: vec![mask],
+        data: LercData::U8(pixels.clone()),
+        no_data_value: Some(no_data as f64),
+    };
+
+    let encoded = lerc::encode(&image, 0.5).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+    assert_eq!(decoded.no_data_value, Some(no_data as f64));
+}

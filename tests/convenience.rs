@@ -199,3 +199,56 @@ fn lossy_round_trip_f64() {
         );
     }
 }
+
+#[test]
+fn decode_typed_rejects_multiband() {
+    use lerc::{DataType, LercData, LercImage};
+
+    let width = 8u32;
+    let height = 8u32;
+    let band_size = (width * height) as usize;
+    let pixels = vec![0u8; band_size * 3];
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 1,
+        n_bands: 3,
+        data_type: DataType::Byte,
+        valid_masks: vec![BitMask::all_valid(band_size)],
+        data: LercData::U8(pixels),
+        no_data_value: None,
+    };
+
+    let blob = lerc::encode(&image, 0.5).unwrap();
+    let result = lerc::decode_typed::<u8>(&blob);
+    assert!(result.is_err(), "decode_typed should reject multi-band blobs");
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("single-band"), "error should mention single-band: {err}");
+}
+
+#[test]
+fn decode_typed_rejects_multidepth() {
+    use lerc::{DataType, LercData, LercImage};
+
+    let width = 8u32;
+    let height = 8u32;
+    let pixels = vec![0.0f32; (width * height * 3) as usize];
+
+    let image = LercImage {
+        width,
+        height,
+        n_depth: 3,
+        n_bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data: LercData::F32(pixels),
+        no_data_value: None,
+    };
+
+    let blob = lerc::encode(&image, 0.01).unwrap();
+    let result = lerc::decode_typed::<f32>(&blob);
+    assert!(result.is_err(), "decode_typed should reject multi-depth blobs");
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("single-depth"), "error should mention single-depth: {err}");
+}

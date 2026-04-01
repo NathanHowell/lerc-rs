@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "crates/lerc-cpp-ref"]
+default-members = ["."]
 
 [package]
 name = "lerc"

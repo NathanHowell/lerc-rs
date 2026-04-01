@@ -15,7 +15,8 @@ fn main() {
     let gen_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("gen_constants.cpp");
     let gen_bin = out_dir.join("gen_constants");
 
-    let status = std::process::Command::new("c++")
+    let cxx = std::env::var("CXX").unwrap_or_else(|_| "c++".to_string());
+    let status = std::process::Command::new(&cxx)
         .args(["-std=c++14", "-o"])
         .arg(&gen_bin)
         .arg(&gen_src)

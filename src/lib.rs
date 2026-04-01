@@ -192,11 +192,26 @@ pub fn encode_typed_masked<T: LercDataType>(
     encode::encode(&image, max_z_error)
 }
 
-/// Decode a LERC blob, returning typed pixel data, the validity mask, width, and height.
+/// Decode a single-band, single-depth LERC blob, returning typed pixel data,
+/// the validity mask, width, and height.
 ///
-/// The pixel type `T` must match the blob's data type. Returns an error on mismatch.
+/// The pixel type `T` must match the blob's data type. Returns an error on type
+/// mismatch or if the blob contains multiple bands or depths (use [`decode`] for
+/// multi-band/multi-depth blobs to get full shape and per-band masks).
 pub fn decode_typed<T: LercDataType>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
     let image = decode::decode(blob)?;
+    if image.n_bands > 1 {
+        return Err(LercError::InvalidData(alloc::format!(
+            "decode_typed requires single-band data, got {} bands (use decode() instead)",
+            image.n_bands
+        )));
+    }
+    if image.n_depth > 1 {
+        return Err(LercError::InvalidData(alloc::format!(
+            "decode_typed requires single-depth data, got n_depth={} (use decode() instead)",
+            image.n_depth
+        )));
+    }
     let w = image.width;
     let h = image.height;
     let pixels = T::try_from_lerc_data(image.data).map_err(|_| {

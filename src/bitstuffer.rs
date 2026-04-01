@@ -897,6 +897,202 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // _into / _append zero-alloc variant tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_simple_into_matches_encode_simple() {
+        let data = vec![0, 1, 2, 3, 100, 255, 42, 7];
+        let vec_result = encode_simple(&data);
+        let max_elem = *data.iter().max().unwrap();
+        let mut buf = Vec::new();
+        encode_simple_into(&mut buf, &data, max_elem);
+        assert_eq!(buf, vec_result);
+    }
+
+    #[test]
+    fn encode_simple_into_zeros() {
+        let data = vec![0, 0, 0, 0, 0];
+        let vec_result = encode_simple(&data);
+        let mut buf = Vec::new();
+        encode_simple_into(&mut buf, &data, 0);
+        assert_eq!(buf, vec_result);
+    }
+
+    #[test]
+    fn encode_simple_into_single_element() {
+        let data = vec![42];
+        let vec_result = encode_simple(&data);
+        let mut buf = Vec::new();
+        encode_simple_into(&mut buf, &data, 42);
+        assert_eq!(buf, vec_result);
+    }
+
+    #[test]
+    fn encode_simple_into_large() {
+        let data: Vec<u32> = (0..1000).collect();
+        let vec_result = encode_simple(&data);
+        let max_elem = *data.iter().max().unwrap();
+        let mut buf = Vec::new();
+        encode_simple_into(&mut buf, &data, max_elem);
+        assert_eq!(buf, vec_result);
+    }
+
+    #[test]
+    fn encode_simple_into_empty() {
+        let data: Vec<u32> = vec![];
+        let vec_result = encode_simple(&data);
+        let mut buf = Vec::new();
+        encode_simple_into(&mut buf, &data, 0);
+        assert_eq!(buf, vec_result);
+    }
+
+    #[test]
+    fn encode_simple_into_appends_to_existing() {
+        // Verify _into appends rather than overwriting
+        let data = vec![1, 2, 3];
+        let max_elem = 3;
+        let mut buf = vec![0xAA, 0xBB];
+        encode_simple_into(&mut buf, &data, max_elem);
+        assert_eq!(buf[0], 0xAA);
+        assert_eq!(buf[1], 0xBB);
+        // The rest should match encode_simple output
+        let standalone = encode_simple(&data);
+        assert_eq!(&buf[2..], &standalone[..]);
+    }
+
+    #[test]
+    fn bit_stuff_append_matches_bit_stuff() {
+        let data = vec![1, 2, 3, 4, 5];
+        let num_bits = 3;
+        let standalone = bit_stuff(&data, num_bits);
+        let mut buf = Vec::new();
+        bit_stuff_append(&mut buf, &data, num_bits);
+        assert_eq!(buf, standalone);
+    }
+
+    #[test]
+    fn bit_stuff_append_various_widths() {
+        for num_bits in 1..32u32 {
+            let max_val = (1u64 << num_bits) - 1;
+            let data: Vec<u32> = (0..50).map(|i| (i as u32) % (max_val as u32 + 1)).collect();
+            let standalone = bit_stuff(&data, num_bits);
+            let mut buf = Vec::new();
+            bit_stuff_append(&mut buf, &data, num_bits);
+            assert_eq!(buf, standalone, "mismatch for num_bits={num_bits}");
+        }
+    }
+
+    #[test]
+    fn bit_stuff_append_empty() {
+        let data: Vec<u32> = vec![];
+        let standalone = bit_stuff(&data, 5);
+        let mut buf = Vec::new();
+        bit_stuff_append(&mut buf, &data, 5);
+        assert_eq!(buf, standalone);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn bit_stuff_append_zero_bits() {
+        let data = vec![0, 0, 0];
+        let standalone = bit_stuff(&data, 0);
+        let mut buf = Vec::new();
+        bit_stuff_append(&mut buf, &data, 0);
+        assert_eq!(buf, standalone);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn bit_stuff_append_preserves_prefix() {
+        let data = vec![7, 3, 1];
+        let num_bits = 3;
+        let standalone = bit_stuff(&data, num_bits);
+        let mut buf = vec![0xDE, 0xAD];
+        bit_stuff_append(&mut buf, &data, num_bits);
+        assert_eq!(buf[0], 0xDE);
+        assert_eq!(buf[1], 0xAD);
+        assert_eq!(&buf[2..], &standalone[..]);
+    }
+
+    #[test]
+    fn encode_lut_into_round_trips() {
+        // Data with few distinct values - good for LUT
+        let data = vec![0, 100, 200, 0, 100, 200, 0, 100, 200, 0];
+        let max_elem = *data.iter().max().unwrap();
+        let info = should_use_lut(&data, max_elem).expect("should use LUT");
+        let mut buf = Vec::new();
+        encode_lut_into(&mut buf, &info, data.len() as u32);
+        let mut pos = 0;
+        let decoded = decode(&buf, &mut pos, 100, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn encode_lut_into_appends_to_existing() {
+        let data = vec![0, 100, 200, 0, 100, 200, 0, 100, 200, 0];
+        let max_elem = *data.iter().max().unwrap();
+        let info = should_use_lut(&data, max_elem).expect("should use LUT");
+        let mut buf = vec![0xFF];
+        encode_lut_into(&mut buf, &info, data.len() as u32);
+        assert_eq!(buf[0], 0xFF);
+        // Decode from offset 1
+        let mut pos = 1;
+        let decoded = decode(&buf, &mut pos, 100, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn encode_small_tile_into_simple_case() {
+        // Small tile with values in [0, 255] -- should use simple encoding
+        let data = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let max_elem = 9;
+        let mut buf = Vec::new();
+        encode_small_tile_into(&mut buf, &data, max_elem);
+        // Verify we can decode it back
+        let mut pos = 0;
+        let decoded = decode(&buf, &mut pos, 100, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn encode_small_tile_into_lut_case() {
+        // Data with few distinct values in a small tile
+        let data = vec![0, 50, 100, 0, 50, 100, 0, 50, 100, 0, 50, 100];
+        let max_elem = 100;
+        let mut buf = Vec::new();
+        encode_small_tile_into(&mut buf, &data, max_elem);
+        let mut pos = 0;
+        let decoded = decode(&buf, &mut pos, 100, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn encode_small_tile_into_single_value() {
+        // All same nonzero value (max_elem = 0 after quantization offset)
+        // After subtracting min, all become 0, so max_elem = 0.
+        // encode_small_tile_into with max_elem=0 should encode as all-zeros.
+        let data = vec![0, 0, 0, 0];
+        let mut buf = Vec::new();
+        encode_small_tile_into(&mut buf, &data, 0);
+        let mut pos = 0;
+        let decoded = decode(&buf, &mut pos, 100, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn encode_small_tile_into_max_size_tile() {
+        // 256-element tile (max for this path)
+        let data: Vec<u32> = (0..256).map(|i| (i % 200) as u32).collect();
+        let max_elem = 199;
+        let mut buf = Vec::new();
+        encode_small_tile_into(&mut buf, &data, max_elem);
+        let mut pos = 0;
+        let decoded = decode(&buf, &mut pos, 300, 6).unwrap();
+        assert_eq!(decoded, data);
+    }
+
     proptest! {
         #[test]
         fn bit_stuff_round_trip(num_bits in 1..31u32, len in 1..200usize) {
@@ -914,6 +1110,29 @@ mod tests {
             let mut pos = 0;
             let decoded = decode(&encoded, &mut pos, data.len(), 6).unwrap();
             prop_assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn encode_simple_into_matches_encode_simple_prop(
+            data in prop::collection::vec(0..1000u32, 1..200)
+        ) {
+            let vec_result = encode_simple(&data);
+            let max_elem = data.iter().copied().max().unwrap_or(0);
+            let mut buf = Vec::new();
+            encode_simple_into(&mut buf, &data, max_elem);
+            prop_assert_eq!(buf, vec_result);
+        }
+
+        #[test]
+        fn bit_stuff_append_matches_bit_stuff_prop(
+            num_bits in 1..31u32, len in 1..200usize
+        ) {
+            let max_val = (1u32 << num_bits) - 1;
+            let data: Vec<u32> = (0..len).map(|i| (i as u32) % (max_val + 1)).collect();
+            let standalone = bit_stuff(&data, num_bits);
+            let mut buf = Vec::new();
+            bit_stuff_append(&mut buf, &data, num_bits);
+            prop_assert_eq!(buf, standalone);
         }
     }
 }

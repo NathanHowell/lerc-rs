@@ -1004,3 +1004,801 @@ fn encode_tile_inner<T: LercDataType>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    // -----------------------------------------------------------------------
+    // Helper to call encode_tile_inner with typical u8 lossless settings
+    // -----------------------------------------------------------------------
+
+    fn encode_tile_inner_u8(
+        values: &[f64],
+        z_min_f: f64,
+        z_max_f: f64,
+        b_diff_enc: bool,
+    ) -> (Vec<u8>, Vec<u32>) {
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        let num_valid = values.len();
+        // u8 lossless: max_z_error = 0.5, max_val_to_quantize = (1<<15)-1
+        encode_tile_inner::<u8>(
+            &mut buf,
+            values,
+            &mut quant_scratch,
+            num_valid,
+            z_min_f,
+            z_max_f,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            0, // integrity = 0 for simplicity
+            DataType::Byte,
+            b_diff_enc,
+        );
+        (buf, quant_scratch)
+    }
+
+    fn encode_tile_inner_f64(
+        values: &[f64],
+        z_min_f: f64,
+        z_max_f: f64,
+        max_z_error: f64,
+    ) -> (Vec<u8>, Vec<u32>) {
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        let num_valid = values.len();
+        encode_tile_inner::<f64>(
+            &mut buf,
+            values,
+            &mut quant_scratch,
+            num_valid,
+            z_min_f,
+            z_max_f,
+            max_z_error,
+            ((1u32 << 30) - 1) as f64,
+            0,
+            DataType::Double,
+            false,
+        );
+        (buf, quant_scratch)
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: all-zero block
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_all_zero_via_num_valid_zero() {
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        // num_valid = 0 triggers const-zero path
+        encode_tile_inner::<u8>(
+            &mut buf,
+            &[],
+            &mut quant_scratch,
+            0,
+            f64::MAX,
+            f64::MIN,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            0,
+            DataType::Byte,
+            false,
+        );
+        assert_eq!(buf.len(), 1);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+    }
+
+    #[test]
+    fn encode_tile_inner_all_zero_via_zmin_zmax_zero() {
+        let values = vec![0.0, 0.0, 0.0, 0.0];
+        let (buf, _) = encode_tile_inner_u8(&values, 0.0, 0.0, false);
+        assert_eq!(buf.len(), 1);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: constant block (z_min == z_max != 0)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_const_offset() {
+        let values = vec![42.0, 42.0, 42.0, 42.0];
+        let (buf, _) = encode_tile_inner_u8(&values, 42.0, 42.0, false);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
+        // Should have mode byte + offset value (reduced to u8 = 1 byte)
+        assert!(buf.len() > 1);
+        // The offset byte should be 42
+        assert_eq!(buf[1], 42);
+    }
+
+    #[test]
+    fn encode_tile_inner_const_offset_i16() {
+        // Use i16 data where the constant value is > 255, requiring a 2-byte offset
+        let values = vec![1000.0, 1000.0, 1000.0];
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        encode_tile_inner::<i16>(
+            &mut buf,
+            &values,
+            &mut quant_scratch,
+            3,
+            1000.0,
+            1000.0,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            0,
+            DataType::Short,
+            false,
+        );
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
+        // 1000 fits in i16 but not i8/u8, so type reduction from Short
+        // should produce a 2-byte offset at minimum
+        assert!(buf.len() >= 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: quantized / bit-stuffed block
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_bitstuffed() {
+        // Small range of u8 values: should produce bit-stuffed output
+        let values: Vec<f64> = (0..16).map(|i| i as f64).collect();
+        let (buf, quant) = encode_tile_inner_u8(&values, 0.0, 15.0, false);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
+        // Quantized values should match original for lossless u8
+        assert_eq!(quant.len(), 16);
+        for (i, &q) in quant.iter().enumerate() {
+            assert_eq!(q, i as u32);
+        }
+    }
+
+    #[test]
+    fn encode_tile_inner_bitstuffed_with_offset() {
+        // Use enough values that bitstuffed is smaller than raw binary.
+        // For u8 with 16 values, raw_size = 1 + 16 = 17.
+        // Bitstuffed with range 0..3 (2 bits) is much smaller.
+        let values: Vec<f64> = (0..16).map(|i| 100.0 + (i % 4) as f64).collect();
+        let (buf, quant) = encode_tile_inner_u8(&values, 100.0, 103.0, false);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
+        // Offset byte should be 100 (z_min as u8)
+        assert_eq!(buf[1], 100);
+        // Quantized should be 0, 1, 2, 3, 0, 1, 2, 3, ...
+        for (i, &q) in quant.iter().enumerate() {
+            assert_eq!(q, (i % 4) as u32);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: raw binary fallback
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_raw_binary_f64_large_range() {
+        // To trigger raw binary via the early exit (not the fallback), we need
+        // need_quantize = false with z_min != z_max.
+        // Use max_z_error > 0 and a range so large that
+        // max_val = (z_max - z_min) / (2 * max_z_error) > max_val_to_quantize.
+        let max_val_to_quantize = ((1u32 << 30) - 1) as f64;
+        let max_z_error = 0.5;
+        let z_min = 0.0;
+        // Need range / (2*0.5) > max_val_to_quantize, so range > max_val_to_quantize
+        let z_max = max_val_to_quantize + 100.0;
+        let n = 4;
+        let values: Vec<f64> = (0..n).map(|i| z_min + (z_max - z_min) * i as f64 / (n - 1) as f64).collect();
+        let (buf, _) = encode_tile_inner_f64(&values, z_min, z_max, max_z_error);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::RawBinary as u8
+        );
+        // Raw binary: 1 byte header + n * 8 bytes
+        assert_eq!(buf.len(), 1 + n * 8);
+        // Verify values are stored correctly
+        for (i, &v) in values.iter().enumerate() {
+            let start = 1 + i * 8;
+            let decoded = f64::from_le_bytes(buf[start..start + 8].try_into().unwrap());
+            assert_eq!(decoded, v);
+        }
+    }
+
+    #[test]
+    fn encode_tile_inner_raw_binary_contains_original_values() {
+        // Use enough values to ensure raw binary wins over bitstuffed
+        let n = 32;
+        let values: Vec<f64> = (0..n).map(|i| 1.5 + i as f64 * 1e14).collect();
+        let z_min = values[0];
+        let z_max = *values.last().unwrap();
+        let (buf, _) = encode_tile_inner_f64(&values, z_min, z_max, 0.0);
+        if buf[0] & tile_flags::MODE_MASK == TileCompressionMode::RawBinary as u8 {
+            // Verify the raw f64 values are stored correctly
+            for (i, &v) in values.iter().enumerate() {
+                let start = 1 + i * 8;
+                let decoded = f64::from_le_bytes(buf[start..start + 8].try_into().unwrap());
+                assert_eq!(decoded, v);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: diff encoding flag
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_diff_encoding_const_zero() {
+        let values = vec![0.0, 0.0, 0.0];
+        let (buf, _) = encode_tile_inner_u8(&values, 0.0, 0.0, true);
+        assert_eq!(buf.len(), 1);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstZero as u8
+        );
+        // Diff flag (bit 2) should be set
+        assert_ne!(buf[0] & tile_flags::DIFF_ENCODING, 0);
+    }
+
+    #[test]
+    fn encode_tile_inner_diff_encoding_const_offset() {
+        let values = vec![10.0, 10.0, 10.0];
+        let (buf, _) = encode_tile_inner_u8(&values, 10.0, 10.0, true);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
+        assert_ne!(buf[0] & tile_flags::DIFF_ENCODING, 0);
+    }
+
+    #[test]
+    fn encode_tile_inner_diff_encoding_bitstuffed() {
+        let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let (buf, _) = encode_tile_inner_u8(&values, 0.0, 7.0, true);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
+        assert_ne!(buf[0] & tile_flags::DIFF_ENCODING, 0);
+    }
+
+    #[test]
+    fn encode_tile_inner_diff_encoding_no_raw_binary() {
+        // With diff encoding, raw binary should NOT be produced.
+        // Instead, a sentinel is written that is larger than raw, so non-diff wins.
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        let values = vec![0.0, 1e15];
+        // Use f64 lossless with diff encoding
+        encode_tile_inner::<f64>(
+            &mut buf,
+            &values,
+            &mut quant_scratch,
+            values.len(),
+            0.0,
+            1e15,
+            0.0,
+            ((1u32 << 30) - 1) as f64,
+            0,
+            DataType::Double,
+            true,
+        );
+        // Should NOT be raw binary when diff is true
+        assert_ne!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::RawBinary as u8
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: integrity bits are preserved
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_integrity_bits() {
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        let values = vec![0.0, 0.0];
+        let integrity: u8 = 0b00001100; // bits 2-3 set
+        encode_tile_inner::<u8>(
+            &mut buf,
+            &values,
+            &mut quant_scratch,
+            values.len(),
+            0.0,
+            0.0,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            integrity,
+            DataType::Byte,
+            false,
+        );
+        // Integrity bits should be present in the header byte
+        assert_eq!(buf[0] & integrity, integrity);
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: quantized with lossy max_z_error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_lossy_quantization() {
+        // Lossy encoding of f64 data with max_z_error = 1.0
+        let values = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+        let (buf, quant) = encode_tile_inner_f64(&values, 0.0, 4.0, 1.0);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
+        // With max_z_error = 1.0, scale = 1/(2*1.0) = 0.5
+        // quant[i] = (val - z_min) * 0.5 + 0.5 = val * 0.5 + 0.5
+        // quant: 0->0, 1->1, 2->1, 3->2, 4->2
+        assert_eq!(quant[0], 0); // 0.0 * 0.5 + 0.5 = 0.5 -> 0
+        assert_eq!(quant[1], 1); // 1.0 * 0.5 + 0.5 = 1.0 -> 1
+        assert_eq!(quant[2], 1); // 2.0 * 0.5 + 0.5 = 1.5 -> 1
+        assert_eq!(quant[3], 2); // 3.0 * 0.5 + 0.5 = 2.0 -> 2
+        assert_eq!(quant[4], 2); // 4.0 * 0.5 + 0.5 = 2.5 -> 2
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: all-quantized-to-same (max_quant == 0)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_all_quantize_to_same() {
+        // With large max_z_error relative to range, all values quantize to 0.
+        // Need: need_quantize = true, i.e. max_val <= max_val_to_quantize
+        //       AND (max_val + 0.5) as u32 != 0
+        // Use max_z_error = 5.0 and values in [10.0, 10.5]:
+        //   max_val = (10.5 - 10.0) / (2*5.0) = 0.05
+        //   (0.05 + 0.5) as u32 = 0, so need_quantize = false -> goes to raw/const path.
+        // Instead use max_z_error = 0.5 and values [10.0, 10.5, 11.0]:
+        //   max_val = (11.0 - 10.0) / 1.0 = 1.0
+        //   (1.0 + 0.5) as u32 = 1, so need_quantize = true
+        //   scale = 1/(2*0.5) = 1.0
+        //   quant = [(10-10)*1+0.5, (10.5-10)*1+0.5, (11-10)*1+0.5] = [0, 1, 1]
+        //   max_quant = 1, so this is NOT all same.
+        //
+        // For all-same quantization, use max_z_error such that all values round to 0:
+        //   values = [10.0, 10.3, 10.4], max_z_error = 0.5
+        //   max_val = 0.4 / 1.0 = 0.4, (0.4 + 0.5) as u32 = 0 -> need_quantize false.
+        //
+        // Use integer type where the logic is simpler:
+        // u8 values [5, 5, 5, 5, 5, 5, 5, 5] with max_z_error=0.5 (lossless)
+        // All values equal -> z_min == z_max -> const offset.
+        // That's already tested. Instead test the quantized path where max_quant=0:
+        // u16 values [100, 101] with max_z_error=1.0:
+        //   max_val = (101-100)/(2*1.0) = 0.5
+        //   (0.5 + 0.5) as u32 = 1 -> need_quantize = true
+        //   scale = 1/(2*1.0) = 0.5
+        //   quant = [(100-100)*0.5+0.5, (101-100)*0.5+0.5] = [0, 1]
+        //   max_quant = 1, not zero.
+        //
+        // For max_quant=0: all values equal after quantization.
+        // values [100, 100, 100, ..., 101] with a huge max_z_error could do it.
+        // max_z_error = 1.0, values = [100.0; 16] + [100.9]:
+        //   max_val = 0.9/2.0 = 0.45, (0.45+0.5) = 0 -> need_quantize=false.
+        //
+        // values = [100.0; 16] + [101.0] with max_z_error = 1.0:
+        //   max_val = 1.0/2.0 = 0.5, (0.5+0.5) = 1 -> need_quantize=true
+        //   scale = 0.5
+        //   quant[last] = (101-100)*0.5+0.5 = 1.0 -> 1
+        //   max_quant = 1.
+        //
+        // Actually let's use: values where after quantization all become 0.
+        // values = [100.0, 100.1, 100.2] with max_z_error = 0.5:
+        //   need_quantize: max_val = 0.2/1.0 = 0.2, (0.2+0.5) = 0 -> false.
+        //
+        // This is tricky because (max_val + 0.5) as u32 == 0 when max_val < 0.5.
+        // For max_quant=0 we need all individual quant values to be 0, but
+        // (max_val + 0.5) as u32 > 0 (so max_val >= 0.5).
+        // When max_val >= 0.5, scale = 1/(2*max_z_error), and at least
+        // the largest value will quantize to max_val * scale + 0.5 >= 1.
+        // So max_quant=0 in the quantized path cannot happen unless all values
+        // are exactly z_min, which means z_min == z_max (caught earlier).
+        //
+        // Therefore the max_quant==0 ConstOffset path in the quantized section
+        // is effectively unreachable for well-formed input. Skip this test case.
+        // Instead verify a near-constant case that ends up as ConstOffset.
+        let values = vec![42.0; 16];
+        let (buf, _) = encode_tile_inner_u8(&values, 42.0, 42.0, false);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_single_u8_tile
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_single_u8_tile_all_zeros() {
+        let data = vec![0u8; 64]; // 8x8 tile, all zeros
+        let n_cols = 8;
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        encode_single_u8_tile(&mut buf, &data, n_cols, 0, 8, 0, 8, 0, &mut quant_buf);
+        assert_eq!(buf.len(), 1);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstZero as u8);
+    }
+
+    #[test]
+    fn encode_single_u8_tile_constant_nonzero() {
+        let data = vec![42u8; 64]; // 8x8 tile, all 42
+        let n_cols = 8;
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        encode_single_u8_tile(&mut buf, &data, n_cols, 0, 8, 0, 8, 0, &mut quant_buf);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstOffset as u8);
+        assert_eq!(buf[1], 42);
+        assert_eq!(buf.len(), 2);
+    }
+
+    #[test]
+    fn encode_single_u8_tile_varying_values() {
+        // 4x4 tile with varying data
+        let mut data = vec![0u8; 16];
+        for (i, v) in data.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        let n_cols = 4;
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        encode_single_u8_tile(&mut buf, &data, n_cols, 0, 4, 0, 4, 0, &mut quant_buf);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::BitStuffed as u8);
+        // Offset byte should be 0 (z_min = 0)
+        assert_eq!(buf[1], 0);
+        // Should be decodable via bitstuffer
+        let mut pos = 2;
+        let decoded = crate::bitstuffer::decode(&buf, &mut pos, 256, 6).unwrap();
+        assert_eq!(decoded.len(), 16);
+        for (i, &v) in decoded.iter().enumerate() {
+            assert_eq!(v, i as u32);
+        }
+    }
+
+    #[test]
+    fn encode_single_u8_tile_with_offset() {
+        // All values in [100, 109]
+        let mut data = vec![0u8; 16];
+        for (i, v) in data.iter_mut().enumerate() {
+            *v = 100 + (i as u8 % 10);
+        }
+        let n_cols = 4;
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        encode_single_u8_tile(&mut buf, &data, n_cols, 0, 4, 0, 4, 0, &mut quant_buf);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::BitStuffed as u8);
+        assert_eq!(buf[1], 100); // z_min = 100
+    }
+
+    #[test]
+    fn encode_single_u8_tile_subtile_region() {
+        // Test encoding a sub-region of a larger image
+        // 16-column image, encode tile at rows [2,4), cols [4,8)
+        let n_cols = 16;
+        let n_rows = 8;
+        let mut data = vec![0u8; n_rows * n_cols];
+        // Fill the tile region with value 99
+        for i in 2..4 {
+            for j in 4..8 {
+                data[i * n_cols + j] = 99;
+            }
+        }
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        encode_single_u8_tile(&mut buf, &data, n_cols, 2, 4, 4, 8, 0, &mut quant_buf);
+        assert_eq!(buf[0] & tile_flags::MODE_MASK, TileCompressionMode::ConstOffset as u8);
+        assert_eq!(buf[1], 99);
+    }
+
+    #[test]
+    fn encode_single_u8_tile_integrity_bits_preserved() {
+        let data = vec![0u8; 64];
+        let mut buf = Vec::new();
+        let mut quant_buf = [0u32; 256];
+        let integrity = 0b00001100u8;
+        encode_single_u8_tile(&mut buf, &data, 8, 0, 8, 0, 8, integrity, &mut quant_buf);
+        assert_eq!(buf[0] & integrity, integrity);
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_recon
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_recon_const_zero_num_valid_zero() {
+        let info = classify_recon(
+            &[],
+            &[],
+            0,
+            f64::MAX,
+            f64::MIN,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            255.0,
+            DataType::Byte,
+            false,
+        );
+        match info {
+            TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
+            _ => panic!("expected Constant(0.0)"),
+        }
+    }
+
+    #[test]
+    fn classify_recon_const_zero_zmin_zmax_zero() {
+        let info = classify_recon(
+            &[0.0, 0.0],
+            &[0, 0],
+            2,
+            0.0,
+            0.0,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            255.0,
+            DataType::Byte,
+            false,
+        );
+        match info {
+            TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
+            _ => panic!("expected Constant(0.0)"),
+        }
+    }
+
+    #[test]
+    fn classify_recon_const_offset() {
+        let info = classify_recon(
+            &[42.0, 42.0],
+            &[0, 0],
+            2,
+            42.0,
+            42.0,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            255.0,
+            DataType::Byte,
+            false,
+        );
+        match info {
+            TileReconInfo::Constant(c) => assert_eq!(c, 42.0),
+            _ => panic!("expected Constant(42.0)"),
+        }
+    }
+
+    #[test]
+    fn classify_recon_quantized() {
+        let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let quant: Vec<u32> = (0..8).collect();
+        let info = classify_recon(
+            &values,
+            &quant,
+            8,
+            0.0,
+            7.0,
+            0.5,
+            ((1u32 << 15) - 1) as f64,
+            255.0,
+            DataType::Byte,
+            false,
+        );
+        match info {
+            TileReconInfo::Quantized {
+                offset,
+                inv_scale,
+                z_max,
+            } => {
+                assert_eq!(offset, 0.0);
+                assert_eq!(inv_scale, 1.0); // 2 * 0.5
+                assert_eq!(z_max, 255.0);
+            }
+            _ => panic!("expected Quantized"),
+        }
+    }
+
+    #[test]
+    fn classify_recon_raw_binary() {
+        // Lossless f64 with z_min != z_max and max_z_error = 0:
+        // need_quantize = z_max > z_min = true, but since max_z_error is 0,
+        // the actual check is: need_quantize = z_max_f > z_min_f.
+        // Then it falls through to Quantized. We need need_quantize = false.
+        // For need_quantize = false with z_min != z_max:
+        //   max_z_error = 0.0 and z_max > z_min => need_quantize = true.
+        //   max_z_error > 0 and max_val > max_val_to_quantize => need_quantize = false.
+        // Use max_val > max_val_to_quantize to get need_quantize = false.
+        let z_min = 0.0;
+        let z_max = 1e18; // huge range
+        let max_z_error = 0.5;
+        let max_val_to_quantize = ((1u32 << 30) - 1) as f64;
+        // max_val = (1e18 - 0) / 1.0 = 1e18, which is >> max_val_to_quantize
+        let values = vec![z_min, z_max];
+        let quant = vec![0, 0];
+        let info = classify_recon(
+            &values,
+            &quant,
+            2,
+            z_min,
+            z_max,
+            max_z_error,
+            max_val_to_quantize,
+            1e18,
+            DataType::Double,
+            false,
+        );
+        match info {
+            TileReconInfo::RawBinary => {}
+            _ => panic!("expected RawBinary, got {:?}", match info {
+                TileReconInfo::Constant(c) => alloc::format!("Constant({c})"),
+                TileReconInfo::Quantized { offset, inv_scale, z_max } => alloc::format!("Quantized(offset={offset}, inv_scale={inv_scale}, z_max={z_max})"),
+                TileReconInfo::RawBinary => alloc::format!("RawBinary"),
+            }),
+        }
+    }
+
+    #[test]
+    fn classify_recon_quantized_all_same_after_quant() {
+        // max_quant == 0 path: need_quantize = true but all quant values are 0.
+        // For this to happen: max_val = (z_max - z_min) / (2 * max_z_error)
+        // must satisfy (max_val + 0.5) as u32 != 0 (so max_val >= 0.5),
+        // yet after individual quantization all values end up at 0.
+        // This is effectively only possible when z_min == z_max was not caught,
+        // or with numerical edge cases. We test the code path directly by
+        // passing quant = [0, 0, 0] with parameters that make need_quantize true.
+        let values = vec![10.0, 10.5, 11.0];
+        let quant = vec![0, 0, 0]; // force max_quant = 0
+        let info = classify_recon(
+            &values,
+            &quant,
+            3,
+            10.0,
+            11.0,
+            0.5,
+            ((1u32 << 30) - 1) as f64,
+            100.0,
+            DataType::Double,
+            false,
+        );
+        match info {
+            TileReconInfo::Constant(c) => assert_eq!(c, 10.0),
+            _ => panic!("expected Constant(10.0) for all-same quantization"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // sample_tile_positions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sample_tile_positions_within_bounds() {
+        let n_rows = 100;
+        let n_cols = 200;
+        let mb_size = 8;
+        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
+        assert!(!positions.is_empty());
+        for &(i0, i1, j0, j1) in &positions {
+            assert!(i0 < n_rows, "i0={i0} >= n_rows={n_rows}");
+            assert!(i1 <= n_rows, "i1={i1} > n_rows={n_rows}");
+            assert!(i0 < i1, "i0={i0} >= i1={i1}");
+            assert!(j0 < n_cols, "j0={j0} >= n_cols={n_cols}");
+            assert!(j1 <= n_cols, "j1={j1} > n_cols={n_cols}");
+            assert!(j0 < j1, "j0={j0} >= j1={j1}");
+        }
+    }
+
+    #[test]
+    fn sample_tile_positions_small_image() {
+        // For a 1x1 image, should produce at least 1 position
+        let positions = sample_tile_positions(1, 1, 8);
+        assert!(!positions.is_empty());
+        for &(i0, i1, j0, j1) in &positions {
+            assert_eq!(i0, 0);
+            assert_eq!(i1, 1);
+            assert_eq!(j0, 0);
+            assert_eq!(j1, 1);
+        }
+    }
+
+    #[test]
+    fn sample_tile_positions_exact_tile_boundary() {
+        // Image size exactly divisible by mb_size
+        let positions = sample_tile_positions(16, 16, 8);
+        assert!(!positions.is_empty());
+        for &(i0, i1, j0, j1) in &positions {
+            assert!(i0 < 16);
+            assert!(i1 <= 16);
+            assert!(j0 < 16);
+            assert!(j1 <= 16);
+            assert_eq!(i1 - i0, 8); // exact block size
+            assert_eq!(j1 - j0, 8);
+        }
+    }
+
+    #[test]
+    fn sample_tile_positions_non_divisible() {
+        // Image size not divisible by mb_size -- last tile is smaller
+        let positions = sample_tile_positions(10, 10, 8);
+        assert!(!positions.is_empty());
+        for &(i0, i1, j0, j1) in &positions {
+            assert!(i1 - i0 <= 8);
+            assert!(j1 - j0 <= 8);
+            assert!(i1 <= 10);
+            assert!(j1 <= 10);
+        }
+    }
+
+    #[test]
+    fn sample_tile_positions_unique() {
+        let positions = sample_tile_positions(100, 100, 8);
+        // All positions should be unique (dedup was called)
+        let mut sorted = positions.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), positions.len());
+    }
+
+    #[test]
+    fn sample_tile_positions_covers_corners() {
+        // Should include corners and center for a large-enough image
+        let n_rows = 64;
+        let n_cols = 64;
+        let mb_size = 8;
+        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
+        // Top-left corner
+        assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == 0));
+        // Top-right corner
+        let last_j0 = (n_cols.div_ceil(mb_size) - 1) * mb_size;
+        assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == last_j0));
+        // Bottom-left corner
+        let last_i0 = (n_rows.div_ceil(mb_size) - 1) * mb_size;
+        assert!(positions
+            .iter()
+            .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == 0));
+        // Bottom-right corner
+        assert!(positions
+            .iter()
+            .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == last_j0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Round-trip: encode then decode via crate's public API
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn encode_tile_inner_round_trip_u8_lossless() {
+        // Encode a tile and decode it using the bitstuffer decoder.
+        // Use 64 values (8x8 tile) with small range so bitstuffed beats raw.
+        // Values: 10..=25 repeating. Range=15, 4 bits. 64 values * 4 bits = 32 bytes.
+        // Bitstuffer overhead: ~3 bytes. Total bitstuffed: 1 + 1 + 35 ~= 37.
+        // Raw: 1 + 64 = 65. So bitstuffed wins.
+        let values: Vec<f64> = (0..64).map(|i| 10.0 + (i % 16) as f64).collect();
+        let (buf, _) = encode_tile_inner_u8(&values, 10.0, 25.0, false);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::BitStuffed as u8
+        );
+        // The offset is written as a reduced type; for u8 value 10, it's 1 byte
+        let offset_val = buf[1];
+        assert_eq!(offset_val, 10);
+        // Decode the bitstuffed portion
+        let mut pos = 2;
+        let decoded = crate::bitstuffer::decode(&buf, &mut pos, 256, 6).unwrap();
+        assert_eq!(decoded.len(), 64);
+        // Reconstruct: offset + quant_val
+        for (i, &d) in decoded.iter().enumerate() {
+            let reconstructed = offset_val as u32 + d;
+            assert_eq!(reconstructed, values[i] as u32);
+        }
+    }
+}

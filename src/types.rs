@@ -226,3 +226,108 @@ impl LercDataType for f64 {
         }
     }
 }
+
+/// Image-level encoding mode (C++ `Lerc2::ImageEncodeMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum ImageEncodeMode {
+    Tiling = 0,
+    DeltaHuffman = 1,
+    Huffman = 2,
+    DeltaDeltaHuffman = 3,
+}
+
+impl TryFrom<u8> for ImageEncodeMode {
+    type Error = crate::error::LercError;
+    fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Tiling),
+            1 => Ok(Self::DeltaHuffman),
+            2 => Ok(Self::Huffman),
+            3 => Ok(Self::DeltaDeltaHuffman),
+            _ => Err(crate::error::LercError::UnsupportedEncoding(v)),
+        }
+    }
+}
+
+/// Per-tile block encoding mode (C++ `Lerc2::BlockEncodeMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum BlockEncodeMode {
+    RawBinary = 0,
+    BitStuffSimple = 1,
+    BitStuffLut = 2,
+}
+
+/// Compression flag bits within a tile header byte.
+pub(crate) mod tile_flags {
+    /// Bits 0-1: block encode mode.
+    pub const MODE_MASK: u8 = 0x03;
+    /// Bit 2: diff encoding relative to previous depth slice.
+    pub const DIFF_ENCODING: u8 = 0x04;
+    /// Bits 6-7: type reduction code for the offset value.
+    pub const TYPE_REDUCTION_SHIFT: u8 = 6;
+
+    /// Constant-zero tile (all valid pixels are 0).
+    pub const CONST_ZERO: u8 = 2;
+    /// Constant-offset tile (all valid pixels share one value).
+    pub const CONST_OFFSET: u8 = 3;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify enum values match the C++ reference (Lerc2.h).
+    ///
+    /// C++: enum ImageEncodeMode { IEM_Tiling = 0, IEM_DeltaHuffman, IEM_Huffman, IEM_DeltaDeltaHuffman };
+    /// C++: enum BlockEncodeMode { BEM_RawBinary = 0, BEM_BitStuffSimple, BEM_BitStuffLUT };
+    /// C++: enum DataType { DT_Char = 0, DT_Byte, DT_Short, DT_UShort, DT_Int, DT_UInt, DT_Float, DT_Double };
+    #[test]
+    fn image_encode_mode_matches_cpp() {
+        assert_eq!(ImageEncodeMode::Tiling as u8, 0);
+        assert_eq!(ImageEncodeMode::DeltaHuffman as u8, 1);
+        assert_eq!(ImageEncodeMode::Huffman as u8, 2);
+        assert_eq!(ImageEncodeMode::DeltaDeltaHuffman as u8, 3);
+    }
+
+    #[test]
+    fn block_encode_mode_matches_cpp() {
+        assert_eq!(BlockEncodeMode::RawBinary as u8, 0);
+        assert_eq!(BlockEncodeMode::BitStuffSimple as u8, 1);
+        assert_eq!(BlockEncodeMode::BitStuffLut as u8, 2);
+    }
+
+    #[test]
+    fn data_type_matches_cpp() {
+        assert_eq!(DataType::Char as i32, 0);
+        assert_eq!(DataType::Byte as i32, 1);
+        assert_eq!(DataType::Short as i32, 2);
+        assert_eq!(DataType::UShort as i32, 3);
+        assert_eq!(DataType::Int as i32, 4);
+        assert_eq!(DataType::UInt as i32, 5);
+        assert_eq!(DataType::Float as i32, 6);
+        assert_eq!(DataType::Double as i32, 7);
+    }
+
+    #[test]
+    fn tile_flags_matches_cpp() {
+        // C++ uses bits 0-1 for mode, bit 2 for diff, bits 6-7 for type reduction
+        assert_eq!(tile_flags::MODE_MASK, 0x03);
+        assert_eq!(tile_flags::DIFF_ENCODING, 0x04);
+        assert_eq!(tile_flags::TYPE_REDUCTION_SHIFT, 6);
+        // Constant modes are encode modes 2 and 3 in bits 0-1
+        assert_eq!(tile_flags::CONST_ZERO, 2);
+        assert_eq!(tile_flags::CONST_OFFSET, 3);
+    }
+
+    #[test]
+    fn image_encode_mode_try_from_round_trip() {
+        for v in 0..=3u8 {
+            let mode = ImageEncodeMode::try_from(v).unwrap();
+            assert_eq!(mode as u8, v);
+        }
+        assert!(ImageEncodeMode::try_from(4).is_err());
+        assert!(ImageEncodeMode::try_from(255).is_err());
+    }
+}

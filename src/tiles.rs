@@ -4,7 +4,7 @@ use crate::bitstuffer;
 use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::header::HeaderInfo;
-use crate::types::{DataType, LercDataType};
+use crate::types::{BlockEncodeMode, DataType, LercDataType, tile_flags};
 
 /// Read a variable-width value from the byte stream.
 /// DataType determines the wire format (may be reduced from the original type).
@@ -295,7 +295,7 @@ fn read_tile<T: LercDataType>(
     *pos += 1;
 
     let b_diff_enc = if header.version >= 5 {
-        (compr_flag & 4) != 0
+        (compr_flag & tile_flags::DIFF_ENCODING) != 0
     } else {
         false
     };
@@ -310,10 +310,10 @@ fn read_tile<T: LercDataType>(
         return Err(LercError::InvalidData("diff encoding on depth 0".into()));
     }
 
-    let bits67 = (compr_flag >> 6) as i32;
-    let compr_mode = compr_flag & 3;
+    let bits67 = (compr_flag >> tile_flags::TYPE_REDUCTION_SHIFT) as i32;
+    let compr_mode = compr_flag & tile_flags::MODE_MASK;
 
-    if compr_mode == 2 {
+    if compr_mode == tile_flags::CONST_ZERO {
         // Entire tile is constant 0
         for i in i0..i1 {
             let mut k = i * n_cols + j0;
@@ -329,7 +329,7 @@ fn read_tile<T: LercDataType>(
         return Ok(());
     }
 
-    if compr_mode == 0 {
+    if compr_mode == BlockEncodeMode::RawBinary as u8 {
         // Raw binary uncompressed
         if b_diff_enc {
             return Err(LercError::InvalidData("raw binary with diff enc".into()));
@@ -373,7 +373,7 @@ fn read_tile<T: LercDataType>(
         header.z_max
     };
 
-    if compr_mode == 3 {
+    if compr_mode == tile_flags::CONST_OFFSET {
         // Entire tile is constant offset
         for i in i0..i1 {
             let mut k = i * n_cols + j0;

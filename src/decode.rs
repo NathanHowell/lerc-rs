@@ -11,14 +11,7 @@ use crate::tiles;
 use crate::types::{DataType, LercDataType};
 use crate::{DecodeResult, LercData, LercImage, LercInfo};
 
-/// Image encoding mode (from C++ IEM_ enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ImageEncodeMode {
-    Tiling = 0,
-    DeltaHuffman = 1,
-    Huffman = 2,
-    DeltaDeltaHuffman = 3,
-}
+use crate::types::ImageEncodeMode;
 
 pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     if crate::lerc1::is_lerc1(data) {
@@ -307,13 +300,7 @@ fn decode_one_band<T: LercDataType>(
                 return Err(LercError::InvalidData("invalid image encode mode".into()));
             }
 
-            let mode = match flag {
-                0 => ImageEncodeMode::Tiling,
-                1 => ImageEncodeMode::DeltaHuffman,
-                2 => ImageEncodeMode::Huffman,
-                3 => ImageEncodeMode::DeltaDeltaHuffman,
-                _ => unreachable!(),
-            };
+            let mode = ImageEncodeMode::try_from(flag)?;
 
             if mode != ImageEncodeMode::Tiling {
                 if try_huffman_int {

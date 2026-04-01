@@ -8,7 +8,7 @@ use crate::header::{self, HeaderInfo};
 use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
-use crate::types::{DataType, LercDataType};
+use crate::types::{DataType, ImageEncodeMode, LercDataType};
 use crate::{LercData, LercImage};
 
 pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
@@ -912,12 +912,12 @@ fn write_blob_payload<T: LercDataType>(
                 }
             }
         }
-        blob.push(0u8); // IEM_Tiling
+        blob.push(ImageEncodeMode::Tiling as u8);
     } else if try_huffman_flt {
         let is_double = T::DATA_TYPE == DataType::Double;
         let fpl_data =
             fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
-        blob.push(3u8); // IEM_DeltaDeltaHuffman
+        blob.push(ImageEncodeMode::DeltaDeltaHuffman as u8);
         blob.extend_from_slice(&fpl_data);
         return Ok(());
     }
@@ -1496,8 +1496,8 @@ fn try_encode_huffman_int<T: LercDataType>(
 
     // Write mode flag
     match mode {
-        HuffMode::Delta => buf.push(1u8), // IEM_DeltaHuffman
-        HuffMode::Direct => buf.push(2u8), // IEM_Huffman
+        HuffMode::Delta => buf.push(ImageEncodeMode::DeltaHuffman as u8),
+        HuffMode::Direct => buf.push(ImageEncodeMode::Huffman as u8),
     }
 
     // Write code table

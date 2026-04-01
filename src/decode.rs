@@ -496,6 +496,316 @@ fn read_data_one_sweep<T: LercDataType>(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal data buffer for `read_mask`: just the 4-byte numBytesMask field.
+    fn make_mask_header(num_bytes_mask: i32) -> Vec<u8> {
+        num_bytes_mask.to_le_bytes().to_vec()
+    }
+
+    // -----------------------------------------------------------------------
+    // read_mask
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_mask_all_valid() {
+        // numBytesMask=0, numValidPixel == nRows*nCols → all valid
+        let data = make_mask_header(0);
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 4,
+            n_cols: 8,
+            num_valid_pixel: 32, // 4*8
+            ..Default::default()
+        };
+        let mask = read_mask(&data, &mut pos, &header, None).unwrap();
+        assert_eq!(mask.count_valid(), 32);
+        for i in 0..32 {
+            assert!(mask.is_valid(i), "pixel {i} should be valid");
+        }
+    }
+
+    #[test]
+    fn read_mask_all_invalid() {
+        // numBytesMask=0, numValidPixel == 0 → all invalid
+        let data = make_mask_header(0);
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 4,
+            n_cols: 8,
+            num_valid_pixel: 0,
+            ..Default::default()
+        };
+        let mask = read_mask(&data, &mut pos, &header, None).unwrap();
+        assert_eq!(mask.count_valid(), 0);
+        for i in 0..32 {
+            assert!(!mask.is_valid(i), "pixel {i} should be invalid");
+        }
+    }
+
+    #[test]
+    fn read_mask_rle_compressed() {
+        // 2x2 image, 2 pixels valid, 2 invalid
+        // Mask bytes: 0xC0 = 0b1100_0000 → pixels 0,1 valid; pixels 2,3 invalid
+        // That's 1 byte for 4 pixels
+        let mask_bytes = vec![0xC0];
+        let compressed = rle::compress(&mask_bytes);
+
+        let mut data = make_mask_header(compressed.len() as i32);
+        data.extend_from_slice(&compressed);
+
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            num_valid_pixel: 2, // not 0, not 4 → triggers RLE path
+            ..Default::default()
+        };
+        let mask = read_mask(&data, &mut pos, &header, None).unwrap();
+        assert!(mask.is_valid(0));
+        assert!(mask.is_valid(1));
+        assert!(!mask.is_valid(2));
+        assert!(!mask.is_valid(3));
+        assert_eq!(mask.count_valid(), 2);
+    }
+
+    #[test]
+    fn read_mask_rle_larger() {
+        // 4x4 image (16 pixels), checkerboard pattern
+        // Byte 0: 0xAA = 0b10101010 → pixels 0,2,4,6 valid
+        // Byte 1: 0x55 = 0b01010101 → pixels 9,11,13,15 valid
+        let mask_bytes = vec![0xAA, 0x55];
+        let compressed = rle::compress(&mask_bytes);
+
+        let mut data = make_mask_header(compressed.len() as i32);
+        data.extend_from_slice(&compressed);
+
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 4,
+            n_cols: 4,
+            num_valid_pixel: 8, // partial → triggers RLE path
+            ..Default::default()
+        };
+        let mask = read_mask(&data, &mut pos, &header, None).unwrap();
+        assert_eq!(mask.count_valid(), 8);
+        // Byte 0 = 0xAA: bits 1,0,1,0,1,0,1,0 (MSB-first)
+        assert!(mask.is_valid(0));
+        assert!(!mask.is_valid(1));
+        assert!(mask.is_valid(2));
+        assert!(!mask.is_valid(3));
+        // Byte 1 = 0x55: bits 0,1,0,1,0,1,0,1 (MSB-first)
+        assert!(!mask.is_valid(8));
+        assert!(mask.is_valid(9));
+    }
+
+    #[test]
+    fn read_mask_reuses_prev_mask() {
+        // numBytesMask <= 0 with partial validity but a previous mask exists
+        let data = make_mask_header(0);
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            num_valid_pixel: 3, // partial → needs mask data or prev_mask
+            ..Default::default()
+        };
+        let mut prev = BitMask::new(4);
+        prev.set_valid(0);
+        prev.set_valid(1);
+        prev.set_valid(3);
+
+        let mask = read_mask(&data, &mut pos, &header, Some(&prev)).unwrap();
+        assert!(mask.is_valid(0));
+        assert!(mask.is_valid(1));
+        assert!(!mask.is_valid(2));
+        assert!(mask.is_valid(3));
+        assert_eq!(mask.count_valid(), 3);
+    }
+
+    #[test]
+    fn read_mask_error_no_prev_mask() {
+        // numBytesMask=0, partial validity, no previous mask → error
+        let data = make_mask_header(0);
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            num_valid_pixel: 2,
+            ..Default::default()
+        };
+        let result = read_mask(&data, &mut pos, &header, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_mask_buffer_too_small() {
+        // Data too short to even read numBytesMask
+        let data = [0u8; 2]; // need 4 bytes
+        let mut pos = 0;
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 1,
+            num_valid_pixel: 1,
+            ..Default::default()
+        };
+        let result = read_mask(&data, &mut pos, &header, None);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // fill_const_image
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn fill_const_image_ndepth1_all_valid() {
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 3,
+            n_depth: 1,
+            z_min: 42.0,
+            z_max: 42.0,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(6);
+        let mut output = vec![0.0_f64; 6];
+
+        fill_const_image(&header, &mask, &[], &[], &mut output).unwrap();
+
+        for (i, &val) in output.iter().enumerate() {
+            assert_eq!(val, 42.0, "pixel {i} should be 42.0");
+        }
+    }
+
+    #[test]
+    fn fill_const_image_ndepth1_partial_mask() {
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            n_depth: 1,
+            z_min: 99.0,
+            z_max: 99.0,
+            ..Default::default()
+        };
+        let mut mask = BitMask::new(4);
+        mask.set_valid(0);
+        mask.set_valid(2);
+        // pixels 1, 3 are invalid
+
+        let mut output = vec![0.0_f64; 4];
+        fill_const_image(&header, &mask, &[], &[], &mut output).unwrap();
+
+        assert_eq!(output[0], 99.0);
+        assert_eq!(output[1], 0.0); // invalid pixel, untouched
+        assert_eq!(output[2], 99.0);
+        assert_eq!(output[3], 0.0); // invalid pixel, untouched
+    }
+
+    #[test]
+    fn fill_const_image_ndepth2_with_z_min_vec() {
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            n_depth: 2,
+            z_min: 10.0,
+            z_max: 20.0, // different from z_min so z_min_vec is used
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(4); // 2x2 pixels
+        let z_min_vec = vec![10.0, 20.0]; // depth 0 = 10.0, depth 1 = 20.0
+        let z_max_vec = vec![10.0, 20.0]; // const: min == max per depth
+
+        // Output has 2*2*2 = 8 elements
+        let mut output = vec![0.0_f64; 8];
+        fill_const_image(&header, &mask, &z_min_vec, &z_max_vec, &mut output).unwrap();
+
+        // pixel 0: output[0]=10.0, output[1]=20.0
+        assert_eq!(output[0], 10.0);
+        assert_eq!(output[1], 20.0);
+        // pixel 1: output[2]=10.0, output[3]=20.0
+        assert_eq!(output[2], 10.0);
+        assert_eq!(output[3], 20.0);
+        // pixel 2: output[4]=10.0, output[5]=20.0
+        assert_eq!(output[4], 10.0);
+        assert_eq!(output[5], 20.0);
+        // pixel 3: output[6]=10.0, output[7]=20.0
+        assert_eq!(output[6], 10.0);
+        assert_eq!(output[7], 20.0);
+    }
+
+    #[test]
+    fn fill_const_image_ndepth2_empty_z_min_vec_uses_header_z_min() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 2,
+            n_depth: 2,
+            z_min: 7.0,
+            z_max: 7.0, // same → z_buf all filled with z_min
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(2);
+        let mut output = vec![0.0_f64; 4]; // 1*2*2
+
+        fill_const_image(&header, &mask, &[], &[], &mut output).unwrap();
+
+        // All values should be 7.0
+        for (i, &val) in output.iter().enumerate() {
+            assert_eq!(val, 7.0, "element {i} should be 7.0");
+        }
+    }
+
+    #[test]
+    fn fill_const_image_ndepth2_partial_mask() {
+        let header = HeaderInfo {
+            n_rows: 1,
+            n_cols: 3,
+            n_depth: 2,
+            z_min: 5.0,
+            z_max: 5.0,
+            ..Default::default()
+        };
+        let mut mask = BitMask::new(3);
+        mask.set_valid(0);
+        mask.set_valid(2);
+        // pixel 1 is invalid
+
+        let mut output = vec![0.0_f64; 6]; // 1*3*2
+        fill_const_image(&header, &mask, &[], &[], &mut output).unwrap();
+
+        // pixel 0: filled
+        assert_eq!(output[0], 5.0);
+        assert_eq!(output[1], 5.0);
+        // pixel 1: invalid, untouched
+        assert_eq!(output[2], 0.0);
+        assert_eq!(output[3], 0.0);
+        // pixel 2: filled
+        assert_eq!(output[4], 5.0);
+        assert_eq!(output[5], 5.0);
+    }
+
+    #[test]
+    fn fill_const_image_integer_type() {
+        let header = HeaderInfo {
+            n_rows: 2,
+            n_cols: 2,
+            n_depth: 1,
+            z_min: 42.0,
+            z_max: 42.0,
+            ..Default::default()
+        };
+        let mask = BitMask::all_valid(4);
+        let mut output = vec![0_i32; 4];
+
+        fill_const_image(&header, &mask, &[], &[], &mut output).unwrap();
+
+        for (i, &val) in output.iter().enumerate() {
+            assert_eq!(val, 42, "pixel {i} should be 42");
+        }
+    }
+}
+
 fn decode_huffman<T: LercDataType>(
     data: &[u8],
     pos: &mut usize,

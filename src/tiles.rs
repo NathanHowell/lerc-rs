@@ -502,3 +502,404 @@ pub(crate) fn read_typed_value<T: LercDataType>(data: &[u8], pos: &mut usize) ->
     *pos += T::BYTES;
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // read_variable_data_type
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_variable_data_type_i8() {
+        // i8 -1 → 0xFF as byte
+        let data = [0xFF_u8];
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Char).unwrap();
+        assert_eq!(val, -1.0);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_variable_data_type_u8() {
+        let data = [255_u8];
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Byte).unwrap();
+        assert_eq!(val, 255.0);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_variable_data_type_i16() {
+        let data = (-1000_i16).to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Short).unwrap();
+        assert_eq!(val, -1000.0);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_variable_data_type_u16() {
+        let data = 60000_u16.to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::UShort).unwrap();
+        assert_eq!(val, 60000.0);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_variable_data_type_i32() {
+        let data = (-123456_i32).to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Int).unwrap();
+        assert_eq!(val, -123456.0);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_variable_data_type_u32() {
+        let data = 4_000_000_000_u32.to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::UInt).unwrap();
+        assert_eq!(val, 4_000_000_000.0);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_variable_data_type_f32() {
+        let data = 3.14_f32.to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Float).unwrap();
+        // f32 -> f64 conversion: compare with the actual f32 value promoted to f64
+        assert_eq!(val, 3.14_f32 as f64);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_variable_data_type_f64() {
+        let data = core::f64::consts::PI.to_le_bytes();
+        let mut pos = 0;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Double).unwrap();
+        assert_eq!(val, core::f64::consts::PI);
+        assert_eq!(pos, 8);
+    }
+
+    #[test]
+    fn read_variable_data_type_buffer_too_small() {
+        let data = [0_u8; 1]; // only 1 byte, but i16 needs 2
+        let mut pos = 0;
+        let result = read_variable_data_type(&data, &mut pos, DataType::Short);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_variable_data_type_with_offset() {
+        // Place i16 at offset 3
+        let mut data = vec![0_u8; 5];
+        let val_bytes = 42_i16.to_le_bytes();
+        data[3] = val_bytes[0];
+        data[4] = val_bytes[1];
+        let mut pos = 3;
+        let val = read_variable_data_type(&data, &mut pos, DataType::Short).unwrap();
+        assert_eq!(val, 42.0);
+        assert_eq!(pos, 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // reduce_data_type
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reduce_i32_value_100_to_byte() {
+        let (dt, tc) = reduce_data_type(100_i32, DataType::Int);
+        assert_eq!(dt, DataType::Byte);
+        assert_eq!(tc, 3);
+    }
+
+    #[test]
+    fn reduce_i32_value_1000_to_short() {
+        let (dt, tc) = reduce_data_type(1000_i32, DataType::Int);
+        assert_eq!(dt, DataType::Short);
+        assert_eq!(tc, 2);
+    }
+
+    #[test]
+    fn reduce_u16_value_200_to_byte() {
+        let (dt, tc) = reduce_data_type(200_u16, DataType::UShort);
+        assert_eq!(dt, DataType::Byte);
+        assert_eq!(tc, 1);
+    }
+
+    #[test]
+    fn reduce_f32_value_42_to_byte() {
+        let (dt, tc) = reduce_data_type(42.0_f32, DataType::Float);
+        assert_eq!(dt, DataType::Byte);
+        assert_eq!(tc, 2);
+    }
+
+    #[test]
+    fn reduce_i32_large_value_no_reduction() {
+        // 100_000 exceeds u16 range (0..65535), so no reduction possible
+        let (dt, tc) = reduce_data_type(100_000_i32, DataType::Int);
+        assert_eq!(dt, DataType::Int);
+        assert_eq!(tc, 0);
+    }
+
+    #[test]
+    fn reduce_i32_negative_no_byte_reduction() {
+        // -50 fits in i8/i16 but not u8 for Int type; should reduce to Short
+        let (dt, tc) = reduce_data_type(-50_i32, DataType::Int);
+        assert_eq!(dt, DataType::Short);
+        assert_eq!(tc, 2);
+    }
+
+    #[test]
+    fn reduce_u16_value_300_no_reduction() {
+        let (dt, tc) = reduce_data_type(300_u16, DataType::UShort);
+        assert_eq!(dt, DataType::UShort);
+        assert_eq!(tc, 0);
+    }
+
+    #[test]
+    fn reduce_f32_fractional_no_reduction() {
+        let (dt, tc) = reduce_data_type(3.14_f32, DataType::Float);
+        assert_eq!(dt, DataType::Float);
+        assert_eq!(tc, 0);
+    }
+
+    #[test]
+    fn reduce_f64_value_100_to_short() {
+        let (dt, tc) = reduce_data_type(100.0_f64, DataType::Double);
+        assert_eq!(dt, DataType::Short);
+        assert_eq!(tc, 3);
+    }
+
+    #[test]
+    fn reduce_u32_value_50_to_byte() {
+        let (dt, tc) = reduce_data_type(50_u32, DataType::UInt);
+        assert_eq!(dt, DataType::Byte);
+        assert_eq!(tc, 2);
+    }
+
+    #[test]
+    fn reduce_i16_value_100_to_char() {
+        // i16 value 100 fits in i8 (-128..127) so should reduce to Char
+        let (dt, tc) = reduce_data_type(100_i16, DataType::Short);
+        assert_eq!(dt, DataType::Char);
+        assert_eq!(tc, 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_typed_as_f64
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_typed_as_f64_i8() {
+        let data = [0xFE_u8]; // -2 as i8
+        let mut pos = 0;
+        let val = read_typed_as_f64::<i8>(&data, &mut pos);
+        assert_eq!(val, -2.0);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_typed_as_f64_u8() {
+        let data = [200_u8];
+        let mut pos = 0;
+        let val = read_typed_as_f64::<u8>(&data, &mut pos);
+        assert_eq!(val, 200.0);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_typed_as_f64_i16() {
+        let data = (-500_i16).to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<i16>(&data, &mut pos);
+        assert_eq!(val, -500.0);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_typed_as_f64_u16() {
+        let data = 50000_u16.to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<u16>(&data, &mut pos);
+        assert_eq!(val, 50000.0);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_typed_as_f64_i32() {
+        let data = (-999999_i32).to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<i32>(&data, &mut pos);
+        assert_eq!(val, -999999.0);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_as_f64_u32() {
+        let data = 3_000_000_000_u32.to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<u32>(&data, &mut pos);
+        assert_eq!(val, 3_000_000_000.0);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_as_f64_f32() {
+        let data = 2.718_f32.to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<f32>(&data, &mut pos);
+        assert_eq!(val, 2.718_f32 as f64);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_as_f64_f64() {
+        let data = 1.23456789012345_f64.to_le_bytes();
+        let mut pos = 0;
+        let val = read_typed_as_f64::<f64>(&data, &mut pos);
+        assert_eq!(val, 1.23456789012345);
+        assert_eq!(pos, 8);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_typed_value
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_typed_value_i8() {
+        let data = [0x80_u8]; // -128 as i8
+        let mut pos = 0;
+        let val: i8 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, -128);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_typed_value_u8() {
+        let data = [42_u8];
+        let mut pos = 0;
+        let val: u8 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, 42);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn read_typed_value_i16() {
+        let data = 12345_i16.to_le_bytes();
+        let mut pos = 0;
+        let val: i16 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, 12345);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_typed_value_u16() {
+        let data = 65535_u16.to_le_bytes();
+        let mut pos = 0;
+        let val: u16 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, 65535);
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn read_typed_value_i32() {
+        let data = (-2_000_000_000_i32).to_le_bytes();
+        let mut pos = 0;
+        let val: i32 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, -2_000_000_000);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_value_u32() {
+        let data = 4_294_967_295_u32.to_le_bytes();
+        let mut pos = 0;
+        let val: u32 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, u32::MAX);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_value_f32() {
+        let expected = 1.5_f32;
+        let data = expected.to_le_bytes();
+        let mut pos = 0;
+        let val: f32 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, expected);
+        assert_eq!(pos, 4);
+    }
+
+    #[test]
+    fn read_typed_value_f64() {
+        let expected = -999.999_f64;
+        let data = expected.to_le_bytes();
+        let mut pos = 0;
+        let val: f64 = read_typed_value(&data, &mut pos);
+        assert_eq!(val, expected);
+        assert_eq!(pos, 8);
+    }
+
+    // -----------------------------------------------------------------------
+    // get_data_type_used (the inverse of reduce_data_type's tc values)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn get_data_type_used_identity() {
+        // tc=0 should always return the same type
+        assert_eq!(get_data_type_used(DataType::Char, 0), Some(DataType::Char));
+        assert_eq!(get_data_type_used(DataType::Byte, 0), Some(DataType::Byte));
+        assert_eq!(get_data_type_used(DataType::Short, 0), Some(DataType::Short));
+        assert_eq!(get_data_type_used(DataType::UShort, 0), Some(DataType::UShort));
+        assert_eq!(get_data_type_used(DataType::Int, 0), Some(DataType::Int));
+        assert_eq!(get_data_type_used(DataType::UInt, 0), Some(DataType::UInt));
+        assert_eq!(get_data_type_used(DataType::Float, 0), Some(DataType::Float));
+        assert_eq!(get_data_type_used(DataType::Double, 0), Some(DataType::Double));
+    }
+
+    #[test]
+    fn get_data_type_used_float_reduction() {
+        assert_eq!(get_data_type_used(DataType::Float, 1), Some(DataType::Short));
+        assert_eq!(get_data_type_used(DataType::Float, 2), Some(DataType::Byte));
+        assert_eq!(get_data_type_used(DataType::Float, 3), None);
+    }
+
+    #[test]
+    fn get_data_type_used_int_reduction() {
+        // Int(4) - tc: tc=1 -> UShort(3), tc=2 -> Short(2), tc=3 -> Byte(1)
+        assert_eq!(get_data_type_used(DataType::Int, 1), Some(DataType::UShort));
+        assert_eq!(get_data_type_used(DataType::Int, 2), Some(DataType::Short));
+        assert_eq!(get_data_type_used(DataType::Int, 3), Some(DataType::Byte));
+    }
+
+    // -----------------------------------------------------------------------
+    // write_variable_data_type round-trips
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn write_then_read_variable_data_type() {
+        let test_cases: &[(f64, DataType)] = &[
+            (-1.0, DataType::Char),
+            (255.0, DataType::Byte),
+            (-1000.0, DataType::Short),
+            (60000.0, DataType::UShort),
+            (-123456.0, DataType::Int),
+            (4_000_000_000.0, DataType::UInt),
+            (3.14_f32 as f64, DataType::Float),
+            (core::f64::consts::PI, DataType::Double),
+        ];
+
+        for &(value, dt) in test_cases {
+            let mut buf = Vec::new();
+            write_variable_data_type(&mut buf, value, dt);
+            let mut pos = 0;
+            let result = read_variable_data_type(&buf, &mut pos, dt).unwrap();
+            assert_eq!(result, value, "round-trip failed for {dt:?} value={value}");
+            assert_eq!(pos, buf.len());
+        }
+    }
+}

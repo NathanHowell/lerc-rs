@@ -31,7 +31,7 @@ Compression output is byte-for-byte identical to the C++ reference at the same s
 
 ```toml
 [dependencies]
-lerc = "0.1"
+lerc-rs = "0.1"
 ```
 
 ### Encode

@@ -657,6 +657,275 @@ fn is_high_entropy_u8<T: LercDataType>(
     true
 }
 
+/// Iterate over all valid pixel values, calling a visitor for each.
+#[inline(always)]
+fn for_each_valid_pixel<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    mut f: impl FnMut(usize, usize, f64), // (pixel_k, depth_m, value)
+) {
+    let all_valid = mask.count_valid() >= width * height;
+    if all_valid && n_depth == 1 {
+        for (k, val) in data.iter().enumerate() {
+            f(k, 0, val.to_f64());
+        }
+    } else {
+        for i in 0..height {
+            for j in 0..width {
+                let k = i * width + j;
+                if all_valid || mask.is_valid(k) {
+                    for m in 0..n_depth {
+                        f(k, m, data[k * n_depth + m].to_f64());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Per-band statistics gathered in a single pass over valid pixels.
+struct BandStats {
+    z_min_vec: Vec<f64>,
+    z_max_vec: Vec<f64>,
+    overall_min: f64,
+    overall_max: f64,
+    /// Minimum value excluding NoData (for sentinel computation).
+    valid_min: f64,
+    /// Whether any valid pixel has mixed NoData across depths.
+    needs_no_data: bool,
+}
+
+/// Gather per-depth min/max, overall range, valid-only min, and mixed NoData
+/// detection in a single traversal of valid pixels.
+fn compute_band_stats<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    num_valid: usize,
+    nd_f64: Option<f64>,
+) -> BandStats {
+    let mut stats = BandStats {
+        z_min_vec: vec![f64::MAX; n_depth],
+        z_max_vec: vec![f64::MIN; n_depth],
+        overall_min: f64::MAX,
+        overall_max: f64::MIN,
+        valid_min: f64::MAX,
+        needs_no_data: false,
+    };
+
+    let mut prev_k = usize::MAX;
+    let mut nd_count_at_pixel = 0usize;
+    let mut depth_count_at_pixel = 0usize;
+
+    for_each_valid_pixel(data, mask, width, height, n_depth, |k, m, val| {
+        if val < stats.z_min_vec[m] { stats.z_min_vec[m] = val; }
+        if val > stats.z_max_vec[m] { stats.z_max_vec[m] = val; }
+        if val < stats.overall_min { stats.overall_min = val; }
+        if val > stats.overall_max { stats.overall_max = val; }
+
+        if let Some(nd) = nd_f64 {
+            if k != prev_k {
+                if prev_k != usize::MAX
+                    && nd_count_at_pixel > 0
+                    && nd_count_at_pixel < depth_count_at_pixel
+                {
+                    stats.needs_no_data = true;
+                }
+                prev_k = k;
+                nd_count_at_pixel = 0;
+                depth_count_at_pixel = 0;
+            }
+            depth_count_at_pixel += 1;
+            if val == nd {
+                nd_count_at_pixel += 1;
+            } else if val < stats.valid_min {
+                stats.valid_min = val;
+            }
+        }
+    });
+
+    // Check the last pixel
+    if nd_f64.is_some()
+        && prev_k != usize::MAX
+        && nd_count_at_pixel > 0
+        && nd_count_at_pixel < depth_count_at_pixel
+    {
+        stats.needs_no_data = true;
+    }
+
+    if num_valid == 0 {
+        stats.overall_min = 0.0;
+        stats.overall_max = 0.0;
+    }
+    if stats.valid_min == f64::MAX {
+        stats.valid_min = stats.overall_min;
+    }
+
+    stats
+}
+
+/// Result of NoData sentinel processing.
+struct NoDataResult<T> {
+    pass_no_data: bool,
+    no_data_val_internal: f64,
+    no_data_val_orig: f64,
+    /// Remapped data buffer (if sentinel differs from original NoData value).
+    remapped_data: Option<Vec<T>>,
+}
+
+/// Compute the NoData sentinel and remap data if needed.
+fn process_no_data<T: LercDataType>(
+    data: &[T],
+    mask: &BitMask,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    num_valid: usize,
+    image_no_data: Option<f64>,
+    nd_f64: Option<f64>,
+    stats: &mut BandStats,
+    max_z_error: f64,
+) -> Result<NoDataResult<T>> {
+    let mut result = NoDataResult {
+        pass_no_data: false,
+        no_data_val_internal: 0.0,
+        no_data_val_orig: 0.0,
+        remapped_data: None,
+    };
+
+    let (Some(nd_orig), Some(nd_val)) = (image_no_data, nd_f64) else {
+        return Ok(result);
+    };
+    if n_depth <= 1 || num_valid == 0 {
+        return Ok(result);
+    }
+
+    if stats.needs_no_data {
+        let sentinel = compute_no_data_sentinel::<T>(stats.valid_min, max_z_error)
+            .ok_or_else(|| LercError::InvalidData(
+                "cannot find a NoData sentinel value below the valid data range for this type".into(),
+            ))?;
+        result.pass_no_data = true;
+        result.no_data_val_orig = nd_orig;
+
+        if sentinel != nd_val {
+            result.no_data_val_internal = sentinel;
+            let mut buf = data.to_vec();
+            for i in 0..height {
+                for j in 0..width {
+                    let k = i * width + j;
+                    if mask.is_valid(k) {
+                        let base = k * n_depth;
+                        for m in 0..n_depth {
+                            if buf[base + m].to_f64() == nd_val {
+                                buf[base + m] = T::from_f64(sentinel);
+                            }
+                        }
+                    }
+                }
+            }
+            stats.overall_min = stats.overall_min.min(sentinel);
+            for val in &mut stats.z_min_vec[..n_depth] {
+                *val = val.min(sentinel);
+            }
+            result.remapped_data = Some(buf);
+        } else {
+            result.no_data_val_internal = nd_orig;
+        }
+    } else {
+        // NoData value provided but not needed — pass through for metadata.
+        result.pass_no_data = true;
+        result.no_data_val_orig = nd_orig;
+        result.no_data_val_internal = nd_orig;
+    }
+
+    Ok(result)
+}
+
+/// Write the blob payload: mask, ranges, and encoded pixel data.
+fn write_blob_payload<T: LercDataType>(
+    blob: &mut Vec<u8>,
+    encode_data: &[T],
+    mask: &BitMask,
+    hd: &mut HeaderInfo,
+    stats: &BandStats,
+    try_huffman_flt: bool,
+) -> Result<()> {
+    let width = hd.n_cols as usize;
+    let height = hd.n_rows as usize;
+    let n_depth = hd.n_depth as usize;
+    let num_valid = hd.num_valid_pixel as usize;
+
+    // Write mask
+    let num_pixels = width * height;
+    if num_valid == 0 || num_valid == num_pixels {
+        blob.extend_from_slice(&0i32.to_le_bytes());
+    } else {
+        let mask_compressed = rle::compress(mask.as_bytes());
+        let mask_size = mask_compressed.len() as i32;
+        blob.extend_from_slice(&mask_size.to_le_bytes());
+        blob.extend_from_slice(&mask_compressed);
+    }
+
+    if num_valid == 0 || stats.overall_min == stats.overall_max {
+        return Ok(());
+    }
+
+    // Write per-depth min/max ranges (v4+)
+    if hd.version >= 4 {
+        for val in &stats.z_min_vec[..n_depth] {
+            write_typed_value::<T>(blob, *val);
+        }
+        for val in &stats.z_max_vec[..n_depth] {
+            write_typed_value::<T>(blob, *val);
+        }
+    }
+
+    if stats.z_min_vec == stats.z_max_vec {
+        return Ok(());
+    }
+
+    // One sweep flag = 0
+    blob.push(0u8);
+
+    // Encoding mode dispatch
+    let try_huffman_int = matches!(T::DATA_TYPE, DataType::Char | DataType::Byte)
+        && hd.max_z_error == 0.5;
+
+    if try_huffman_int {
+        let skip_huffman = is_high_entropy_u8(encode_data, mask, hd);
+        if !skip_huffman {
+            if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd) {
+                let mut tiling_blob = Vec::new();
+                encode_tiles(
+                    &mut tiling_blob, encode_data, mask, hd,
+                    &stats.z_min_vec, &stats.z_max_vec,
+                )?;
+                if huffman_blob.len() < tiling_blob.len() {
+                    blob.extend_from_slice(&huffman_blob);
+                    return Ok(());
+                }
+            }
+        }
+        blob.push(0u8); // IEM_Tiling
+    } else if try_huffman_flt {
+        let is_double = T::DATA_TYPE == DataType::Double;
+        let fpl_data =
+            fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
+        blob.push(3u8); // IEM_DeltaDeltaHuffman
+        blob.extend_from_slice(&fpl_data);
+        return Ok(());
+    }
+
+    encode_tiles(blob, encode_data, mask, hd, &stats.z_min_vec, &stats.z_max_vec)?;
+    Ok(())
+}
+
 fn encode_one_band<T: LercDataType>(
     data: &[T],
     mask: &BitMask,
@@ -669,171 +938,26 @@ fn encode_one_band<T: LercDataType>(
     let n_depth = image.n_depth as usize;
     let num_valid = mask.count_valid().min(width * height);
 
-    // Iterate over all valid pixel values, calling a visitor for each.
-    // This is the single traversal pattern used for statistics gathering.
-    #[inline(always)]
-    fn for_each_valid_pixel<T: LercDataType>(
-        data: &[T],
-        mask: &BitMask,
-        width: usize,
-        height: usize,
-        n_depth: usize,
-        mut f: impl FnMut(usize, usize, f64), // (pixel_k, depth_m, value)
-    ) {
-        let all_valid = mask.count_valid() >= width * height;
-        if all_valid && n_depth == 1 {
-            for (k, val) in data.iter().enumerate() {
-                f(k, 0, val.to_f64());
-            }
-        } else {
-            for i in 0..height {
-                for j in 0..width {
-                    let k = i * width + j;
-                    if all_valid || mask.is_valid(k) {
-                        for m in 0..n_depth {
-                            f(k, m, data[k * n_depth + m].to_f64());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Determine NoData value (if any) for filtering during the scan.
     let nd_f64 = image
         .no_data_value
         .filter(|_| n_depth > 1)
         .map(|nd| T::from_f64(nd).to_f64());
 
-    // Single pass: compute min/max stats, valid-only min (excluding NoData),
-    // and detect mixed NoData pixels — all in one traversal.
-    let mut z_min_vec = vec![f64::MAX; n_depth];
-    let mut z_max_vec = vec![f64::MIN; n_depth];
-    let mut overall_min = f64::MAX;
-    let mut overall_max = f64::MIN;
-    let mut valid_min = f64::MAX; // min excluding NoData values
-    let mut needs_no_data = false;
-    let mut prev_k = usize::MAX;
-    let mut nd_count_at_pixel = 0usize;
-    let mut depth_count_at_pixel = 0usize;
+    // 1. Gather statistics in a single pass.
+    let mut stats =
+        compute_band_stats(data, mask, width, height, n_depth, num_valid, nd_f64);
 
-    for_each_valid_pixel(data, mask, width, height, n_depth, |k, m, val| {
-        // Track min/max (all values including NoData)
-        if val < z_min_vec[m] { z_min_vec[m] = val; }
-        if val > z_max_vec[m] { z_max_vec[m] = val; }
-        if val < overall_min { overall_min = val; }
-        if val > overall_max { overall_max = val; }
+    // 2. Handle NoData sentinel computation and data remapping.
+    let nd_result = process_no_data(
+        data, mask, width, height, n_depth, num_valid,
+        image.no_data_value, nd_f64, &mut stats, max_z_error,
+    )?;
+    let encode_data: &[T] = nd_result.remapped_data.as_deref().unwrap_or(data);
 
-        // Track valid-only min and mixed NoData detection
-        if let Some(nd) = nd_f64 {
-            // Reset per-pixel counters when we move to a new pixel
-            if k != prev_k {
-                // Check previous pixel for mixed NoData
-                if prev_k != usize::MAX
-                    && nd_count_at_pixel > 0
-                    && nd_count_at_pixel < depth_count_at_pixel
-                {
-                    needs_no_data = true;
-                }
-                prev_k = k;
-                nd_count_at_pixel = 0;
-                depth_count_at_pixel = 0;
-            }
-            depth_count_at_pixel += 1;
-            if val == nd {
-                nd_count_at_pixel += 1;
-            } else if val < valid_min {
-                valid_min = val;
-            }
-        }
-    });
-
-    // Check the last pixel for mixed NoData
-    if nd_f64.is_some()
-        && prev_k != usize::MAX
-        && nd_count_at_pixel > 0
-        && nd_count_at_pixel < depth_count_at_pixel
-    {
-        needs_no_data = true;
-    }
-
-    if num_valid == 0 {
-        overall_min = 0.0;
-        overall_max = 0.0;
-    }
-
-    if valid_min == f64::MAX {
-        valid_min = overall_min;
-    }
-
-    // Handle NoData values for nDepth > 1.
-    let mut pass_no_data = false;
-    let mut no_data_val_internal = 0.0;
-    let mut no_data_val_orig = 0.0;
-    let mut data_buf: Option<Vec<T>> = None;
-
-    if let Some(nd_orig) = image.no_data_value
-        && n_depth > 1
-        && num_valid > 0
-        && nd_f64.is_some()
-    {
-        let nd_f64_val = nd_f64.unwrap();
-
-        if needs_no_data {
-
-            // Compute an internal sentinel below the valid (non-NoData) range
-            let sentinel = compute_no_data_sentinel::<T>(valid_min, max_z_error)
-                .ok_or_else(|| LercError::InvalidData(
-                    "cannot find a NoData sentinel value below the valid data range for this type".into(),
-                ))?;
-            pass_no_data = true;
-            no_data_val_orig = nd_orig;
-
-            if sentinel != nd_f64_val {
-                no_data_val_internal = sentinel;
-                // Remap: replace original nodata with sentinel in a copy
-                let mut buf = data.to_vec();
-                for i in 0..height {
-                    for j in 0..width {
-                        let k = i * width + j;
-                        if mask.is_valid(k) {
-                            let base = k * n_depth;
-                            for m in 0..n_depth {
-                                if buf[base + m].to_f64() == nd_f64_val {
-                                    buf[base + m] = T::from_f64(sentinel);
-                                }
-                            }
-                        }
-                    }
-                }
-                // Update min/max to include sentinel
-                overall_min = overall_min.min(sentinel);
-                for val in &mut z_min_vec[..n_depth] {
-                    *val = val.min(sentinel);
-                }
-                data_buf = Some(buf);
-            } else {
-                no_data_val_internal = nd_orig;
-            }
-        } else {
-            // NoData value provided but not needed (all depths are either
-            // all-nodata or all-valid). Still pass it through for info.
-            pass_no_data = true;
-            no_data_val_orig = nd_orig;
-            no_data_val_internal = nd_orig;
-        }
-    }
-
-    let encode_data: &[T] = data_buf.as_deref().unwrap_or(data);
-
-    // Compute the minimum required version.
-    // v3: baseline (with checksum)
-    // v4: if n_depth > 1
-    // v5: if n_depth > 1 (diff encoding may be used; also changes integrity pattern)
-    // v6: if pass_no_data, n_blobs_more > 0, or FPL encoding (lossless float)
+    // 3. Determine minimum required version and build header.
     let try_huffman_flt =
         matches!(T::DATA_TYPE, DataType::Float | DataType::Double) && max_z_error == 0.0;
-    let min_version = if pass_no_data || n_blobs_more > 0 || try_huffman_flt {
+    let min_version = if nd_result.pass_no_data || n_blobs_more > 0 || try_huffman_flt {
         6
     } else if n_depth > 1 {
         5
@@ -848,111 +972,29 @@ fn encode_one_band<T: LercDataType>(
         n_cols: width as i32,
         n_depth: n_depth as i32,
         num_valid_pixel: num_valid as i32,
-        micro_block_size: 8, // will be updated after block size selection
-        blob_size: 0,        // patched later
+        micro_block_size: 8,
+        blob_size: 0,
         data_type: T::DATA_TYPE,
         n_blobs_more,
-        pass_no_data_values: pass_no_data,
+        pass_no_data_values: nd_result.pass_no_data,
         is_int: false,
         max_z_error,
-        z_min: overall_min,
-        z_max: overall_max,
-        no_data_val: no_data_val_internal,
-        no_data_val_orig,
+        z_min: stats.overall_min,
+        z_max: stats.overall_max,
+        no_data_val: nd_result.no_data_val_internal,
+        no_data_val_orig: nd_result.no_data_val_orig,
     };
 
-    // Select the best micro block size by trying both 8 and 16.
-    // Skip for lossless float/double — the FPL path doesn't use tiling.
+    // 4. Select block size (skip for FPL path).
     if !try_huffman_flt {
         let best_block_size =
-            select_block_size::<T>(encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
+            select_block_size::<T>(encode_data, mask, &hd, &stats.z_min_vec, &stats.z_max_vec)?;
         hd.micro_block_size = best_block_size;
     }
 
+    // 5. Write header + payload, finalize checksum.
     let mut blob = header::write_header(&hd);
-
-    // Write mask
-    let num_pixels = width * height;
-    if num_valid == 0 || num_valid == num_pixels {
-        // No mask data needed
-        blob.extend_from_slice(&0i32.to_le_bytes());
-    } else {
-        let mask_compressed = rle::compress(mask.as_bytes());
-        let mask_size = mask_compressed.len() as i32;
-        blob.extend_from_slice(&mask_size.to_le_bytes());
-        blob.extend_from_slice(&mask_compressed);
-    }
-
-    if num_valid == 0 {
-        header::finalize_blob(&mut blob);
-        return Ok(blob);
-    }
-
-    // Const image
-    if overall_min == overall_max {
-        header::finalize_blob(&mut blob);
-        return Ok(blob);
-    }
-
-    // Write per-depth min/max ranges (v4+)
-    if hd.version >= 4 {
-        for val in &z_min_vec[..n_depth] {
-            write_typed_value::<T>(&mut blob, *val);
-        }
-        for val in &z_max_vec[..n_depth] {
-            write_typed_value::<T>(&mut blob, *val);
-        }
-    }
-
-    // Check if all depths are constant
-    if z_min_vec == z_max_vec {
-        header::finalize_blob(&mut blob);
-        return Ok(blob);
-    }
-
-    // One sweep flag = 0 (we use tiling)
-    blob.push(0u8);
-
-    // Check if Huffman-eligible types
-    let try_huffman_int = matches!(T::DATA_TYPE, DataType::Char | DataType::Byte)
-        && max_z_error == 0.5;
-
-    if try_huffman_int {
-        // Quick entropy check: if the data is high-entropy (nearly all 256 byte values
-        // present and roughly uniform), Huffman cannot beat tiling. Skip it to avoid
-        // building two Huffman trees.
-        let skip_huffman = is_high_entropy_u8(encode_data, mask, &hd);
-
-        if !skip_huffman {
-            // Try Huffman encoding for 8-bit integer types
-            if let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, &hd) {
-                // Huffman is beneficial; compare against tiling size
-                let mut tiling_blob = Vec::new();
-                encode_tiles(&mut tiling_blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
-
-                if huffman_blob.len() < tiling_blob.len() {
-                    blob.extend_from_slice(&huffman_blob);
-                    header::finalize_blob(&mut blob);
-                    return Ok(blob);
-                }
-            }
-        }
-        // Huffman not beneficial or skipped; fall through to tiling
-        // Write IEM_Tiling = 0
-        blob.push(0u8);
-    } else if try_huffman_flt {
-        // For lossless float/double, use FPL encoding
-        let is_double = T::DATA_TYPE == DataType::Double;
-        let fpl_data = fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
-        blob.push(3u8); // IEM_DeltaDeltaHuffman
-        blob.extend_from_slice(&fpl_data);
-        header::finalize_blob(&mut blob);
-        return Ok(blob);
-    }
-
-    // Write tiles
-    encode_tiles(&mut blob, encode_data, mask, &hd, &z_min_vec, &z_max_vec)?;
-
+    write_blob_payload(&mut blob, encode_data, mask, &mut hd, &stats, try_huffman_flt)?;
     header::finalize_blob(&mut blob);
     Ok(blob)
 }

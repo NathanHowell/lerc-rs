@@ -4,7 +4,7 @@ use crate::bitstuffer;
 use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::header::HeaderInfo;
-use crate::types::{BlockEncodeMode, DataType, LercDataType, tile_flags};
+use crate::types::{DataType, LercDataType, TileCompressionMode, tile_flags};
 
 /// Read a variable-width value from the byte stream.
 /// DataType determines the wire format (may be reduced from the original type).
@@ -313,8 +313,7 @@ fn read_tile<T: LercDataType>(
     let bits67 = (compr_flag >> tile_flags::TYPE_REDUCTION_SHIFT) as i32;
     let compr_mode = compr_flag & tile_flags::MODE_MASK;
 
-    if compr_mode == tile_flags::CONST_ZERO {
-        // Entire tile is constant 0
+    if compr_mode == TileCompressionMode::ConstZero as u8 {
         for i in i0..i1 {
             let mut k = i * n_cols + j0;
             let mut m = k * n_depth + i_depth;
@@ -329,8 +328,7 @@ fn read_tile<T: LercDataType>(
         return Ok(());
     }
 
-    if compr_mode == BlockEncodeMode::RawBinary as u8 {
-        // Raw binary uncompressed
+    if compr_mode == TileCompressionMode::RawBinary as u8 {
         if b_diff_enc {
             return Err(LercError::InvalidData("raw binary with diff enc".into()));
         }
@@ -373,8 +371,7 @@ fn read_tile<T: LercDataType>(
         header.z_max
     };
 
-    if compr_mode == tile_flags::CONST_OFFSET {
-        // Entire tile is constant offset
+    if compr_mode == TileCompressionMode::ConstOffset as u8 {
         for i in i0..i1 {
             let mut k = i * n_cols + j0;
             let mut m = k * n_depth + i_depth;

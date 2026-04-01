@@ -250,28 +250,29 @@ impl TryFrom<u8> for ImageEncodeMode {
     }
 }
 
-/// Per-tile block encoding mode (C++ `Lerc2::BlockEncodeMode`).
+/// Tile compression mode — the 2-bit value stored in bits 0-1 of the tile header byte.
+///
+/// C++ uses `BlockEncodeMode` for values 0-2 and separate logic for 2-3.
+/// We unify all four wire values into one enum since they're mutually exclusive.
+/// Note: "BitStuffLut" is not a separate wire value — LUT vs simple is determined
+/// from the bit-stuffed payload, and both use wire value 1 (BitStuffed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub(crate) enum BlockEncodeMode {
+pub(crate) enum TileCompressionMode {
     RawBinary = 0,
-    BitStuffSimple = 1,
-    BitStuffLut = 2,
+    BitStuffed = 1,
+    ConstZero = 2,
+    ConstOffset = 3,
 }
 
 /// Compression flag bits within a tile header byte.
 pub(crate) mod tile_flags {
-    /// Bits 0-1: block encode mode.
+    /// Bits 0-1: tile compression mode.
     pub const MODE_MASK: u8 = 0x03;
     /// Bit 2: diff encoding relative to previous depth slice.
     pub const DIFF_ENCODING: u8 = 0x04;
     /// Bits 6-7: type reduction code for the offset value.
     pub const TYPE_REDUCTION_SHIFT: u8 = 6;
-
-    /// Constant-zero tile (all valid pixels are 0).
-    pub const CONST_ZERO: u8 = 2;
-    /// Constant-offset tile (all valid pixels share one value).
-    pub const CONST_OFFSET: u8 = 3;
 }
 
 #[cfg(test)]
@@ -292,10 +293,13 @@ mod tests {
     }
 
     #[test]
-    fn block_encode_mode_matches_cpp() {
-        assert_eq!(BlockEncodeMode::RawBinary as u8, 0);
-        assert_eq!(BlockEncodeMode::BitStuffSimple as u8, 1);
-        assert_eq!(BlockEncodeMode::BitStuffLut as u8, 2);
+    fn tile_compression_mode_matches_cpp() {
+        // C++ BlockEncodeMode: BEM_RawBinary=0, BEM_BitStuffSimple=1, BEM_BitStuffLUT=2
+        // C++ also uses 2=const-zero and 3=const-offset in the same 2-bit field
+        assert_eq!(TileCompressionMode::RawBinary as u8, 0);
+        assert_eq!(TileCompressionMode::BitStuffed as u8, 1);
+        assert_eq!(TileCompressionMode::ConstZero as u8, 2);
+        assert_eq!(TileCompressionMode::ConstOffset as u8, 3);
     }
 
     #[test]
@@ -312,13 +316,9 @@ mod tests {
 
     #[test]
     fn tile_flags_matches_cpp() {
-        // C++ uses bits 0-1 for mode, bit 2 for diff, bits 6-7 for type reduction
         assert_eq!(tile_flags::MODE_MASK, 0x03);
         assert_eq!(tile_flags::DIFF_ENCODING, 0x04);
         assert_eq!(tile_flags::TYPE_REDUCTION_SHIFT, 6);
-        // Constant modes are encode modes 2 and 3 in bits 0-1
-        assert_eq!(tile_flags::CONST_ZERO, 2);
-        assert_eq!(tile_flags::CONST_OFFSET, 3);
     }
 
     #[test]

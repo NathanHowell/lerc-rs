@@ -293,14 +293,14 @@ fn decode_one_band<T: LercDataType>(
             let flag = blob[pos];
             pos += 1;
 
-            if flag > 3
-                || (flag > 2 && hd.version < 6)
-                || (flag > 1 && hd.version < 4)
-            {
-                return Err(LercError::InvalidData("invalid image encode mode".into()));
-            }
-
             let mode = ImageEncodeMode::try_from(flag)?;
+
+            // Version-gated mode validation
+            if (mode == ImageEncodeMode::DeltaDeltaHuffman && hd.version < 6)
+                || (mode == ImageEncodeMode::Huffman && hd.version < 4)
+            {
+                return Err(LercError::InvalidData("image encode mode not supported in this version".into()));
+            }
 
             if mode != ImageEncodeMode::Tiling {
                 if try_huffman_int {

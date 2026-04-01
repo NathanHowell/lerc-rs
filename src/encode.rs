@@ -8,7 +8,7 @@ use crate::header::{self, HeaderInfo};
 use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
-use crate::types::{DataType, ImageEncodeMode, LercDataType};
+use crate::types::{DataType, ImageEncodeMode, LercDataType, TileCompressionMode, tile_flags};
 use crate::{LercData, LercImage};
 
 pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
@@ -1100,12 +1100,12 @@ fn encode_single_u8_tile(
     }
 
     if z_min == 0 && z_max == 0 {
-        buf.push(2 | integrity);
+        buf.push(TileCompressionMode::ConstZero as u8 | integrity);
         return;
     }
 
     if z_min == z_max {
-        buf.push(3 | integrity);
+        buf.push(TileCompressionMode::ConstOffset as u8 | integrity);
         buf.push(z_min);
         return;
     }
@@ -1118,7 +1118,7 @@ fn encode_single_u8_tile(
         *v -= z_min_u32;
     }
 
-    buf.push(1 | integrity);
+    buf.push(TileCompressionMode::BitStuffed as u8 | integrity);
     buf.push(z_min);
 
     let num_bits = crate::bitstuffer::num_bits_needed(max_quant);
@@ -2170,11 +2170,10 @@ fn encode_tile_inner<T: LercDataType>(
     src_data_type: DataType,
     b_diff_enc: bool,
 ) {
-    let diff_flag: u8 = if b_diff_enc { 4 } else { 0 };
+    let diff_flag: u8 = if b_diff_enc { tile_flags::DIFF_ENCODING } else { 0 };
 
     if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
-        // Constant 0 block (for diff enc this means all diffs are zero)
-        buf.push(2 | diff_flag | integrity);
+        buf.push(TileCompressionMode::ConstZero as u8 | diff_flag | integrity);
         return;
     }
 
@@ -2194,15 +2193,15 @@ fn encode_tile_inner<T: LercDataType>(
         } else {
             tiles::reduce_data_type(z_min_t, src_data_type)
         };
-        let bits67 = (tc as u8) << 6;
-        buf.push(3 | bits67 | diff_flag | integrity);
+        let bits67 = (tc as u8) << tile_flags::TYPE_REDUCTION_SHIFT;
+        buf.push(TileCompressionMode::ConstOffset as u8 | bits67 | diff_flag | integrity);
         tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
         return;
     }
 
     if !need_quantize {
         if !b_diff_enc {
-            buf.push(integrity);
+            buf.push(TileCompressionMode::RawBinary as u8 | integrity);
             for val in values {
                 let t = T::from_f64(*val);
                 write_typed_value_raw::<T>(buf, t);
@@ -2224,7 +2223,7 @@ fn encode_tile_inner<T: LercDataType>(
     } else {
         tiles::reduce_data_type(z_min_t, src_data_type)
     };
-    let bits67 = (tc as u8) << 6;
+    let bits67 = (tc as u8) << tile_flags::TYPE_REDUCTION_SHIFT;
 
     // Quantize values (reusing scratch buffer)
     quant_scratch.clear();
@@ -2244,14 +2243,14 @@ fn encode_tile_inner<T: LercDataType>(
 
     if max_quant == 0 {
         // All values quantize to same -> constant block
-        buf.push(3 | bits67 | diff_flag | integrity);
+        buf.push(TileCompressionMode::ConstOffset as u8 | bits67 | diff_flag | integrity);
         tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
         return;
     }
 
     // Try LUT vs simple encoding
     let encoded_start = buf.len();
-    buf.push(1 | bits67 | diff_flag | integrity);
+    buf.push(TileCompressionMode::BitStuffed as u8 | bits67 | diff_flag | integrity);
     tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
 
     // Use fast path for small tiles with small values (common for u8 data)
@@ -2270,7 +2269,7 @@ fn encode_tile_inner<T: LercDataType>(
         if encoded_len >= raw_size {
             // Raw binary fallback: replace the encoded data
             buf.truncate(encoded_start);
-            buf.push(integrity);
+            buf.push(TileCompressionMode::RawBinary as u8 | integrity);
             for val in values {
                 let t = T::from_f64(*val);
                 write_typed_value_raw::<T>(buf, t);

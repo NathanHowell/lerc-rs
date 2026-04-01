@@ -870,10 +870,10 @@ fn write_blob_payload<T: LercDataType>(
     // Write per-depth min/max ranges (v4+)
     if hd.version >= 4 {
         for val in &stats.z_min_vec[..n_depth] {
-            write_typed_value::<T>(blob, *val);
+            T::from_f64(*val).extend_le_bytes(blob);
         }
         for val in &stats.z_max_vec[..n_depth] {
-            write_typed_value::<T>(blob, *val);
+            T::from_f64(*val).extend_le_bytes(blob);
         }
     }
 
@@ -2195,7 +2195,7 @@ fn encode_tile_inner<T: LercDataType>(
             buf.push(TileCompressionMode::RawBinary as u8 | integrity);
             for val in values {
                 let t = T::from_f64(*val);
-                write_typed_value_raw::<T>(buf, t);
+                t.extend_le_bytes(buf);
             }
             return;
         }
@@ -2263,17 +2263,10 @@ fn encode_tile_inner<T: LercDataType>(
             buf.push(TileCompressionMode::RawBinary as u8 | integrity);
             for val in values {
                 let t = T::from_f64(*val);
-                write_typed_value_raw::<T>(buf, t);
+                t.extend_le_bytes(buf);
             }
         }
     }
 }
 
-fn write_typed_value<T: LercDataType>(blob: &mut Vec<u8>, val: f64) {
-    let t = T::from_f64(val);
-    write_typed_value_raw::<T>(blob, t);
-}
 
-fn write_typed_value_raw<T: LercDataType>(blob: &mut Vec<u8>, val: T) {
-    val.extend_le_bytes(blob);
-}

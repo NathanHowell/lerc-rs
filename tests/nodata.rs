@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 /// Helper: create a multi-depth f32 image with some NoData pixels.
 /// Returns (pixels, mask, expected_no_data_value).
@@ -40,7 +40,7 @@ fn round_trip_f32_ndepth3_nodata() {
     let height = 8u32;
     let n_depth = 3u32;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -122,7 +122,7 @@ fn round_trip_f32_ndepth3_nodata_lossless() {
     let height = 8u32;
     let n_depth = 3u32;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -187,7 +187,7 @@ fn round_trip_f64_ndepth2_nodata() {
         };
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -241,7 +241,7 @@ fn round_trip_i32_ndepth2_nodata() {
         pixels[base + 1] = if k % 4 == 0 { no_data } else { k as i32 * 20 };
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -285,7 +285,7 @@ fn decode_info_reports_nodata() {
     let height = 8u32;
     let n_depth = 3u32;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -312,7 +312,7 @@ fn no_nodata_when_not_set() {
     let height = 4u32;
     let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -345,7 +345,7 @@ fn nodata_ndepth1_not_encoded() {
     let height = 4u32;
     let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -400,7 +400,7 @@ fn round_trip_multiband_nodata() {
         };
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -454,7 +454,7 @@ fn unsigned_u16_nodata_round_trip() {
         }
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -502,7 +502,7 @@ fn unsigned_u8_nodata_round_trip() {
         }
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,

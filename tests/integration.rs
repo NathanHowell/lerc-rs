@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, LercInfo, SampleData};
+use lerc::{DataType, Image, LercInfo, SampleData};
 
 #[test]
 fn huffman_u8_compression_ratio() {
@@ -12,7 +12,7 @@ fn huffman_u8_compression_ratio() {
         .map(|i| if i % 7 == 0 { 1 } else { 0 })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -52,7 +52,7 @@ fn round_trip_i8_lossless() {
         .map(|i| ((i % 256) as i16 - 128) as i8)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -98,7 +98,7 @@ fn round_trip_u8_with_mask_huffman() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -145,7 +145,7 @@ fn round_trip_u8_multiband_huffman() {
         .map(|i| (i % 10) as u8)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -279,7 +279,7 @@ fn round_trip_u8_lossless() {
     let height = 64u32;
     let pixels: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -312,7 +312,7 @@ fn round_trip_f32_lossy() {
         .map(|i| (i as f32) * 0.1 + 100.0)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -349,7 +349,7 @@ fn round_trip_i32_lossless() {
         .map(|i| i as i32 * 1000 - 100000)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -397,7 +397,7 @@ fn round_trip_with_partial_mask() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -442,7 +442,7 @@ fn round_trip_f32_lossless() {
         .map(|i| (i as f32) * 0.1 + 100.0)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -489,7 +489,7 @@ fn round_trip_f32_lossless_varied_data() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -526,7 +526,7 @@ fn round_trip_f64_lossless() {
         .map(|i| (i as f64) * 0.123456789 + 1000.0)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -573,7 +573,7 @@ fn round_trip_f64_lossless_varied() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -609,7 +609,7 @@ fn round_trip_f32_lossless_constant() {
     let height = 16u32;
     let pixels: Vec<f32> = vec![42.5; (width * height) as usize];
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -640,7 +640,7 @@ fn round_trip_f32_lossless_multi_depth() {
         .map(|i| (i as f32) * 0.01 + 1.0)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -699,7 +699,7 @@ fn block_size_selection_smooth_gradient_prefers_16() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -758,7 +758,7 @@ fn block_size_selection_noisy_data_prefers_8() {
         .collect();
 
     let max_z_error = 0.01;
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -809,7 +809,7 @@ fn block_size_16_round_trip_f32_lossy() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -846,7 +846,7 @@ fn block_size_header_field_is_valid() {
     let height = 32u32;
     let pixels: Vec<u16> = (0..width * height).map(|i| (i % 1000) as u16).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -901,7 +901,7 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
 
     let max_z_error = 0.001;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -958,7 +958,7 @@ fn try_raise_max_z_error_improves_compression() {
 
     let max_z_error = 0.001;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1027,7 +1027,7 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1078,7 +1078,7 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
 
     let max_z_error = 0.001;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1121,7 +1121,7 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
     let height = 32u32;
     let pixels: Vec<i32> = (0..width * height).map(|i| i as i32 * 100).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1165,7 +1165,7 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
 
     let max_z_error = 0.001;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1221,7 +1221,7 @@ fn try_raise_max_z_error_already_optimal() {
 
     let max_z_error = 0.005;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1296,7 +1296,7 @@ fn try_raise_max_z_error_with_partial_mask() {
 
     let max_z_error = 0.001;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,

@@ -81,7 +81,7 @@ pub struct LercInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct LercImage {
+pub struct Image {
     pub width: u32,
     pub height: u32,
     pub n_depth: u32,
@@ -95,7 +95,7 @@ pub struct LercImage {
     pub no_data_value: Option<f64>,
 }
 
-impl Default for LercImage {
+impl Default for Image {
     fn default() -> Self {
         Self {
             width: 0,
@@ -126,11 +126,11 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     decode::decode_info(data)
 }
 
-pub fn decode(data: &[u8]) -> Result<LercImage> {
+pub fn decode(data: &[u8]) -> Result<Image> {
     decode::decode(data)
 }
 
-pub fn encode(image: &LercImage, precision: Precision<f64>) -> Result<Vec<u8>> {
+pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
     let max_z_error = match precision {
         Precision::Lossless => {
             if image.data_type.is_integer() {
@@ -175,7 +175,7 @@ pub fn encode_slice<T: Sample>(
         }
         Precision::Tolerance(val) => val.to_f64(),
     };
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -222,7 +222,7 @@ pub fn encode_slice_masked<T: Sample>(
         }
         Precision::Tolerance(val) => val.to_f64(),
     };
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -273,10 +273,10 @@ pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32
 }
 
 // ---------------------------------------------------------------------------
-// Typed accessor methods on LercImage
+// Typed accessor methods on Image
 // ---------------------------------------------------------------------------
 
-impl LercImage {
+impl Image {
     /// Try to borrow the pixel data as `&[T]`.
     ///
     /// Returns `None` if the image's data type does not match `T`.
@@ -355,7 +355,7 @@ impl LercImage {
         }
     }
 
-    /// Create a single-band, all-valid `LercImage` from a typed pixel vector
+    /// Create a single-band, all-valid `Image` from a typed pixel vector
     /// and dimensions.
     ///
     /// Returns an error if `data.len() != width * height`.

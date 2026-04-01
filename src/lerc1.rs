@@ -17,7 +17,7 @@ use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::rle;
 use crate::types::TileRect;
-use crate::{DataType, LercImage, LercInfo, SampleData};
+use crate::{DataType, Image, LercInfo, SampleData};
 
 const LERC1_MAGIC: &[u8; 10] = b"CntZImage ";
 const LERC1_VERSION: i32 = 11;
@@ -611,8 +611,8 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     })
 }
 
-/// Fully decode a Lerc1 blob into an `LercImage`.
-pub fn decode(data: &[u8]) -> Result<LercImage> {
+/// Fully decode a Lerc1 blob into an `Image`.
+pub fn decode(data: &[u8]) -> Result<Image> {
     let mut cursor = Cursor::new(data);
     let hd = read_lerc1_header(&mut cursor)?;
 
@@ -703,7 +703,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         }
     }
 
-    Ok(LercImage {
+    Ok(Image {
         width: width as u32,
         height: height as u32,
         n_depth: 1,

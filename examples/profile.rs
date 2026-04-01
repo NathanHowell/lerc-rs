@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -17,7 +17,7 @@ fn make_f32_gradient(width: usize, height: usize) -> Vec<f32> {
 fn main() {
     let size = 512;
     let pixels = make_f32_gradient(size, size);
-    let image = LercImage {
+    let image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,
@@ -31,7 +31,7 @@ fn main() {
     let u8_pixels: Vec<u8> = (0..size * size)
         .map(|i| ((i * 7 + 13) % 256) as u8)
         .collect();
-    let u8_image = LercImage {
+    let u8_image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,

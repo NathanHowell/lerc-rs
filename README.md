@@ -55,7 +55,7 @@ let blob = lerc::encode_slice(128, 128, &bytes, Precision::Lossless).unwrap();
 // Decode to typed data
 let (pixels, mask, width, height) = lerc::decode_slice::<f32>(&blob).unwrap();
 
-// Or decode to LercImage for full metadata
+// Or decode to Image for full metadata
 let image = lerc::decode(&blob).unwrap();
 println!("{}×{}, {:?}, {} bands", image.width, image.height, image.data_type, image.n_bands);
 ```

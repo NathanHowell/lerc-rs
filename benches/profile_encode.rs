@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 fn make_f32_gradient(width: usize, height: usize) -> Vec<f32> {
     (0..width * height)
@@ -16,7 +16,7 @@ fn make_f32_gradient(width: usize, height: usize) -> Vec<f32> {
 fn bench_encode_512_lossy(c: &mut Criterion) {
     let size = 512;
     let pixels = make_f32_gradient(size, size);
-    let image = LercImage {
+    let image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,
@@ -35,7 +35,7 @@ fn bench_encode_512_lossy(c: &mut Criterion) {
 fn bench_encode_512_lossless(c: &mut Criterion) {
     let size = 512;
     let pixels = make_f32_gradient(size, size);
-    let image = LercImage {
+    let image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,
@@ -56,7 +56,7 @@ fn bench_encode_u8_512(c: &mut Criterion) {
     let pixels: Vec<u8> = (0..size * size)
         .map(|i| ((i * 7 + 13) % 256) as u8)
         .collect();
-    let image = LercImage {
+    let image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,
@@ -75,7 +75,7 @@ fn bench_encode_u8_512(c: &mut Criterion) {
 fn bench_decode_512_lossy(c: &mut Criterion) {
     let size = 512;
     let pixels = make_f32_gradient(size, size);
-    let image = LercImage {
+    let image = Image {
         width: size as u32,
         height: size as u32,
         n_depth: 1,

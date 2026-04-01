@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 /// Helper: build an nDepth=3 image with correlated depth slices.
 /// depth[0] = base, depth[1] = base + small_delta, depth[2] = base + 2 * small_delta
@@ -25,7 +25,7 @@ fn round_trip_u16_ndepth3_lossless() {
     let height = 32u32;
     let (pixels, n_depth) = make_correlated_u16(width, height);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -73,7 +73,7 @@ fn round_trip_i32_ndepth3_lossless() {
         pixels[i * 3 + 2] = base + (i as i32 % 10) + (i as i32 % 7);
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -116,7 +116,7 @@ fn round_trip_f32_ndepth3_lossy() {
         pixels[i * 3 + 2] = base + 1.0;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -164,7 +164,7 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         correlated[i * 3 + 2] = base.wrapping_add(2);
     }
 
-    let image_correlated = LercImage {
+    let image_correlated = Image {
         width,
         height,
         n_depth,
@@ -186,7 +186,7 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
         uncorrelated[i * 3 + 2] = ((i * 131 + 30000) % 60000) as u16;
     }
 
-    let image_uncorrelated = LercImage {
+    let image_uncorrelated = Image {
         width,
         height,
         n_depth,
@@ -241,7 +241,7 @@ fn round_trip_u8_ndepth3_lossless() {
         pixels[i * 3 + 2] = ((i + 2) % 256) as u8;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -292,7 +292,7 @@ fn round_trip_ndepth3_with_mask() {
         }
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -348,7 +348,7 @@ fn round_trip_identical_depths() {
         pixels[i * 3 + 2] = val;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -384,7 +384,7 @@ fn round_trip_f64_ndepth2_lossless() {
         pixels[i * 2 + 1] = base + 0.001;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -429,7 +429,7 @@ fn round_trip_u32_ndepth4_lossless() {
         pixels[i * 4 + 3] = base + 15;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -494,7 +494,7 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
 
     let pixels = make_correlated_f32_lossy(width, height);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -541,7 +541,7 @@ fn lossy_multi_depth_f64_round_trip() {
         pixels[i * 2 + 1] = base + 0.3;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -589,7 +589,7 @@ fn lossy_multi_depth_i32_round_trip() {
         pixels[i * 3 + 2] = base + 6;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -645,7 +645,7 @@ fn lossy_multi_depth_with_mask_round_trip() {
         }
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -711,7 +711,7 @@ fn lossy_multi_depth_multiband_round_trip() {
 
     let masks = vec![BitMask::all_valid(num_pixels); n_bands as usize];
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,

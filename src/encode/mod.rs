@@ -11,13 +11,13 @@ use crate::fpl;
 use crate::header::{self, HeaderInfo};
 use crate::rle;
 use crate::types::{DataType, ImageEncodeMode, Sample};
-use crate::{LercImage, SampleData};
+use crate::{Image, SampleData};
 
 use huffman::{is_high_entropy_u8, try_encode_huffman_int};
 use optimizations::{compute_no_data_sentinel, try_bit_plane_compression, try_raise_max_z_error};
 use tiles::{encode_tiles, select_block_size};
 
-pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
+pub fn encode(image: &Image, max_z_error: f64) -> Result<Vec<u8>> {
     match &image.data {
         SampleData::I8(d) => encode_slice(image, d, max_z_error),
         SampleData::U8(d) => encode_slice(image, d, max_z_error),
@@ -30,7 +30,7 @@ pub fn encode(image: &LercImage, max_z_error: f64) -> Result<Vec<u8>> {
     }
 }
 
-fn encode_slice<T: Sample>(image: &LercImage, data: &[T], max_z_error: f64) -> Result<Vec<u8>> {
+fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Result<Vec<u8>> {
     let width = image.width as usize;
     let height = image.height as usize;
     let n_depth = image.n_depth as usize;
@@ -411,7 +411,7 @@ fn write_blob_payload<T: Sample>(
 fn encode_one_band<T: Sample>(
     data: &[T],
     mask: &BitMask,
-    image: &LercImage,
+    image: &Image,
     max_z_error: f64,
     n_blobs_more: i32,
 ) -> Result<Vec<u8>> {

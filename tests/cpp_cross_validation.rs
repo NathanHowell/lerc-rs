@@ -3,7 +3,7 @@
 
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 use lerc_cpp_ref::{
     self as cpp, DT_CHAR, DT_DOUBLE, DT_FLOAT, DT_INT, DT_SHORT, DT_UCHAR, DT_UINT, DT_USHORT,
     INFO_DATA_TYPE, INFO_N_BANDS, INFO_N_COLS, INFO_N_ROWS, RANGE_MAX_Z_ERR_USED,
@@ -559,7 +559,7 @@ fn rust_encode_cpp_decode_multiband_f32() {
     let masks: Vec<_> = (0..n_bands).map(|_| BitMask::all_valid(ppb)).collect();
 
     let max_z_err = 0.01;
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -890,7 +890,7 @@ fn rust_encode_cpp_decode_multi_depth_f32_lossy() {
         data[i * 3 + 2] = base * 1.02 + noise2;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,
@@ -975,7 +975,7 @@ fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
         data[i * 3 + 2] = base + 2.0;
     }
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth,

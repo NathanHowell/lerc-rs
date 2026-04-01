@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 use lerc_cpp_ref as cpp;
 
 // ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ fn bench_encode_f32(c: &mut Criterion) {
         let valid = make_valid_bytes(size, size);
         let pixel_bytes = (size * size * 4) as u64;
 
-        let image = LercImage {
+        let image = Image {
             width: size as u32,
             height: size as u32,
             n_depth: 1,
@@ -176,7 +176,7 @@ fn bench_encode_u8(c: &mut Criterion) {
         let valid = make_valid_bytes(size, size);
         let pixel_bytes = (size * size) as u64;
 
-        let image = LercImage {
+        let image = Image {
             width: size as u32,
             height: size as u32,
             n_depth: 1,
@@ -220,7 +220,7 @@ fn bench_decode_synthetic(c: &mut Criterion) {
         let pixel_bytes = (size * size * 4) as u64;
 
         // Encode with Rust, then benchmark decode
-        let image = LercImage {
+        let image = Image {
             width: size as u32,
             height: size as u32,
             n_depth: 1,
@@ -294,7 +294,7 @@ fn bench_decode_f64_lossless(c: &mut Criterion) {
         let valid = make_valid_bytes(size, size);
         let pixel_bytes = (size * size * 8) as u64;
 
-        let image = LercImage {
+        let image = Image {
             width: size as u32,
             height: size as u32,
             n_depth: 1,

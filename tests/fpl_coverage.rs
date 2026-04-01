@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 // ---------------------------------------------------------------------------
 // Helper: verify that FPL encoding was used (IEM_DeltaDeltaHuffman = 3)
@@ -407,7 +407,7 @@ fn fpl_f32_multi_depth() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width: w,
         height: h,
         n_depth,
@@ -556,7 +556,7 @@ fn fpl_f64_multi_depth() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width: w,
         height: h,
         n_depth,

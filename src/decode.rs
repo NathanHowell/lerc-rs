@@ -9,7 +9,7 @@ use crate::huffman::HuffmanCodec;
 use crate::rle;
 use crate::tiles;
 use crate::types::{DataType, Sample};
-use crate::{DecodeResult, LercImage, LercInfo, SampleData};
+use crate::{DecodeResult, Image, LercInfo, SampleData};
 
 use crate::types::ImageEncodeMode;
 
@@ -60,7 +60,7 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     })
 }
 
-pub fn decode(data: &[u8]) -> Result<LercImage> {
+pub fn decode(data: &[u8]) -> Result<Image> {
     if crate::lerc1::is_lerc1(data) {
         return crate::lerc1::decode(data);
     }
@@ -79,7 +79,7 @@ pub fn decode(data: &[u8]) -> Result<LercImage> {
         ($default:expr, $variant:ident) => {{
             let mut output = vec![$default; total_pixels];
             let result = decode_bands_into(data, &info, &mut output)?;
-            Ok(LercImage {
+            Ok(Image {
                 width,
                 height,
                 n_depth,
@@ -1086,7 +1086,7 @@ mod tests {
 
     /// Helper: encode a u8 image and decode it, returning the decoded pixels.
     fn roundtrip_u8(width: u32, height: u32, pixels: &[u8], max_z_error: f64) -> Vec<u8> {
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1106,7 +1106,7 @@ mod tests {
 
     /// Helper: encode an i8 image and decode it, returning the decoded pixels.
     fn roundtrip_i8(width: u32, height: u32, pixels: &[i8], max_z_error: f64) -> Vec<i8> {
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1217,7 +1217,7 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<u8> = (0..16).collect();
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1242,7 +1242,7 @@ mod tests {
         let width = 4u32;
         let height = 4u32;
         let pixels: Vec<f32> = (0..16).map(|i| i as f32 * 1.5).collect();
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1266,7 +1266,7 @@ mod tests {
         let width = 3u32;
         let height = 3u32;
         let pixels = vec![42u16; 9];
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1289,7 +1289,7 @@ mod tests {
         let width = 2u32;
         let height = 2u32;
         let pixels = vec![0u8; 4];
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1322,7 +1322,7 @@ mod tests {
                 *pixel = (i * 7 % 256) as u8;
             }
         }
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,
@@ -1442,7 +1442,7 @@ mod tests {
         let mut all_pixels = band1.clone();
         all_pixels.extend_from_slice(&band2);
 
-        let image = crate::LercImage {
+        let image = crate::Image {
             width,
             height,
             n_depth: 1,

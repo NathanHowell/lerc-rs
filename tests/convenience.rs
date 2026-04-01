@@ -122,7 +122,7 @@ fn round_trip_u8_masked() {
 }
 
 // ---------------------------------------------------------------------------
-// Accessor methods on LercImage via as_typed
+// Accessor methods on Image via as_typed
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -203,14 +203,14 @@ fn lossy_round_trip_f64() {
 
 #[test]
 fn decode_slice_rejects_multiband() {
-    use lerc::{DataType, LercImage, SampleData};
+    use lerc::{DataType, Image, SampleData};
 
     let width = 8u32;
     let height = 8u32;
     let band_size = (width * height) as usize;
     let pixels = vec![0u8; band_size * 3];
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -236,13 +236,13 @@ fn decode_slice_rejects_multiband() {
 
 #[test]
 fn decode_slice_rejects_multidepth() {
-    use lerc::{DataType, LercImage, SampleData};
+    use lerc::{DataType, Image, SampleData};
 
     let width = 8u32;
     let height = 8u32;
     let pixels = vec![0.0f32; (width * height * 3) as usize];
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 3,
@@ -267,7 +267,7 @@ fn decode_slice_rejects_multidepth() {
 }
 
 // ---------------------------------------------------------------------------
-// LercImage ergonomic API tests
+// Image ergonomic API tests
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -396,7 +396,7 @@ fn lerc_image_from_pixels() {
     let height = 2u32;
     let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 
-    let image = lerc::LercImage::from_pixels(width, height, data.clone()).expect("from_pixels");
+    let image = lerc::Image::from_pixels(width, height, data.clone()).expect("from_pixels");
     assert_eq!(image.width, width);
     assert_eq!(image.height, height);
     assert_eq!(image.n_bands, 1);
@@ -413,28 +413,28 @@ fn lerc_image_from_pixels() {
 
 #[test]
 fn lerc_image_from_pixels_wrong_size() {
-    let result = lerc::LercImage::from_pixels::<u8>(3, 3, vec![0u8; 10]);
+    let result = lerc::Image::from_pixels::<u8>(3, 3, vec![0u8; 10]);
     assert!(result.is_err());
 }
 
 #[test]
 fn lerc_image_from_pixels_all_types() {
     // Verify from_pixels works for every Sample
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i8; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u8; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i16; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u16; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0i32; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0u32; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0.0f32; 4]).is_ok());
-    assert!(lerc::LercImage::from_pixels(2, 2, vec![0.0f64; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0i8; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0u8; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0i16; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0u16; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0i32; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0u32; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0.0f32; 4]).is_ok());
+    assert!(lerc::Image::from_pixels(2, 2, vec![0.0f64; 4]).is_ok());
 }
 
 #[test]
 fn lerc_image_pixel_multiband_returns_none() {
-    use lerc::{DataType, LercImage, SampleData};
+    use lerc::{DataType, Image, SampleData};
 
-    let image = LercImage {
+    let image = Image {
         width: 2,
         height: 2,
         n_depth: 1,

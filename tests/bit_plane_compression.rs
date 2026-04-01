@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 /// Build a u16 image where the lower `noisy_bits` are random noise and
 /// the upper bits form a smooth gradient. With enough pixels this should
@@ -83,7 +83,7 @@ fn bit_plane_compression_u16_noisy_low_bits() {
     let noisy_bits = 3u32;
     let pixels = make_noisy_u16(width, height, noisy_bits);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -141,7 +141,7 @@ fn bit_plane_compression_u32_noisy_low_bits() {
     let noisy_bits = 4u32;
     let pixels = make_noisy_u32(width, height, noisy_bits);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -184,7 +184,7 @@ fn bit_plane_compression_i16_noisy_low_bits() {
     let noisy_bits = 3u32;
     let pixels = make_noisy_i16(width, height, noisy_bits);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -226,7 +226,7 @@ fn positive_max_z_error_does_not_trigger_bit_plane() {
     let height = 128u32;
     let pixels = make_noisy_u16(width, height, 3);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -262,7 +262,7 @@ fn magic_value_777_triggers_bit_plane() {
     let height = 128u32;
     let pixels = make_noisy_u16(width, height, 3);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -296,7 +296,7 @@ fn bit_plane_fallback_to_lossless_for_clean_data() {
         .map(|i| (i * 100 / (width * height) as usize) as u16)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -334,7 +334,7 @@ fn bit_plane_compression_smaller_than_lossless() {
     let height = 128u32;
     let pixels = make_noisy_u16(width, height, 4);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -367,7 +367,7 @@ fn bit_plane_too_few_pixels_falls_back() {
     let height = 16u32; // Only 256 pixels, well below 5000
     let pixels = make_noisy_u16(width, height, 3);
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,

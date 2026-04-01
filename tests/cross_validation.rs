@@ -9,7 +9,7 @@
 
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 // ---------------------------------------------------------------------------
 // Reference test data from the C++ LERC SDK
@@ -519,7 +519,7 @@ fn encoded_single_band_header_validation() {
         .map(|i| (i as f32) * 0.1 + 100.0)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -556,7 +556,7 @@ fn encoded_multiband_three_concatenated_blobs() {
         .map(|i| ((i * 37) % 256) as u8)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -633,7 +633,7 @@ fn encoded_blob_size_matches_header() {
     // f32
     {
         let pixels: Vec<f32> = (0..n).map(|i| i as f32).collect();
-        let img = LercImage {
+        let img = Image {
             width,
             height,
             n_depth: 1,
@@ -651,7 +651,7 @@ fn encoded_blob_size_matches_header() {
     // u8
     {
         let pixels: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
-        let img = LercImage {
+        let img = Image {
             width,
             height,
             n_depth: 1,
@@ -669,7 +669,7 @@ fn encoded_blob_size_matches_header() {
     // i32
     {
         let pixels: Vec<i32> = (0..n).map(|i| i as i32 - 300).collect();
-        let img = LercImage {
+        let img = Image {
             width,
             height,
             n_depth: 1,
@@ -687,7 +687,7 @@ fn encoded_blob_size_matches_header() {
     // f64
     {
         let pixels: Vec<f64> = (0..n).map(|i| i as f64 * 0.001).collect();
-        let img = LercImage {
+        let img = Image {
             width,
             height,
             n_depth: 1,
@@ -710,7 +710,7 @@ fn encoded_checksum_verified_manually() {
     let n = (width * height) as usize;
     let pixels: Vec<f32> = (0..n).map(|i| (i as f32).sqrt()).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -741,9 +741,9 @@ fn encoded_data_type_codes_correct() {
     let height = 8u32;
     let n = (width * height) as usize;
 
-    let cases: Vec<(LercImage, i32)> = vec![
+    let cases: Vec<(Image, i32)> = vec![
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -756,7 +756,7 @@ fn encoded_data_type_codes_correct() {
             1, // Byte
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -769,7 +769,7 @@ fn encoded_data_type_codes_correct() {
             2, // Short
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -782,7 +782,7 @@ fn encoded_data_type_codes_correct() {
             3, // UShort
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -795,7 +795,7 @@ fn encoded_data_type_codes_correct() {
             4, // Int
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -808,7 +808,7 @@ fn encoded_data_type_codes_correct() {
             5, // UInt
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -821,7 +821,7 @@ fn encoded_data_type_codes_correct() {
             6, // Float
         ),
         (
-            LercImage {
+            Image {
                 width,
                 height,
                 n_depth: 1,
@@ -862,7 +862,7 @@ fn deterministic_encoding_f32() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -891,7 +891,7 @@ fn deterministic_encoding_u8_multiband() {
         .map(|i| ((i * 41 + 7) % 256) as u8)
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -933,7 +933,7 @@ fn deterministic_encoding_with_mask() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -962,7 +962,7 @@ fn self_consistency_all_invalid() {
     let mask = BitMask::new(n); // all invalid
 
     let pixels: Vec<f32> = vec![0.0; n];
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -997,7 +997,7 @@ fn self_consistency_single_valid_pixel() {
     let mut pixels: Vec<f32> = vec![0.0; n];
     pixels[100] = 42.5;
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1040,7 +1040,7 @@ fn self_consistency_constant_image() {
     let n = (width * height) as usize;
     let pixels: Vec<f32> = vec![std::f32::consts::PI; n];
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1081,7 +1081,7 @@ fn self_consistency_i16_large_range() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -1118,7 +1118,7 @@ fn self_consistency_u32_sparse_mask() {
 
     let pixels: Vec<u32> = (0..n).map(|i| (i as u32) * 1000).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,

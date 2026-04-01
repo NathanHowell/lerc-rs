@@ -1,6 +1,6 @@
 use lerc::Precision;
 use lerc::bitmask::BitMask;
-use lerc::{DataType, LercImage, SampleData};
+use lerc::{DataType, Image, SampleData};
 
 /// Helper: encode an image, then decode with both `decode()` and `decode_*_into()`,
 /// and verify the results match.
@@ -12,7 +12,7 @@ macro_rules! test_decode_into_matches {
             let height: u32 = $height;
             let pixels: Vec<$ty> = $pixels;
 
-            let image = LercImage {
+            let image = Image {
                 width,
                 height,
                 n_depth: 1,
@@ -165,7 +165,7 @@ fn decode_into_buffer_too_small() {
     let height = 32u32;
     let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -196,7 +196,7 @@ fn decode_into_type_mismatch() {
     let height = 16u32;
     let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -227,7 +227,7 @@ fn decode_into_oversized_buffer_ok() {
     let height = 16u32;
     let pixels: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -271,7 +271,7 @@ fn decode_into_multiband() {
 
     let pixels: Vec<u8> = (0..total).map(|i| (i % 10) as u8).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -323,7 +323,7 @@ fn decode_into_with_mask() {
         })
         .collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,
@@ -365,7 +365,7 @@ fn decode_into_generic_api() {
     let height = 16u32;
     let pixels: Vec<u32> = (0..width * height).map(|i| i * 42).collect();
 
-    let image = LercImage {
+    let image = Image {
         width,
         height,
         n_depth: 1,

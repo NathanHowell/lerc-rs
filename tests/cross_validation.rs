@@ -210,8 +210,8 @@ fn california_detailed_pixel_statistics() {
     assert_eq!(image.width, 400);
     assert_eq!(image.height, 400);
     assert_eq!(image.data_type, DataType::Float);
-    assert_eq!(image.n_bands, 1);
-    assert_eq!(image.n_depth, 1);
+    assert_eq!(image.bands, 1);
+    assert_eq!(image.depth, 1);
 
     let pixels = match &image.data {
         SampleData::F32(p) => p,
@@ -247,7 +247,7 @@ fn california_detailed_pixel_statistics() {
         }
     }
 
-    assert_eq!(valid_count as u32, info.num_valid_pixels);
+    assert_eq!(valid_count as u32, info.valid_pixels);
     assert!(valid_count > 0, "no valid pixels");
     assert!(invalid_count > 0, "expected some invalid (ocean) pixels");
 
@@ -314,8 +314,8 @@ fn bluemarble_three_bands_detailed() {
 
     assert_eq!(image.width, 256);
     assert_eq!(image.height, 256);
-    assert_eq!(image.n_bands, 3);
-    assert_eq!(image.n_depth, 1);
+    assert_eq!(image.bands, 3);
+    assert_eq!(image.depth, 1);
     assert_eq!(image.data_type, DataType::Byte);
 
     let pixels = match &image.data {
@@ -363,16 +363,16 @@ fn bluemarble_three_bands_detailed() {
 
     // Valid pixel count per band: from decode_info (first blob header)
     assert!(
-        info.num_valid_pixels > 0 && info.num_valid_pixels <= (256 * 256) as u32,
-        "num_valid_pixels {} out of expected range",
-        info.num_valid_pixels
+        info.valid_pixels > 0 && info.valid_pixels <= (256 * 256) as u32,
+        "valid_pixels {} out of expected range",
+        info.valid_pixels
     );
 
     // Verify the validity mask from the decoded image
     let mask = &image.valid_masks[0];
     let valid_count = mask.count_valid();
     assert_eq!(
-        valid_count, info.num_valid_pixels as usize,
+        valid_count, info.valid_pixels as usize,
         "mask valid count does not match header"
     );
 }
@@ -451,7 +451,7 @@ fn bluemarble_round_trip_lossless() {
 
     assert_eq!(image2.width, 256);
     assert_eq!(image2.height, 256);
-    assert_eq!(image2.n_bands, 3);
+    assert_eq!(image2.bands, 3);
     assert_eq!(image2.data_type, DataType::Byte);
 
     let pixels2 = match &image2.data {
@@ -522,8 +522,8 @@ fn encoded_single_band_header_validation() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels),
@@ -559,8 +559,8 @@ fn encoded_multiband_three_concatenated_blobs() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands,
+        depth: 1,
+        bands: n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: SampleData::U8(pixels),
@@ -636,8 +636,8 @@ fn encoded_blob_size_matches_header() {
         let img = Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(n)],
             data: SampleData::F32(pixels),
@@ -654,8 +654,8 @@ fn encoded_blob_size_matches_header() {
         let img = Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(n)],
             data: SampleData::U8(pixels),
@@ -672,8 +672,8 @@ fn encoded_blob_size_matches_header() {
         let img = Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Int,
             valid_masks: vec![BitMask::all_valid(n)],
             data: SampleData::I32(pixels),
@@ -690,8 +690,8 @@ fn encoded_blob_size_matches_header() {
         let img = Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Double,
             valid_masks: vec![BitMask::all_valid(n)],
             data: SampleData::F64(pixels),
@@ -713,8 +713,8 @@ fn encoded_checksum_verified_manually() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(n)],
         data: SampleData::F32(pixels),
@@ -746,8 +746,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::Byte,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::U8(vec![0u8; n]),
@@ -759,8 +759,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::Short,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::I16(vec![0i16; n]),
@@ -772,8 +772,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::UShort,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::U16(vec![0u16; n]),
@@ -785,8 +785,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::Int,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::I32(vec![0i32; n]),
@@ -798,8 +798,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::UInt,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::U32(vec![0u32; n]),
@@ -811,8 +811,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::Float,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::F32(vec![0.0f32; n]),
@@ -824,8 +824,8 @@ fn encoded_data_type_codes_correct() {
             Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: DataType::Double,
                 valid_masks: vec![BitMask::all_valid(n)],
                 data: SampleData::F64(vec![0.0f64; n]),
@@ -865,8 +865,8 @@ fn deterministic_encoding_f32() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels),
@@ -894,8 +894,8 @@ fn deterministic_encoding_u8_multiband() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 3,
+        depth: 1,
+        bands: 3,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: SampleData::U8(pixels),
@@ -936,8 +936,8 @@ fn deterministic_encoding_with_mask() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
         data: SampleData::F32(pixels),
@@ -965,8 +965,8 @@ fn self_consistency_all_invalid() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
         data: SampleData::F32(pixels),
@@ -1000,8 +1000,8 @@ fn self_consistency_single_valid_pixel() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: SampleData::F32(pixels),
@@ -1043,8 +1043,8 @@ fn self_consistency_constant_image() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(n)],
         data: SampleData::F32(pixels.clone()),
@@ -1084,8 +1084,8 @@ fn self_consistency_i16_large_range() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Short,
         valid_masks: vec![BitMask::all_valid(n)],
         data: SampleData::I16(pixels.clone()),
@@ -1121,8 +1121,8 @@ fn self_consistency_u32_sparse_mask() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![mask.clone()],
         data: SampleData::U32(pixels.clone()),

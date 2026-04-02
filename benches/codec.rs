@@ -72,8 +72,8 @@ fn bench_decode_reference(c: &mut Criterion) {
                 cpp::DT_FLOAT,
                 ca_info.width as i32,
                 ca_info.height as i32,
-                ca_info.n_depth as i32,
-                ca_info.n_bands as i32,
+                ca_info.depth as i32,
+                ca_info.bands as i32,
             )
         });
     });
@@ -87,8 +87,8 @@ fn bench_decode_reference(c: &mut Criterion) {
                 cpp::DT_UCHAR,
                 bm_info.width as i32,
                 bm_info.height as i32,
-                bm_info.n_depth as i32,
-                bm_info.n_bands as i32,
+                bm_info.depth as i32,
+                bm_info.bands as i32,
             )
         });
     });
@@ -107,8 +107,8 @@ fn bench_encode_f32(c: &mut Criterion) {
         let image = Image {
             width: size as u32,
             height: size as u32,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(size * size)],
             data: SampleData::F32(pixels.clone()),
@@ -179,8 +179,8 @@ fn bench_encode_u8(c: &mut Criterion) {
         let image = Image {
             width: size as u32,
             height: size as u32,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(size * size)],
             data: SampleData::U8(pixels.clone()),
@@ -223,8 +223,8 @@ fn bench_decode_synthetic(c: &mut Criterion) {
         let image = Image {
             width: size as u32,
             height: size as u32,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(size * size)],
             data: SampleData::F32(pixels.clone()),
@@ -297,8 +297,8 @@ fn bench_decode_f64_lossless(c: &mut Criterion) {
         let image = Image {
             width: size as u32,
             height: size as u32,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Double,
             valid_masks: vec![BitMask::all_valid(size * size)],
             data: SampleData::F64(pixels.clone()),

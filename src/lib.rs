@@ -56,8 +56,8 @@ pub enum Precision<T> {
 pub struct DecodeResult {
     pub width: u32,
     pub height: u32,
-    pub n_depth: u32,
-    pub n_bands: u32,
+    pub depth: u32,
+    pub bands: u32,
     pub data_type: DataType,
     pub valid_masks: Vec<BitMask>,
     pub no_data_value: Option<f64>,
@@ -68,10 +68,10 @@ pub struct LercInfo {
     pub version: i32,
     pub width: u32,
     pub height: u32,
-    pub n_depth: u32,
-    pub n_bands: u32,
+    pub depth: u32,
+    pub bands: u32,
     pub data_type: DataType,
-    pub num_valid_pixels: u32,
+    pub valid_pixels: u32,
     pub tolerance: f64,
     pub min_value: f64,
     pub max_value: f64,
@@ -84,8 +84,8 @@ pub struct LercInfo {
 pub struct Image {
     pub width: u32,
     pub height: u32,
-    pub n_depth: u32,
-    pub n_bands: u32,
+    pub depth: u32,
+    pub bands: u32,
     pub data_type: DataType,
     pub valid_masks: Vec<BitMask>,
     pub data: SampleData,
@@ -100,8 +100,8 @@ impl Default for Image {
         Self {
             width: 0,
             height: 0,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: Vec::new(),
             data: SampleData::U8(Vec::new()),
@@ -178,8 +178,8 @@ pub fn encode_slice<T: Sample>(
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: T::DATA_TYPE,
         valid_masks: vec![BitMask::all_valid(expected)],
         data: T::into_lerc_data(data.to_vec()),
@@ -225,8 +225,8 @@ pub fn encode_slice_masked<T: Sample>(
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: T::DATA_TYPE,
         valid_masks: vec![mask.clone()],
         data: T::into_lerc_data(data.to_vec()),
@@ -243,16 +243,16 @@ pub fn encode_slice_masked<T: Sample>(
 /// multi-band/multi-depth blobs to get full shape and per-band masks).
 pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
     let image = decode::decode(blob)?;
-    if image.n_bands > 1 {
+    if image.bands > 1 {
         return Err(LercError::InvalidData(alloc::format!(
             "decode_slice requires single-band data, got {} bands (use decode() instead)",
-            image.n_bands
+            image.bands
         )));
     }
-    if image.n_depth > 1 {
+    if image.depth > 1 {
         return Err(LercError::InvalidData(alloc::format!(
-            "decode_slice requires single-depth data, got n_depth={} (use decode() instead)",
-            image.n_depth
+            "decode_slice requires single-depth data, got depth={} (use decode() instead)",
+            image.depth
         )));
     }
     let w = image.width;
@@ -291,10 +291,10 @@ impl Image {
 
     /// Get the pixel value at `(row, col)` for single-band, single-depth images.
     ///
-    /// Returns `None` if the data type does not match `T`, if `n_bands > 1` or
-    /// `n_depth > 1`, or if the coordinates are out of bounds.
+    /// Returns `None` if the data type does not match `T`, if `bands > 1` or
+    /// `depth > 1`, or if the coordinates are out of bounds.
     pub fn pixel<T: Sample>(&self, row: u32, col: u32) -> Option<T> {
-        if self.n_bands != 1 || self.n_depth != 1 {
+        if self.bands != 1 || self.depth != 1 {
             return None;
         }
         if row >= self.height || col >= self.width {
@@ -308,12 +308,12 @@ impl Image {
     /// Iterate over valid pixels as `(row, col, value)` tuples.
     ///
     /// Only works for single-band, single-depth images. Returns `None` if the data
-    /// type does not match `T` or if `n_bands > 1` or `n_depth > 1`.
+    /// type does not match `T` or if `bands > 1` or `depth > 1`.
     /// The iterator respects the validity mask, skipping invalid pixels.
     pub fn valid_pixels<'a, T: Sample + 'a>(
         &'a self,
     ) -> Option<impl Iterator<Item = (u32, u32, T)> + 'a> {
-        if self.n_bands != 1 || self.n_depth != 1 {
+        if self.bands != 1 || self.depth != 1 {
             return None;
         }
         let data = self.as_typed::<T>()?;
@@ -370,8 +370,8 @@ impl Image {
         Ok(Self {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: T::DATA_TYPE,
             valid_masks: vec![BitMask::all_valid(expected)],
             data: T::into_lerc_data(data),

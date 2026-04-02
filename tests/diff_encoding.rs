@@ -28,8 +28,8 @@ fn round_trip_u16_ndepth3_lossless() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U16(pixels.clone()),
@@ -39,7 +39,7 @@ fn round_trip_u16_ndepth3_lossless() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     assert_eq!(decoded.width, width);
     assert_eq!(decoded.height, height);
 
@@ -76,8 +76,8 @@ fn round_trip_i32_ndepth3_lossless() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::I32(pixels.clone()),
@@ -87,7 +87,7 @@ fn round_trip_i32_ndepth3_lossless() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::I32(dec_pixels) => {
             assert_eq!(
@@ -119,8 +119,8 @@ fn round_trip_f32_ndepth3_lossy() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F32(pixels.clone()),
@@ -130,7 +130,7 @@ fn round_trip_f32_ndepth3_lossy() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
@@ -167,8 +167,8 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
     let image_correlated = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::U16(correlated.clone()),
@@ -189,8 +189,8 @@ fn diff_encoding_smaller_than_independent_for_correlated_data() {
     let image_uncorrelated = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::U16(uncorrelated.clone()),
@@ -244,8 +244,8 @@ fn round_trip_u8_ndepth3_lossless() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::U8(pixels.clone()),
@@ -255,7 +255,7 @@ fn round_trip_u8_ndepth3_lossless() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::U8(dec_pixels) => {
             assert_eq!(
@@ -295,8 +295,8 @@ fn round_trip_ndepth3_with_mask() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Short,
         valid_masks: vec![mask.clone()],
         data: SampleData::I16(pixels.clone()),
@@ -306,7 +306,7 @@ fn round_trip_ndepth3_with_mask() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     let dec_mask = &decoded.valid_masks[0];
 
     match &decoded.data {
@@ -351,8 +351,8 @@ fn round_trip_identical_depths() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::I32(pixels.clone()),
@@ -387,8 +387,8 @@ fn round_trip_f64_ndepth2_lossless() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F64(pixels.clone()),
@@ -398,7 +398,7 @@ fn round_trip_f64_ndepth2_lossless() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::F64(dec_pixels) => {
             for (i, (&orig, &dec)) in pixels.iter().zip(dec_pixels).enumerate() {
@@ -432,8 +432,8 @@ fn round_trip_u32_ndepth4_lossless() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::U32(pixels.clone()),
@@ -443,7 +443,7 @@ fn round_trip_u32_ndepth4_lossless() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::U32(dec_pixels) => {
             assert_eq!(dec_pixels, &pixels, "u32 nDepth=4 round-trip mismatch");
@@ -497,8 +497,8 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F32(pixels.clone()),
@@ -508,7 +508,7 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
@@ -544,8 +544,8 @@ fn lossy_multi_depth_f64_round_trip() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F64(pixels.clone()),
@@ -555,7 +555,7 @@ fn lossy_multi_depth_f64_round_trip() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::F64(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
@@ -592,8 +592,8 @@ fn lossy_multi_depth_i32_round_trip() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::I32(pixels.clone()),
@@ -603,7 +603,7 @@ fn lossy_multi_depth_i32_round_trip() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::I32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
@@ -648,8 +648,8 @@ fn lossy_multi_depth_with_mask_round_trip() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: SampleData::F32(pixels.clone()),
@@ -659,7 +659,7 @@ fn lossy_multi_depth_with_mask_round_trip() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     let dec_mask = &decoded.valid_masks[0];
 
     match &decoded.data {
@@ -714,8 +714,8 @@ fn lossy_multi_depth_multiband_round_trip() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands,
+        depth: n_depth,
+        bands: n_bands,
         data_type: DataType::Float,
         valid_masks: masks,
         data: SampleData::F32(pixels.clone()),
@@ -725,8 +725,8 @@ fn lossy_multi_depth_multiband_round_trip() {
     let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
-    assert_eq!(decoded.n_bands, n_bands);
+    assert_eq!(decoded.depth, n_depth);
+    assert_eq!(decoded.bands, n_bands);
     match &decoded.data {
         SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());

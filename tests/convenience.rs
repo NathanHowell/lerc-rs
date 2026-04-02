@@ -213,8 +213,8 @@ fn decode_slice_rejects_multiband() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 3,
+        depth: 1,
+        bands: 3,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: SampleData::U8(pixels),
@@ -245,8 +245,8 @@ fn decode_slice_rejects_multidepth() {
     let image = Image {
         width,
         height,
-        n_depth: 3,
-        n_bands: 1,
+        depth: 3,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels),
@@ -399,8 +399,8 @@ fn lerc_image_from_pixels() {
     let image = lerc::Image::from_pixels(width, height, data.clone()).expect("from_pixels");
     assert_eq!(image.width, width);
     assert_eq!(image.height, height);
-    assert_eq!(image.n_bands, 1);
-    assert_eq!(image.n_depth, 1);
+    assert_eq!(image.bands, 1);
+    assert_eq!(image.depth, 1);
     assert_eq!(image.data_type, lerc::DataType::Float);
     assert!(image.all_valid());
     assert_eq!(image.as_typed::<f32>().unwrap(), &data[..]);
@@ -437,8 +437,8 @@ fn lerc_image_pixel_multiband_returns_none() {
     let image = Image {
         width: 2,
         height: 2,
-        n_depth: 1,
-        n_bands: 2,
+        depth: 1,
+        bands: 2,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(4)],
         data: SampleData::U8(vec![0; 8]),

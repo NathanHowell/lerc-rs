@@ -15,8 +15,8 @@ fn huffman_u8_compression_ratio() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U8(pixels.clone()),
@@ -55,8 +55,8 @@ fn round_trip_i8_lossless() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Char,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::I8(pixels.clone()),
@@ -101,8 +101,8 @@ fn round_trip_u8_with_mask_huffman() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![mask.clone()],
         data: SampleData::U8(pixels.clone()),
@@ -148,8 +148,8 @@ fn round_trip_u8_multiband_huffman() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands,
+        depth: 1,
+        bands: n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: SampleData::U8(pixels.clone()),
@@ -174,16 +174,16 @@ fn decode_california_float() {
 
     assert_eq!(info.width, 400);
     assert_eq!(info.height, 400);
-    assert_eq!(info.n_depth, 1);
-    assert_eq!(info.n_bands, 1);
+    assert_eq!(info.depth, 1);
+    assert_eq!(info.bands, 1);
     assert_eq!(info.data_type, DataType::Float);
     assert!(info.tolerance >= 0.0);
 
     let image = lerc::decode(data).expect("decode failed");
     assert_eq!(image.width, 400);
     assert_eq!(image.height, 400);
-    assert_eq!(image.n_depth, 1);
-    assert_eq!(image.n_bands, 1);
+    assert_eq!(image.depth, 1);
+    assert_eq!(image.bands, 1);
     assert_eq!(image.data_type, DataType::Float);
     assert_eq!(image.valid_masks.len(), 1);
 
@@ -210,7 +210,7 @@ fn decode_california_float() {
                 }
             }
 
-            assert_eq!(valid_count, info.num_valid_pixels);
+            assert_eq!(valid_count, info.valid_pixels);
             assert!(valid_count > 0);
 
             // Decoded values should be within [zMin - maxZError, zMax + maxZError]
@@ -239,8 +239,8 @@ fn decode_bluemarble_byte() {
     assert_eq!(info.height, 256);
     assert_eq!(info.data_type, DataType::Byte);
     // 3-band file: band-interleaved via concatenated blobs
-    assert_eq!(info.n_bands, 3);
-    assert_eq!(info.n_depth, 1);
+    assert_eq!(info.bands, 3);
+    assert_eq!(info.depth, 1);
 
     let image = lerc::decode(data).expect("decode failed");
     assert_eq!(image.width, 256);
@@ -249,7 +249,7 @@ fn decode_bluemarble_byte() {
 
     match &image.data {
         SampleData::U8(pixels) => {
-            let expected_len = 256 * 256 * image.n_depth as usize * image.n_bands as usize;
+            let expected_len = 256 * 256 * image.depth as usize * image.bands as usize;
             assert_eq!(pixels.len(), expected_len);
 
             // Byte values should be in [0, 255] (trivially true for u8)
@@ -269,7 +269,7 @@ fn decode_info_roundtrip_consistency() {
 
     assert_eq!(info.width, image.width);
     assert_eq!(info.height, image.height);
-    assert_eq!(info.n_depth, image.n_depth);
+    assert_eq!(info.depth, image.depth);
     assert_eq!(info.data_type, image.data_type);
 }
 
@@ -282,8 +282,8 @@ fn round_trip_u8_lossless() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U8(pixels.clone()),
@@ -315,8 +315,8 @@ fn round_trip_f32_lossy() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -352,8 +352,8 @@ fn round_trip_i32_lossless() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::I32(pixels.clone()),
@@ -400,8 +400,8 @@ fn round_trip_with_partial_mask() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: SampleData::F32(pixels.clone()),
@@ -445,8 +445,8 @@ fn round_trip_f32_lossless() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -492,8 +492,8 @@ fn round_trip_f32_lossless_varied_data() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -529,8 +529,8 @@ fn round_trip_f64_lossless() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F64(pixels.clone()),
@@ -576,8 +576,8 @@ fn round_trip_f64_lossless_varied() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F64(pixels.clone()),
@@ -612,8 +612,8 @@ fn round_trip_f32_lossless_constant() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -643,8 +643,8 @@ fn round_trip_f32_lossless_multi_depth() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -654,7 +654,7 @@ fn round_trip_f32_lossless_multi_depth() {
     let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
     let decoded = lerc::decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
     match &decoded.data {
         SampleData::F32(dec_pixels) => {
             assert_eq!(dec_pixels.len(), pixels.len());
@@ -702,8 +702,8 @@ fn block_size_selection_smooth_gradient_prefers_16() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -761,8 +761,8 @@ fn block_size_selection_noisy_data_prefers_8() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -812,8 +812,8 @@ fn block_size_16_round_trip_f32_lossy() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -849,8 +849,8 @@ fn block_size_header_field_is_valid() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::UShort,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U16(pixels.clone()),
@@ -904,8 +904,8 @@ fn try_raise_max_z_error_f32_two_decimal_places() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -961,8 +961,8 @@ fn try_raise_max_z_error_improves_compression() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -1030,8 +1030,8 @@ fn try_raise_max_z_error_not_triggered_for_zero_mze() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -1081,8 +1081,8 @@ fn try_raise_max_z_error_not_triggered_for_full_precision() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F64(pixels.clone()),
@@ -1124,8 +1124,8 @@ fn try_raise_max_z_error_not_triggered_for_integer() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Int,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::I32(pixels.clone()),
@@ -1168,8 +1168,8 @@ fn try_raise_max_z_error_f64_one_decimal_place() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F64(pixels.clone()),
@@ -1224,8 +1224,8 @@ fn try_raise_max_z_error_already_optimal() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -1299,8 +1299,8 @@ fn try_raise_max_z_error_with_partial_mask() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: SampleData::F32(pixels.clone()),
@@ -1352,16 +1352,16 @@ fn decode_lerc1_world() {
     assert_eq!(info.version, 11, "lerc1 version should be 11");
     assert_eq!(info.width, 257, "unexpected width");
     assert_eq!(info.height, 257, "unexpected height");
-    assert_eq!(info.n_depth, 1, "lerc1 always has n_depth=1");
-    assert_eq!(info.n_bands, 1, "lerc1 always has n_bands=1");
+    assert_eq!(info.depth, 1, "lerc1 always has n_depth=1");
+    assert_eq!(info.bands, 1, "lerc1 always has n_bands=1");
     assert_eq!(info.data_type, DataType::Float, "lerc1 always produces f32");
 
     // Verify full decode
     let image = lerc::decode(&data).expect("decode failed for lerc1");
     assert_eq!(image.width, 257);
     assert_eq!(image.height, 257);
-    assert_eq!(image.n_depth, 1);
-    assert_eq!(image.n_bands, 1);
+    assert_eq!(image.depth, 1);
+    assert_eq!(image.bands, 1);
     assert_eq!(image.data_type, DataType::Float);
     assert_eq!(image.valid_masks.len(), 1);
 

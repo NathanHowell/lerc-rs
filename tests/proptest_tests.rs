@@ -323,8 +323,8 @@ proptest! {
 
         prop_assert_eq!(info.width, image.width);
         prop_assert_eq!(info.height, image.height);
-        prop_assert_eq!(info.n_depth, image.n_depth);
-        prop_assert_eq!(info.n_bands, image.n_bands);
+        prop_assert_eq!(info.depth, image.depth);
+        prop_assert_eq!(info.bands, image.bands);
         prop_assert_eq!(info.data_type, image.data_type);
         prop_assert_eq!(info.data_type, DataType::Float);
     }
@@ -337,8 +337,8 @@ proptest! {
 
         prop_assert_eq!(info.width, image.width);
         prop_assert_eq!(info.height, image.height);
-        prop_assert_eq!(info.n_depth, image.n_depth);
-        prop_assert_eq!(info.n_bands, image.n_bands);
+        prop_assert_eq!(info.depth, image.depth);
+        prop_assert_eq!(info.bands, image.bands);
         prop_assert_eq!(info.data_type, image.data_type);
         prop_assert_eq!(info.data_type, DataType::Byte);
     }

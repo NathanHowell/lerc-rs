@@ -598,11 +598,11 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         version: LERC1_VERSION,
         width: hd.width as u32,
         height: hd.height as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         // We can't know exact valid count without decoding; use total pixels as upper bound
-        num_valid_pixels: (hd.width as u32) * (hd.height as u32),
+        valid_pixels: (hd.width as u32) * (hd.height as u32),
         tolerance: hd.max_z_error,
         min_value: f64::NAN, // Not available from header alone
         max_value: z_sec.max_val_in_img as f64,
@@ -706,8 +706,8 @@ pub fn decode(data: &[u8]) -> Result<Image> {
     Ok(Image {
         width: width as u32,
         height: height as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask],
         data: SampleData::F32(z),

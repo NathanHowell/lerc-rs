@@ -566,8 +566,8 @@ fn rust_encode_cpp_decode_multiband_f32() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands,
+        depth: 1,
+        bands: n_bands,
         data_type: DataType::Float,
         valid_masks: masks,
         data: SampleData::F32(data.clone()),
@@ -613,7 +613,7 @@ fn cpp_encode_rust_decode_multiband_u8() {
 
     let image = lerc::decode(&blob).unwrap();
     assert_eq!(image.data_type, DataType::Byte);
-    assert_eq!(image.n_bands, nb as u32);
+    assert_eq!(image.bands, nb as u32);
     assert_eq!(data.as_slice(), image.as_typed::<u8>().unwrap());
 }
 
@@ -897,8 +897,8 @@ fn rust_encode_cpp_decode_multi_depth_f32_lossy() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F32(data.clone()),
@@ -950,7 +950,7 @@ fn cpp_encode_rust_decode_multi_depth_f32_lossy() {
     );
 
     let image = lerc::decode(&blob).unwrap();
-    assert_eq!(image.n_depth, n_depth as u32);
+    assert_eq!(image.depth, n_depth as u32);
     let decoded = image.as_typed::<f32>().unwrap();
 
     for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
@@ -982,8 +982,8 @@ fn roundtrip_rust_cpp_multi_depth_f32_lossy() {
     let image = Image {
         width,
         height,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(num_pixels)],
         data: SampleData::F32(data.clone()),

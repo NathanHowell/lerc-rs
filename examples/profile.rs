@@ -20,8 +20,8 @@ fn main() {
     let image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::F32(pixels.clone()),
@@ -34,8 +34,8 @@ fn main() {
     let u8_image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::U8(u8_pixels),

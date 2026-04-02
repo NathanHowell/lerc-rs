@@ -15,8 +15,8 @@ macro_rules! test_decode_into_matches {
             let image = Image {
                 width,
                 height,
-                n_depth: 1,
-                n_bands: 1,
+                depth: 1,
+                bands: 1,
                 data_type: $dt,
                 valid_masks: vec![BitMask::all_valid((width * height) as usize)],
                 data: SampleData::$variant(pixels.clone()),
@@ -39,8 +39,8 @@ macro_rules! test_decode_into_matches {
 
             assert_eq!(result.width, width);
             assert_eq!(result.height, height);
-            assert_eq!(result.n_depth, 1);
-            assert_eq!(result.n_bands, 1);
+            assert_eq!(result.depth, 1);
+            assert_eq!(result.bands, 1);
             assert_eq!(result.data_type, $dt);
             assert_eq!(result.valid_masks.len(), decoded.valid_masks.len());
             assert_eq!(
@@ -168,8 +168,8 @@ fn decode_into_buffer_too_small() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels),
@@ -199,8 +199,8 @@ fn decode_into_type_mismatch() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::F32(pixels),
@@ -230,8 +230,8 @@ fn decode_into_oversized_buffer_ok() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U8(pixels.clone()),
@@ -274,8 +274,8 @@ fn decode_into_multiband() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands,
+        depth: 1,
+        bands: n_bands,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(band_size)],
         data: SampleData::U8(pixels.clone()),
@@ -295,7 +295,7 @@ fn decode_into_multiband() {
     let mut output = vec![0u8; total];
     let result = lerc::decode_u8_into(&encoded, &mut output).expect("decode_into failed");
 
-    assert_eq!(result.n_bands, n_bands);
+    assert_eq!(result.bands, n_bands);
     assert_eq!(result.valid_masks.len(), decoded.valid_masks.len());
     assert_eq!(output, expected);
 }
@@ -326,8 +326,8 @@ fn decode_into_with_mask() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![mask.clone()],
         data: SampleData::F32(pixels),
@@ -368,8 +368,8 @@ fn decode_into_generic_api() {
     let image = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::UInt,
         valid_masks: vec![BitMask::all_valid((width * height) as usize)],
         data: SampleData::U32(pixels.clone()),

@@ -19,8 +19,8 @@ fn bench_encode_512_lossy(c: &mut Criterion) {
     let image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::F32(pixels),
@@ -38,8 +38,8 @@ fn bench_encode_512_lossless(c: &mut Criterion) {
     let image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::F32(pixels),
@@ -59,8 +59,8 @@ fn bench_encode_u8_512(c: &mut Criterion) {
     let image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Byte,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::U8(pixels),
@@ -78,8 +78,8 @@ fn bench_decode_512_lossy(c: &mut Criterion) {
     let image = Image {
         width: size as u32,
         height: size as u32,
-        n_depth: 1,
-        n_bands: 1,
+        depth: 1,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid(size * size)],
         data: SampleData::F32(pixels),

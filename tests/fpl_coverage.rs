@@ -410,8 +410,8 @@ fn fpl_f32_multi_depth() {
     let image = Image {
         width: w,
         height: h,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Float,
         valid_masks: vec![BitMask::all_valid((w * h) as usize)],
         data: SampleData::F32(pixels.clone()),
@@ -422,14 +422,14 @@ fn fpl_f32_multi_depth() {
     assert_fpl_used(&blob);
 
     let info = lerc::decode_info(&blob).expect("decode_info failed");
-    assert_eq!(info.n_depth, n_depth);
+    assert_eq!(info.depth, n_depth);
     assert_eq!(info.data_type, DataType::Float);
     assert_eq!(info.tolerance, 0.0);
 
     let decoded = lerc::decode(&blob).expect("decode failed");
     assert_eq!(decoded.width, w);
     assert_eq!(decoded.height, h);
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
 
     let decoded_pixels = decoded.as_typed::<f32>().expect("expected f32 data");
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded_pixels.iter()).enumerate() {
@@ -559,8 +559,8 @@ fn fpl_f64_multi_depth() {
     let image = Image {
         width: w,
         height: h,
-        n_depth,
-        n_bands: 1,
+        depth: n_depth,
+        bands: 1,
         data_type: DataType::Double,
         valid_masks: vec![BitMask::all_valid((w * h) as usize)],
         data: SampleData::F64(pixels.clone()),
@@ -571,7 +571,7 @@ fn fpl_f64_multi_depth() {
     assert_fpl_used(&blob);
 
     let decoded = lerc::decode(&blob).expect("decode failed");
-    assert_eq!(decoded.n_depth, n_depth);
+    assert_eq!(decoded.depth, n_depth);
 
     let decoded_pixels = decoded.as_typed::<f64>().expect("expected f64 data");
     for (i, (&orig, &dec)) in pixels.iter().zip(decoded_pixels.iter()).enumerate() {

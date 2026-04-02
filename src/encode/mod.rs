@@ -33,8 +33,8 @@ pub fn encode(image: &Image, max_z_error: f64) -> Result<Vec<u8>> {
 fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Result<Vec<u8>> {
     let width = image.width as usize;
     let height = image.height as usize;
-    let n_depth = image.n_depth as usize;
-    let n_bands = image.n_bands as usize;
+    let n_depth = image.depth as usize;
+    let n_bands = image.bands as usize;
     let band_size = width * height * n_depth;
 
     let max_z_error = if T::is_integer() {
@@ -417,7 +417,7 @@ fn encode_one_band<T: Sample>(
 ) -> Result<Vec<u8>> {
     let width = image.width as usize;
     let height = image.height as usize;
-    let n_depth = image.n_depth as usize;
+    let n_depth = image.depth as usize;
     let num_valid = mask.count_valid().min(width * height);
 
     let nd_f64 = if n_depth > 1 {

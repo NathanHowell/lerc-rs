@@ -48,10 +48,10 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         version: hd.version,
         width: hd.n_cols as u32,
         height: hd.n_rows as u32,
-        n_depth: hd.n_depth as u32,
-        n_bands,
+        depth: hd.n_depth as u32,
+        bands: n_bands,
         data_type: hd.data_type,
-        num_valid_pixels: hd.num_valid_pixel as u32,
+        valid_pixels: hd.num_valid_pixel as u32,
         tolerance: hd.max_z_error,
         min_value: hd.z_min,
         max_value: hd.z_max,
@@ -66,10 +66,10 @@ pub fn decode(data: &[u8]) -> Result<Image> {
     }
 
     let info = decode_info(data)?;
-    let n_bands = info.n_bands;
+    let n_bands = info.bands;
     let width = info.width;
     let height = info.height;
-    let n_depth = info.n_depth;
+    let n_depth = info.depth;
     let dt = info.data_type;
     let no_data_value = info.no_data_value;
 
@@ -82,8 +82,8 @@ pub fn decode(data: &[u8]) -> Result<Image> {
             Ok(Image {
                 width,
                 height,
-                n_depth,
-                n_bands,
+                depth: n_depth,
+                bands: n_bands,
                 data_type: dt,
                 valid_masks: result.valid_masks,
                 data: SampleData::$variant(output),
@@ -125,7 +125,7 @@ pub fn decode_into<T: Sample>(data: &[u8], output: &mut [T]) -> Result<DecodeRes
     }
 
     let total_pixels =
-        info.width as usize * info.height as usize * info.n_depth as usize * info.n_bands as usize;
+        info.width as usize * info.height as usize * info.depth as usize * info.bands as usize;
 
     // Verify buffer size
     if output.len() < total_pixels {
@@ -144,8 +144,8 @@ fn decode_bands_into<T: Sample>(
     info: &LercInfo,
     output: &mut [T],
 ) -> Result<DecodeResult> {
-    let n_bands = info.n_bands;
-    let band_pixels = info.width as usize * info.height as usize * info.n_depth as usize;
+    let n_bands = info.bands;
+    let band_pixels = info.width as usize * info.height as usize * info.depth as usize;
 
     let mut masks = Vec::with_capacity(n_bands as usize);
     let mut offset = 0usize;
@@ -174,8 +174,8 @@ fn decode_bands_into<T: Sample>(
     Ok(DecodeResult {
         width: info.width,
         height: info.height,
-        n_depth: info.n_depth,
-        n_bands: info.n_bands,
+        depth: info.depth,
+        bands: info.bands,
         data_type: info.data_type,
         valid_masks: masks,
         no_data_value: info.no_data_value,
@@ -1089,8 +1089,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid((width * height) as usize)],
             data: crate::SampleData::U8(pixels.to_vec()),
@@ -1109,8 +1109,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Char,
             valid_masks: vec![BitMask::all_valid((width * height) as usize)],
             data: crate::SampleData::I8(pixels.to_vec()),
@@ -1220,8 +1220,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(16)],
             data: crate::SampleData::U8(pixels.clone()),
@@ -1245,8 +1245,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Float,
             valid_masks: vec![BitMask::all_valid(16)],
             data: crate::SampleData::F32(pixels.clone()),
@@ -1269,8 +1269,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::UShort,
             valid_masks: vec![BitMask::all_valid(9)],
             data: crate::SampleData::U16(pixels.clone()),
@@ -1292,8 +1292,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::new(4)],
             data: crate::SampleData::U8(pixels),
@@ -1325,8 +1325,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 1,
+            depth: 1,
+            bands: 1,
             data_type: DataType::Byte,
             valid_masks: vec![mask.clone()],
             data: crate::SampleData::U8(pixels.clone()),
@@ -1408,10 +1408,10 @@ mod tests {
         let info = crate::decode_info(&blob).unwrap();
         assert_eq!(info.width, width);
         assert_eq!(info.height, height);
-        assert_eq!(info.n_bands, 1);
-        assert_eq!(info.n_depth, 1);
+        assert_eq!(info.bands, 1);
+        assert_eq!(info.depth, 1);
         assert_eq!(info.data_type, DataType::Byte);
-        assert_eq!(info.num_valid_pixels, width * height);
+        assert_eq!(info.valid_pixels, width * height);
     }
 
     #[test]
@@ -1445,8 +1445,8 @@ mod tests {
         let image = crate::Image {
             width,
             height,
-            n_depth: 1,
-            n_bands: 2,
+            depth: 1,
+            bands: 2,
             data_type: DataType::Byte,
             valid_masks: vec![BitMask::all_valid(n), BitMask::all_valid(n)],
             data: crate::SampleData::U8(all_pixels.clone()),
@@ -1454,7 +1454,7 @@ mod tests {
         };
         let blob = crate::encode(&image, crate::Precision::Lossless).unwrap();
         let decoded = crate::decode(&blob).unwrap();
-        assert_eq!(decoded.n_bands, 2);
+        assert_eq!(decoded.bands, 2);
         assert_eq!(decoded.valid_masks.len(), 2);
         match decoded.data {
             crate::SampleData::U8(v) => assert_eq!(v, all_pixels),

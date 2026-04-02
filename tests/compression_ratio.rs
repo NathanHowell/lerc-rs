@@ -241,7 +241,7 @@ fn ratio_reference_bluemarble() {
 
     let image = lerc::decode(BLUEMARBLE).unwrap();
     let data = image.as_typed::<u8>().unwrap();
-    let (width, height, n_bands) = (image.width, image.height, image.n_bands);
+    let (width, height, n_bands) = (image.width, image.height, image.bands);
 
     // Build per-band encoding
     let ppb = (width * height) as usize;
@@ -251,8 +251,8 @@ fn ratio_reference_bluemarble() {
     let img = Image {
         width,
         height,
-        n_depth: 1,
-        n_bands,
+        depth: 1,
+        bands: n_bands,
         data_type: DataType::Byte,
         valid_masks: masks,
         data: SampleData::U8(data.to_vec()),

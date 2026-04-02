@@ -11,6 +11,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 0
+      - name: Verify tag is reachable from master
+        run: git merge-base --is-ancestor ${{ github.sha }} origin/master
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo publish --locked
         env:

@@ -55,7 +55,7 @@ test_decode_into_matches!(
     decode_into_u8_matches_decode,
     DataType::Byte,
     U8,
-    lerc::decode_u8_into,
+    lerc::decode_into,
     u8,
     0u8,
     (0..64 * 64).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
@@ -68,7 +68,7 @@ test_decode_into_matches!(
     decode_into_i8_matches_decode,
     DataType::Char,
     I8,
-    lerc::decode_i8_into,
+    lerc::decode_into,
     i8,
     0i8,
     (0..64 * 64)
@@ -83,7 +83,7 @@ test_decode_into_matches!(
     decode_into_i16_matches_decode,
     DataType::Short,
     I16,
-    lerc::decode_i16_into,
+    lerc::decode_into,
     i16,
     0i16,
     (0..64 * 64).map(|i| i as i16 - 2000).collect::<Vec<i16>>(),
@@ -96,7 +96,7 @@ test_decode_into_matches!(
     decode_into_u16_matches_decode,
     DataType::UShort,
     U16,
-    lerc::decode_u16_into,
+    lerc::decode_into,
     u16,
     0u16,
     (0..64 * 64)
@@ -111,7 +111,7 @@ test_decode_into_matches!(
     decode_into_i32_matches_decode,
     DataType::Int,
     I32,
-    lerc::decode_i32_into,
+    lerc::decode_into,
     i32,
     0i32,
     (0..32 * 32).map(|i| i * 100 - 50000).collect::<Vec<i32>>(),
@@ -124,7 +124,7 @@ test_decode_into_matches!(
     decode_into_u32_matches_decode,
     DataType::UInt,
     U32,
-    lerc::decode_u32_into,
+    lerc::decode_into,
     u32,
     0u32,
     (0..32 * 32).map(|i| i as u32 * 7).collect::<Vec<u32>>(),
@@ -137,7 +137,7 @@ test_decode_into_matches!(
     decode_into_f32_matches_decode,
     DataType::Float,
     F32,
-    lerc::decode_f32_into,
+    lerc::decode_into,
     f32,
     0.0f32,
     (0..64 * 64).map(|i| i as f32 * 0.1).collect::<Vec<f32>>(),
@@ -150,7 +150,7 @@ test_decode_into_matches!(
     decode_into_f64_matches_decode,
     DataType::Double,
     F64,
-    lerc::decode_f64_into,
+    lerc::decode_into,
     f64,
     0.0f64,
     (0..32 * 32).map(|i| i as f64 * 0.01).collect::<Vec<f64>>(),
@@ -180,7 +180,7 @@ fn decode_into_buffer_too_small() {
 
     // Buffer is too small
     let mut output = vec![0.0f32; 10];
-    let err = lerc::decode_f32_into(&encoded, &mut output).unwrap_err();
+    let err = lerc::decode_into(&encoded, &mut output).unwrap_err();
     match err {
         lerc::LercError::OutputBufferTooSmall { needed, available } => {
             assert_eq!(needed, (width * height) as usize);
@@ -211,7 +211,7 @@ fn decode_into_type_mismatch() {
 
     // Try to decode f32 data into a u8 buffer
     let mut output = vec![0u8; (width * height) as usize];
-    let err = lerc::decode_u8_into(&encoded, &mut output).unwrap_err();
+    let err = lerc::decode_into(&encoded, &mut output).unwrap_err();
     match err {
         lerc::LercError::TypeMismatch { expected, actual } => {
             assert_eq!(expected, DataType::Float);
@@ -242,7 +242,7 @@ fn decode_into_oversized_buffer_ok() {
 
     // Buffer is larger than needed -- should succeed
     let mut output = vec![0xFFu8; (width * height * 2) as usize];
-    let result = lerc::decode_u8_into(&encoded, &mut output).expect("decode_into should succeed");
+    let result = lerc::decode_into(&encoded, &mut output).expect("decode_into should succeed");
 
     assert_eq!(result.width, width);
     assert_eq!(result.height, height);
@@ -293,7 +293,7 @@ fn decode_into_multiband() {
 
     // Decode into pre-allocated buffer
     let mut output = vec![0u8; total];
-    let result = lerc::decode_u8_into(&encoded, &mut output).expect("decode_into failed");
+    let result = lerc::decode_into(&encoded, &mut output).expect("decode_into failed");
 
     assert_eq!(result.bands, n_bands);
     assert_eq!(result.valid_masks.len(), decoded.valid_masks.len());
@@ -343,7 +343,7 @@ fn decode_into_with_mask() {
     };
 
     let mut output = vec![0.0f32; total];
-    let result = lerc::decode_f32_into(&encoded, &mut output).expect("decode_into failed");
+    let result = lerc::decode_into(&encoded, &mut output).expect("decode_into failed");
 
     // Verify masks match
     assert_eq!(result.valid_masks.len(), 1);

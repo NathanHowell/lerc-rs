@@ -66,7 +66,7 @@ println!("{}×{}, {:?}, {} bands", image.width, image.height, image.data_type, i
 // Decode into a pre-allocated buffer
 let info = lerc::decode_info(&blob).unwrap();
 let mut output = vec![0.0f32; (info.width * info.height) as usize];
-let result = lerc::decode_f32_into(&blob, &mut output).unwrap();
+let result = lerc::decode_into(&blob, &mut output).unwrap();
 ```
 
 ### With validity mask

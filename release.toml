@@ -1,0 +1,11 @@
+# cargo-release configuration
+# https://github.com/crate-ci/cargo-release
+
+# CI handles publishing via the Publish workflow on v* tags
+publish = false
+
+# Only release the main crate, not the test helper
+release = false
+
+[packages.lerc-rs]
+release = true

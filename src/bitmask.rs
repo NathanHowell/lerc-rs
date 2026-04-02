@@ -8,51 +8,62 @@ use bitvec::prelude::*;
 pub struct BitMask(pub BitVec<u8, Msb0>);
 
 impl BitMask {
+    /// Create a new mask with all pixels marked invalid (zero).
     pub fn new(num_pixels: usize) -> Self {
         Self(bitvec![u8, Msb0; 0; num_pixels])
     }
 
+    /// Create a new mask with all pixels marked valid (one).
     pub fn all_valid(num_pixels: usize) -> Self {
         Self(bitvec![u8, Msb0; 1; num_pixels])
     }
 
+    /// Create a mask from raw MSB-first bytes, truncated to `num_pixels` bits.
     pub fn from_bytes(data: Vec<u8>, num_pixels: usize) -> Self {
         let mut bits = BitVec::<u8, Msb0>::from_vec(data);
         bits.truncate(num_pixels);
         Self(bits)
     }
 
+    /// Returns `true` if pixel `k` is valid.
     #[inline]
     pub fn is_valid(&self, k: usize) -> bool {
         self.0[k]
     }
 
+    /// Mark pixel `k` as valid.
     #[inline]
     pub fn set_valid(&mut self, k: usize) {
         self.0.set(k, true);
     }
 
+    /// Mark pixel `k` as invalid.
     #[inline]
     pub fn set_invalid(&mut self, k: usize) {
         self.0.set(k, false);
     }
 
+    /// Returns the number of valid pixels in the mask.
     pub fn count_valid(&self) -> usize {
         self.0.count_ones()
     }
 
+    /// Returns the total number of pixels tracked by this mask.
     pub fn num_pixels(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns the number of bytes in the underlying storage.
     pub fn num_bytes(&self) -> usize {
         self.0.as_raw_slice().len()
     }
 
+    /// Borrow the underlying byte storage as a slice.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_raw_slice()
     }
 
+    /// Mutably borrow the underlying byte storage.
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         self.0.as_raw_mut_slice()
     }

@@ -1,3 +1,8 @@
+//! Pure Rust implementation of the LERC (Limited Error Raster Compression) format.
+//!
+//! Supports encoding and decoding of raster images with configurable lossy or lossless
+//! compression. Compatible with ESRI's LERC2 format specification.
+
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -9,9 +14,12 @@
 
 extern crate alloc;
 
+/// Error types for LERC encoding and decoding.
 pub mod error;
+/// Pixel data types and the `Sample` trait for type-safe encoding/decoding.
 pub mod types;
 
+/// Validity bitmask for tracking valid/invalid pixels.
 pub mod bitmask;
 pub(crate) mod bitstuffer;
 #[allow(dead_code)]
@@ -54,40 +62,67 @@ pub enum Precision<T> {
 /// Metadata returned from a decode-into operation (no owned pixel data).
 #[derive(Debug, Clone)]
 pub struct DecodeResult {
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
+    /// Number of values per pixel (depth slices).
     pub depth: u32,
+    /// Number of bands in the image.
     pub bands: u32,
+    /// Pixel data type of the decoded blob.
     pub data_type: DataType,
+    /// Per-band validity masks indicating which pixels are valid.
     pub valid_masks: Vec<BitMask>,
+    /// NoData sentinel value, if the blob uses NoData encoding.
     pub no_data_value: Option<f64>,
 }
 
+/// Header metadata extracted from a LERC blob without decoding pixel data.
 #[derive(Debug, Clone, Default)]
 pub struct LercInfo {
+    /// LERC format version number.
     pub version: i32,
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
+    /// Number of values per pixel (depth slices).
     pub depth: u32,
+    /// Number of bands in the image.
     pub bands: u32,
+    /// Pixel data type stored in the blob.
     pub data_type: DataType,
+    /// Number of valid (non-masked) pixels.
     pub valid_pixels: u32,
+    /// Maximum error tolerance used during encoding.
     pub tolerance: f64,
+    /// Minimum pixel value across all valid pixels.
     pub min_value: f64,
+    /// Maximum pixel value across all valid pixels.
     pub max_value: f64,
+    /// Total size of the LERC blob in bytes.
     pub blob_size: u32,
     /// The original NoData value, if the blob uses NoData encoding (v6+, nDepth > 1).
     pub no_data_value: Option<f64>,
 }
 
+/// A decoded raster image with pixel data and validity masks.
 #[derive(Debug, Clone)]
 pub struct Image {
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
+    /// Number of values per pixel (depth slices).
     pub depth: u32,
+    /// Number of bands in the image.
     pub bands: u32,
+    /// Pixel data type.
     pub data_type: DataType,
+    /// Per-band validity masks indicating which pixels are valid.
     pub valid_masks: Vec<BitMask>,
+    /// Pixel sample data stored as a typed vector.
     pub data: SampleData,
     /// The original NoData value, if any. When set during encoding with nDepth > 1,
     /// pixels matching this value in invalid depth slices are encoded with a sentinel.
@@ -110,26 +145,38 @@ impl Default for Image {
     }
 }
 
+/// Type-erased pixel data container, one variant per supported data type.
 #[derive(Debug, Clone)]
 pub enum SampleData {
+    /// Signed 8-bit integer pixel data.
     I8(Vec<i8>),
+    /// Unsigned 8-bit integer pixel data.
     U8(Vec<u8>),
+    /// Signed 16-bit integer pixel data.
     I16(Vec<i16>),
+    /// Unsigned 16-bit integer pixel data.
     U16(Vec<u16>),
+    /// Signed 32-bit integer pixel data.
     I32(Vec<i32>),
+    /// Unsigned 32-bit integer pixel data.
     U32(Vec<u32>),
+    /// 32-bit floating-point pixel data.
     F32(Vec<f32>),
+    /// 64-bit floating-point pixel data.
     F64(Vec<f64>),
 }
 
+/// Read header metadata from a LERC blob without decoding pixel data.
 pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     decode::decode_info(data)
 }
 
+/// Decode a LERC blob, returning the image with pixel data and validity masks.
 pub fn decode(data: &[u8]) -> Result<Image> {
     decode::decode(data)
 }
 
+/// Encode an image into a LERC blob with the given precision.
 pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
     let max_z_error = match precision {
         Precision::Lossless => {

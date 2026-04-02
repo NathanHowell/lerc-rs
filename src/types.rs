@@ -1,18 +1,28 @@
+/// Pixel data type stored in the LERC blob header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(i32)]
 pub enum DataType {
+    /// Signed 8-bit integer (`i8`).
     #[default]
     Char = 0,
+    /// Unsigned 8-bit integer (`u8`).
     Byte = 1,
+    /// Signed 16-bit integer (`i16`).
     Short = 2,
+    /// Unsigned 16-bit integer (`u16`).
     UShort = 3,
+    /// Signed 32-bit integer (`i32`).
     Int = 4,
+    /// Unsigned 32-bit integer (`u32`).
     UInt = 5,
+    /// 32-bit IEEE 754 floating point (`f32`).
     Float = 6,
+    /// 64-bit IEEE 754 floating point (`f64`).
     Double = 7,
 }
 
 impl DataType {
+    /// Convert an `i32` discriminant to a `DataType`, returning `None` if invalid.
     pub fn from_i32(v: i32) -> Option<Self> {
         match v {
             0 => Some(Self::Char),
@@ -27,6 +37,7 @@ impl DataType {
         }
     }
 
+    /// Size of one sample in bytes.
     pub fn size(self) -> usize {
         match self {
             Self::Char | Self::Byte => 1,
@@ -36,10 +47,12 @@ impl DataType {
         }
     }
 
+    /// Returns `true` if this is an integer type (not `Float` or `Double`).
     pub fn is_integer(self) -> bool {
         !matches!(self, Self::Float | Self::Double)
     }
 
+    /// Returns `true` if this is a signed integer type (`Char`, `Short`, or `Int`).
     pub fn is_signed(self) -> bool {
         matches!(self, Self::Char | Self::Short | Self::Int)
     }
@@ -49,14 +62,24 @@ pub(crate) mod sealed {
     pub trait Sealed {}
 }
 
+/// Trait for pixel types that can be encoded/decoded with LERC.
+///
+/// Implemented for `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `f32`, and `f64`.
 pub trait Sample: sealed::Sealed + Copy + PartialOrd + Default + core::fmt::Debug {
+    /// The corresponding LERC `DataType` discriminant.
     const DATA_TYPE: DataType;
+    /// Size of this type in bytes.
     const BYTES: usize;
 
+    /// Convert this value to `f64`.
     fn to_f64(self) -> f64;
+    /// Create a value from an `f64` (truncating/rounding as needed).
     fn from_f64(v: f64) -> Self;
+    /// Reinterpret this value's bits as a `u64`.
     fn to_bits_u64(self) -> u64;
+    /// Reinterpret a `u64`'s bits as this type.
     fn from_bits_u64(v: u64) -> Self;
+    /// Returns `true` if this is an integer pixel type.
     fn is_integer() -> bool;
 
     /// Wrap a `Vec<Self>` into the corresponding `SampleData` variant.

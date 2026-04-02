@@ -312,7 +312,7 @@ fn process_no_data<T: Sample>(
             result.no_data_val_internal = nd_orig;
         }
     } else {
-        // NoData value provided but not needed — pass through for metadata.
+        // NoData value provided but not needed  -- pass through for metadata.
         result.pass_no_data = true;
         result.no_data_val_orig = nd_orig;
         result.no_data_val_internal = nd_orig;
@@ -544,9 +544,9 @@ mod tests {
     #[test]
     fn band_stats_with_nodata() {
         // 3x1 image, 2 depths, NoData = -9999.0
-        // pixel 0: [5.0, -9999.0] — mixed NoData across depths
-        // pixel 1: [10.0, 20.0]   — all valid
-        // pixel 2: [15.0, 25.0]   — all valid
+        // pixel 0: [5.0, -9999.0]  -- mixed NoData across depths
+        // pixel 1: [10.0, 20.0]    -- all valid
+        // pixel 2: [15.0, 25.0]    -- all valid
         let width = 3;
         let height = 1;
         let n_depth = 2;

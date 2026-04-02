@@ -367,7 +367,7 @@ pub(super) fn compute_no_data_sentinel<T: Sample>(min_val: f64, max_z_error: f64
                 return Some(c);
             }
         }
-        // No sentinel found — cannot represent NoData for this type/range combination
+        // No sentinel found  -- cannot represent NoData for this type/range combination
         None
     } else {
         // For float/double: pick candidates below minVal - 2*maxZErr

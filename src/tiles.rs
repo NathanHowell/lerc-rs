@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn read_variable_data_type_i8() {
-        // i8 -1 → 0xFF as byte
+        // i8 -1 -> 0xFF as byte
         let data = [0xFF_u8];
         let mut pos = 0;
         let val = read_variable_data_type(&data, &mut pos, DataType::Char).unwrap();

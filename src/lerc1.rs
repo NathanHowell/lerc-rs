@@ -315,7 +315,7 @@ fn read_cnt_tile(
     let compr_flag = cursor.read_u8()?;
 
     if compr_flag == 2 {
-        // Entire tile is constant 0 (invalid) — already zeroed
+        // Entire tile is constant 0 (invalid)  -- already zeroed
         return Ok(());
     }
 
@@ -850,9 +850,9 @@ mod tests {
         // tailShift = 4 - 1 = 3 => shift left 3*8=24 bits
         // word0 = 0x6C << 24 = 0x6C00_0000
         //
-        // Extract val0: word0 << 0 >> 30 = 0x6C00_0000 >> 30 = 0b01 = 1 ✓
-        // Extract val1: bit_pos=2, word0 << 2 = 0xB000_0000, >> 30 = 0b10 = 2 ✓
-        // Extract val2: bit_pos=4, word0 << 4 = 0xC000_0000, >> 30 = 0b11 = 3 ✓
+        // Extract val0: word0 << 0 >> 30 = 0x6C00_0000 >> 30 = 0b01 = 1 [ok]
+        // Extract val1: bit_pos=2, word0 << 2 = 0xB000_0000, >> 30 = 0b10 = 2 [ok]
+        // Extract val2: bit_pos=4, word0 << 4 = 0xC000_0000, >> 30 = 0b11 = 3 [ok]
         //
         // First byte: bits67=1 (n=2), numBits=2 => byte = 0b01_000010 = 0x42
         // numElements as u16 LE: 3, 0

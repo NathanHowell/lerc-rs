@@ -125,10 +125,10 @@ pub(super) fn is_high_entropy_u8<T: Sample>(
     // If delta histogram has few distinct values, delta-Huffman will compress well.
     let delta_distinct = delta_histo.iter().filter(|&&c| c > 0).count();
     if delta_distinct < 64 {
-        return false; // Don't skip — delta-Huffman will likely win
+        return false; // Don't skip  -- delta-Huffman will likely win
     }
 
-    // Both direct and delta are high entropy — safe to skip Huffman
+    // Both direct and delta are high entropy  -- safe to skip Huffman
     true
 }
 
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn low_entropy_constant_stride() {
-        // Data with a constant stride: (i*7)%256 — direct histogram is uniform
+        // Data with a constant stride: (i*7)%256  -- direct histogram is uniform
         // but delta is highly compressible (constant delta of 7).
         // This should return false because delta-Huffman can compress it.
         let width = 128;

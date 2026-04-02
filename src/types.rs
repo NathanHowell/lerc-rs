@@ -352,11 +352,11 @@ pub(crate) struct TileRect {
     pub j1: usize,
 }
 
-/// Tile compression mode — the 2-bit value stored in bits 0-1 of the tile header byte.
+/// Tile compression mode: the 2-bit value stored in bits 0-1 of the tile header byte.
 ///
 /// C++ uses `BlockEncodeMode` for values 0-2 and separate logic for 2-3.
 /// We unify all four wire values into one enum since they're mutually exclusive.
-/// Note: "BitStuffLut" is not a separate wire value — LUT vs simple is determined
+/// "BitStuffLut" is not a separate wire value. LUT vs simple is determined
 /// from the bit-stuffed payload, and both use wire value 1 (BitStuffed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

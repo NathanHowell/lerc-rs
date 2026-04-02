@@ -49,13 +49,13 @@ use bitmask::BitMask;
 /// Controls the precision/error tolerance for LERC encoding.
 ///
 /// `Lossless` preserves exact values. `Tolerance(x)` allows decoded values
-/// to differ from originals by at most ±x.
+/// to differ from originals by at most +/-x.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Precision<T> {
-    /// Lossless compression — exact round-trip for all pixel values.
+    /// Lossless compression. Exact round-trip for all pixel values.
     #[default]
     Lossless,
-    /// Lossy compression — decoded values are within ±tolerance of originals.
+    /// Lossy compression. Decoded values are within the given tolerance of originals.
     Tolerance(T),
 }
 
@@ -103,7 +103,7 @@ pub struct LercInfo {
     pub max_value: f64,
     /// Total size of the LERC blob in bytes.
     pub blob_size: u32,
-    /// The original NoData value, if the blob uses NoData encoding (v6+, nDepth > 1).
+    /// The original NoData value, if the blob uses NoData encoding (v6+, depth > 1).
     pub no_data_value: Option<f64>,
 }
 
@@ -124,7 +124,7 @@ pub struct Image {
     pub valid_masks: Vec<BitMask>,
     /// Pixel sample data stored as a typed vector.
     pub data: SampleData,
-    /// The original NoData value, if any. When set during encoding with nDepth > 1,
+    /// The original NoData value, if any. When set during encoding with depth > 1,
     /// pixels matching this value in invalid depth slices are encoded with a sentinel.
     /// On decode, the sentinel is remapped back to this value.
     pub no_data_value: Option<f64>,

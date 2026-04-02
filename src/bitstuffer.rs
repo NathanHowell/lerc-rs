@@ -878,7 +878,7 @@ mod tests {
 
     #[test]
     fn round_trip_lut() {
-        // Data with few distinct values — good for LUT
+        // Data with few distinct values  -- good for LUT
         let data = vec![0, 100, 200, 0, 100, 200, 0, 100, 200, 0];
         let max_elem = *data.iter().max().unwrap();
         let info = should_use_lut(&data, max_elem).expect("should use LUT");

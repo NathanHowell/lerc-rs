@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn read_mask_all_valid() {
-        // numBytesMask=0, numValidPixel == nRows*nCols → all valid
+        // numBytesMask=0, numValidPixel == nRows*nCols -> all valid
         let data = make_mask_header(0);
         let mut pos = 0;
         let header = HeaderInfo {
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn read_mask_all_invalid() {
-        // numBytesMask=0, numValidPixel == 0 → all invalid
+        // numBytesMask=0, numValidPixel == 0 -> all invalid
         let data = make_mask_header(0);
         let mut pos = 0;
         let header = HeaderInfo {
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn read_mask_rle_compressed() {
         // 2x2 image, 2 pixels valid, 2 invalid
-        // Mask bytes: 0xC0 = 0b1100_0000 → pixels 0,1 valid; pixels 2,3 invalid
+        // Mask bytes: 0xC0 = 0b1100_0000 -> pixels 0,1 valid; pixels 2,3 invalid
         // That's 1 byte for 4 pixels
         let mask_bytes = vec![0xC0];
         let compressed = rle::compress(&mask_bytes);
@@ -659,7 +659,7 @@ mod tests {
         let header = HeaderInfo {
             n_rows: 2,
             n_cols: 2,
-            num_valid_pixel: 2, // not 0, not 4 → triggers RLE path
+            num_valid_pixel: 2, // not 0, not 4 -> triggers RLE path
             ..Default::default()
         };
         let mask = read_mask(&data, &mut pos, &header, None).unwrap();
@@ -673,8 +673,8 @@ mod tests {
     #[test]
     fn read_mask_rle_larger() {
         // 4x4 image (16 pixels), checkerboard pattern
-        // Byte 0: 0xAA = 0b10101010 → pixels 0,2,4,6 valid
-        // Byte 1: 0x55 = 0b01010101 → pixels 9,11,13,15 valid
+        // Byte 0: 0xAA = 0b10101010 -> pixels 0,2,4,6 valid
+        // Byte 1: 0x55 = 0b01010101 -> pixels 9,11,13,15 valid
         let mask_bytes = vec![0xAA, 0x55];
         let compressed = rle::compress(&mask_bytes);
 
@@ -685,7 +685,7 @@ mod tests {
         let header = HeaderInfo {
             n_rows: 4,
             n_cols: 4,
-            num_valid_pixel: 8, // partial → triggers RLE path
+            num_valid_pixel: 8, // partial -> triggers RLE path
             ..Default::default()
         };
         let mask = read_mask(&data, &mut pos, &header, None).unwrap();
@@ -708,7 +708,7 @@ mod tests {
         let header = HeaderInfo {
             n_rows: 2,
             n_cols: 2,
-            num_valid_pixel: 3, // partial → needs mask data or prev_mask
+            num_valid_pixel: 3, // partial -> needs mask data or prev_mask
             ..Default::default()
         };
         let mut prev = BitMask::new(4);
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn read_mask_error_no_prev_mask() {
-        // numBytesMask=0, partial validity, no previous mask → error
+        // numBytesMask=0, partial validity, no previous mask -> error
         let data = make_mask_header(0);
         let mut pos = 0;
         let header = HeaderInfo {
@@ -841,7 +841,7 @@ mod tests {
             n_cols: 2,
             n_depth: 2,
             z_min: 7.0,
-            z_max: 7.0, // same → z_buf all filled with z_min
+            z_max: 7.0, // same -> z_buf all filled with z_min
             ..Default::default()
         };
         let mask = BitMask::all_valid(2);
@@ -1176,7 +1176,7 @@ mod tests {
 
     #[test]
     fn decode_huffman_u8_roundtrip_all_same_value() {
-        // All same value — should be const image, not Huffman,
+        // All same value  -- should be const image, not Huffman,
         // but tests the decode path can handle it
         let width = 8;
         let height = 8;
@@ -1187,7 +1187,7 @@ mod tests {
 
     #[test]
     fn decode_huffman_u8_roundtrip_two_values() {
-        // Two alternating values — minimal Huffman tree
+        // Two alternating values  -- minimal Huffman tree
         let width = 16;
         let height = 16;
         let pixels: Vec<u8> = (0..width * height)
@@ -1199,7 +1199,7 @@ mod tests {
 
     #[test]
     fn decode_huffman_u8_roundtrip_full_range() {
-        // Use all 256 values — covers full byte range
+        // Use all 256 values  -- covers full byte range
         let width = 16;
         let height = 16;
         let pixels: Vec<u8> = (0..width * height).map(|i| (i % 256) as u8).collect();
@@ -1262,7 +1262,7 @@ mod tests {
 
     #[test]
     fn decode_one_band_const_image() {
-        // All same value — const image path in decoder
+        // All same value  -- const image path in decoder
         let width = 3u32;
         let height = 3u32;
         let pixels = vec![42u16; 9];
@@ -1285,7 +1285,7 @@ mod tests {
 
     #[test]
     fn decode_one_band_no_valid_pixels() {
-        // All pixels invalid — no data to decode
+        // All pixels invalid  -- no data to decode
         let width = 2u32;
         let height = 2u32;
         let pixels = vec![0u8; 4];
@@ -1714,7 +1714,7 @@ mod tests {
 
     #[test]
     fn decode_huffman_u8_sparse_values() {
-        // Only a few distinct values — small Huffman tree
+        // Only a few distinct values  -- small Huffman tree
         let width = 32u32;
         let height = 32u32;
         let n = (width * height) as usize;
@@ -1793,7 +1793,7 @@ mod tests {
 
     #[test]
     fn decode_info_truncated_blob() {
-        // Valid header but truncated — decode_info should still succeed
+        // Valid header but truncated  -- decode_info should still succeed
         // since it only reads the header
         let pixels: Vec<u8> = (0..64).collect();
         let blob = crate::encode_slice(8, 8, &pixels, crate::Precision::Lossless).unwrap();

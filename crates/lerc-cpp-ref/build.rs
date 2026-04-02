@@ -57,4 +57,16 @@ fn main() {
         .file(lerc_lib.join("Lerc1Decode/CntZImage.cpp"))
         .warnings(false)
         .compile("lerc_cpp");
+
+    // Fletcher-32 shim: calls through to Lerc2::ComputeChecksumFletcher32
+    let shim_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fletcher32_shim.cpp");
+    cc::Build::new()
+        .cpp(true)
+        .std("c++14")
+        .define("LERC_STATIC", None)
+        .include(lerc_lib.join("include"))
+        .include(&lerc_lib)
+        .file(&shim_src)
+        .warnings(false)
+        .compile("fletcher32_shim");
 }

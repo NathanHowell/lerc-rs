@@ -3,6 +3,7 @@
 use lerc::DataType;
 use lerc::Precision;
 use lerc::bitmask::BitMask;
+use lerc::checksum::fletcher32;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 
@@ -69,6 +70,25 @@ fn mask_strategy(num_pixels: usize) -> impl Strategy<Value = BitMask> {
         }
         mask
     })
+}
+
+// ---------------------------------------------------------------------------
+// Property: Fletcher-32 matches C++ reference
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+
+    #[test]
+    fn fletcher32_matches_cpp(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let rust_result = fletcher32(&data);
+        let cpp_result = lerc_cpp_ref::fletcher32(&data);
+        prop_assert_eq!(
+            rust_result, cpp_result,
+            "fletcher32 mismatch for {} bytes: rust={:#010x} cpp={:#010x}",
+            data.len(), rust_result, cpp_result,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

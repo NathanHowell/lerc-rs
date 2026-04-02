@@ -72,9 +72,9 @@ pub struct LercInfo {
     pub n_bands: u32,
     pub data_type: DataType,
     pub num_valid_pixels: u32,
-    pub max_z_error: f64,
-    pub z_min: f64,
-    pub z_max: f64,
+    pub tolerance: f64,
+    pub min_value: f64,
+    pub max_value: f64,
     pub blob_size: u32,
     /// The original NoData value, if the blob uses NoData encoding (v6+, nDepth > 1).
     pub no_data_value: Option<f64>,

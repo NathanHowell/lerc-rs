@@ -84,7 +84,7 @@ proptest! {
         // The encoder may raise maxZError (e.g. try_raise_max_z_error for float data
         // with limited precision). Use the effective maxZError from the header.
         let info = lerc::decode_info(&blob).expect("decode_info failed");
-        let effective_mze = info.max_z_error;
+        let effective_mze = info.tolerance;
         // Allow tolerance for f32 quantization rounding. The quantize/dequantize
         // cycle can exceed maxZError due to float precision limitations when the
         // data range is large relative to maxZError (same issue as C++
@@ -121,7 +121,7 @@ proptest! {
     fn lossy_f64_round_trip((w, h, pixels, mze) in f64_image_strategy()) {
         let blob = lerc::encode_slice(w, h, &pixels, Precision::Tolerance(mze)).expect("encode failed");
         let info = lerc::decode_info(&blob).expect("decode_info failed");
-        let effective_mze = info.max_z_error;
+        let effective_mze = info.tolerance;
         let tol = effective_mze * 1.001;
         let (decoded, mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
         prop_assert_eq!(dw, w);

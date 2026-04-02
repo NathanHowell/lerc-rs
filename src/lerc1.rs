@@ -603,9 +603,9 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         data_type: DataType::Float,
         // We can't know exact valid count without decoding; use total pixels as upper bound
         num_valid_pixels: (hd.width as u32) * (hd.height as u32),
-        max_z_error: hd.max_z_error,
-        z_min: f64::NAN, // Not available from header alone
-        z_max: z_sec.max_val_in_img as f64,
+        tolerance: hd.max_z_error,
+        min_value: f64::NAN, // Not available from header alone
+        max_value: z_sec.max_val_in_img as f64,
         blob_size: blob_size as u32,
         ..Default::default()
     })

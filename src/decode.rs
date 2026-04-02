@@ -52,9 +52,9 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         n_bands,
         data_type: hd.data_type,
         num_valid_pixels: hd.num_valid_pixel as u32,
-        max_z_error: hd.max_z_error,
-        z_min: hd.z_min,
-        z_max: hd.z_max,
+        tolerance: hd.max_z_error,
+        min_value: hd.z_min,
+        max_value: hd.z_max,
         blob_size: hd.blob_size as u32,
         no_data_value,
     })

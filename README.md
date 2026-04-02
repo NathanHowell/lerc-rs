@@ -20,7 +20,7 @@ Preliminary benchmarks on a single synthetic dataset (512×512, Apple M-series, 
 
 | Path | Rust | C++ reference |
 |------|------|---------------|
-| encode f32 lossy (maxZErr=0.01) | 1.9 ms | 3.1 ms |
+| encode f32 lossy (tolerance=0.01) | 1.9 ms | 3.1 ms |
 | encode f32 lossless (FPL) | 8.3 ms | 17 ms |
 | encode u8 lossless (Huffman) | 2.3 ms | 2.7 ms |
 | decode f32 lossy | 0.77 ms | 0.76 ms |
@@ -97,8 +97,8 @@ let blob = lerc::encode_slice_masked(256, 256, &pixels, &mask, Precision::Tolera
 - Huffman coding for 8-bit types with delta prediction
 - Float-point lossless (FPL) with byte-plane Huffman and predictors
 - Diff encoding between depth slices for multi-depth data
-- Bit-plane compression for noisy integer data (opt-in via negative `max_z_error`)
-- `TryRaiseMaxZError` for float data with limited precision
+- Bit-plane compression for noisy integer data (opt-in via negative `tolerance`)
+- `precision optimization` for float data with limited precision
 - NoData value encoding for mixed valid/invalid multi-depth pixels
 
 ## Building

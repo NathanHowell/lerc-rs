@@ -177,7 +177,7 @@ fn decode_california_float() {
     assert_eq!(info.n_depth, 1);
     assert_eq!(info.n_bands, 1);
     assert_eq!(info.data_type, DataType::Float);
-    assert!(info.max_z_error >= 0.0);
+    assert!(info.tolerance >= 0.0);
 
     let image = lerc::decode(data).expect("decode failed");
     assert_eq!(image.width, 400);
@@ -214,16 +214,16 @@ fn decode_california_float() {
             assert!(valid_count > 0);
 
             // Decoded values should be within [zMin - maxZError, zMax + maxZError]
-            let tolerance = info.max_z_error;
+            let tolerance = info.tolerance;
             assert!(
-                min_val as f64 >= info.z_min - tolerance,
+                min_val as f64 >= info.min_value - tolerance,
                 "min_val {min_val} < z_min {} - tolerance {tolerance}",
-                info.z_min
+                info.min_value
             );
             assert!(
-                max_val as f64 <= info.z_max + tolerance,
+                max_val as f64 <= info.max_value + tolerance,
                 "max_val {max_val} > z_max {} + tolerance {tolerance}",
-                info.z_max
+                info.max_value
             );
         }
         _ => panic!("expected F32 data"),
@@ -881,7 +881,7 @@ fn block_size_header_field_is_valid() {
 /// Helper: read the maxZError from a LERC2 encoded blob via decode_info.
 fn read_max_z_error(encoded: &[u8]) -> f64 {
     let info: LercInfo = lerc::decode_info(encoded).expect("decode_info failed");
-    info.max_z_error
+    info.tolerance
 }
 
 #[test]

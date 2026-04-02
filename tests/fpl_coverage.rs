@@ -67,7 +67,7 @@ fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
 
     let info = lerc::decode_info(&blob).expect("decode_info failed");
     assert_eq!(info.data_type, DataType::Float);
-    assert_eq!(info.max_z_error, 0.0);
+    assert_eq!(info.tolerance, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
     let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
@@ -96,7 +96,7 @@ fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
 
     let info = lerc::decode_info(&blob).expect("decode_info failed");
     assert_eq!(info.data_type, DataType::Double);
-    assert_eq!(info.max_z_error, 0.0);
+    assert_eq!(info.tolerance, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
     let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
@@ -424,7 +424,7 @@ fn fpl_f32_multi_depth() {
     let info = lerc::decode_info(&blob).expect("decode_info failed");
     assert_eq!(info.n_depth, n_depth);
     assert_eq!(info.data_type, DataType::Float);
-    assert_eq!(info.max_z_error, 0.0);
+    assert_eq!(info.tolerance, 0.0);
 
     let decoded = lerc::decode(&blob).expect("decode failed");
     assert_eq!(decoded.width, w);

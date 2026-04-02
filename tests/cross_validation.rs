@@ -264,16 +264,16 @@ fn california_detailed_pixel_statistics() {
     );
 
     // z range should match header within tolerance
-    let tolerance = info.max_z_error;
+    let tolerance = info.tolerance;
     assert!(
-        min_val as f64 >= info.z_min - tolerance,
+        min_val as f64 >= info.min_value - tolerance,
         "min_val {min_val} below z_min {} - tolerance {tolerance}",
-        info.z_min
+        info.min_value
     );
     assert!(
-        max_val as f64 <= info.z_max + tolerance,
+        max_val as f64 <= info.max_value + tolerance,
         "max_val {max_val} above z_max {} + tolerance {tolerance}",
-        info.z_max
+        info.max_value
     );
 }
 
@@ -385,7 +385,7 @@ fn bluemarble_three_bands_detailed() {
 fn california_round_trip_lossy() {
     let image = lerc::decode(CALIFORNIA).expect("decode failed");
     let info = lerc::decode_info(CALIFORNIA).expect("decode_info failed");
-    let max_z_error = info.max_z_error;
+    let max_z_error = info.tolerance;
 
     let pixels_orig = match &image.data {
         SampleData::F32(p) => p.clone(),

@@ -11,12 +11,12 @@ license = "Apache-2.0"
 description = "Pure Rust LERC (Limited Error Raster Compression) encoder and decoder"
 repository = "https://github.com/NathanHowell/lerc-rs"
 documentation = "https://docs.rs/lerc-rs"
-
-[lib]
-name = "lerc"
 keywords = ["lerc", "raster", "compression", "geospatial", "esri"]
 categories = ["compression", "encoding", "no-std"]
 exclude = ["esri-lerc/", "crates/", "benches/", "examples/", "tests/"]
+
+[lib]
+name = "lerc"
 
 [features]
 default = ["std"]

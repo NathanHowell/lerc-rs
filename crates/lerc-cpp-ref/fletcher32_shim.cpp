@@ -1,12 +1,10 @@
 // Expose Lerc2::ComputeChecksumFletcher32 (which is private) so we can
 // property-test the Rust reimplementation against the C++ original.
 //
-// We use the `#define private public` trick to access the private static
-// method without modifying the upstream header.
+// build.rs patches Lerc2.h in OUT_DIR to make the method public, and
+// the include path is set so this file picks up the patched copy.
 
-#define private public
 #include "Lerc2.h"
-#undef private
 
 USING_NAMESPACE_LERC
 

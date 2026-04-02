@@ -1,7 +1,7 @@
 /// Compute Fletcher32 checksum matching the LERC C++ implementation.
 ///
 /// The C++ code processes byte pairs as big-endian 16-bit words:
-///   word = (byte[i] << 8) | byte[i+1]
+///   word = (byte\[i\] << 8) | byte\[i+1\]
 /// with a batch size of 359 words before reduction.
 pub fn fletcher32(data: &[u8]) -> u32 {
     let mut sum1: u32 = 0xffff;

@@ -17,7 +17,14 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          files: target/nextest/ci/junit.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test-cpp-validation:
     name: C++ cross-validation
@@ -28,7 +35,14 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --features cpp-validation
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci --features cpp-validation
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          files: target/nextest/ci/junit.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test-wasm:
     name: wasm32 tests

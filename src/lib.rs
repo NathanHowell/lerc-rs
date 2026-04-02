@@ -22,8 +22,9 @@ pub mod types;
 /// Validity bitmask for tracking valid/invalid pixels.
 pub mod bitmask;
 pub(crate) mod bitstuffer;
+/// Fletcher-32 checksum used by the LERC2 format.
 #[allow(dead_code)]
-pub(crate) mod checksum;
+pub mod checksum;
 #[allow(dead_code)]
 pub(crate) mod header;
 #[allow(dead_code)]

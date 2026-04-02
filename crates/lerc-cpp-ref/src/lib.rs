@@ -80,6 +80,8 @@ unsafe extern "C" {
         dataRangeArraySize: i32,
     ) -> u32;
 
+    fn lerc_fletcher32(pByte: *const u8, len: i32) -> u32;
+
     fn lerc_decode(
         pLercBlob: *const u8,
         blobSize: u32,
@@ -92,6 +94,11 @@ unsafe extern "C" {
         dataType: u32,
         pData: *mut c_void,
     ) -> u32;
+}
+
+/// Compute Fletcher-32 checksum using the C++ reference implementation.
+pub fn fletcher32(data: &[u8]) -> u32 {
+    unsafe { lerc_fletcher32(data.as_ptr(), data.len() as i32) }
 }
 
 /// Encode data using the C++ reference implementation.

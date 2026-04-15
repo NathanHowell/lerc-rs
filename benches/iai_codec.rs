@@ -8,9 +8,9 @@
 //! Run with: `cargo bench --bench iai_codec`
 
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
-use std::hint::black_box;
 use lerc::bitmask::BitMask;
 use lerc::{DataType, Image, Precision, SampleData};
+use std::hint::black_box;
 
 // ---------------------------------------------------------------------------
 // Reference files (real-world test data)
@@ -46,7 +46,9 @@ fn make_f32_image() -> Image {
 }
 
 fn make_u8_image() -> Image {
-    let pixels: Vec<u8> = (0..SIZE * SIZE).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+    let pixels: Vec<u8> = (0..SIZE * SIZE)
+        .map(|i| ((i * 7 + 13) % 256) as u8)
+        .collect();
     Image {
         width: SIZE as u32,
         height: SIZE as u32,

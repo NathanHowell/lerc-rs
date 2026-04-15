@@ -97,3 +97,18 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  iai-bench:
+    name: Callgrind benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Install iai-callgrind-runner
+        run: cargo install iai-callgrind-runner --version 0.16.1 --locked
+      - run: cargo bench --bench iai_codec

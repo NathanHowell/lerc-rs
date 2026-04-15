@@ -29,6 +29,7 @@ cpp-validation = []
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 proptest = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
+iai-callgrind = "0.16"
 lerc-cpp-ref = { path = "crates/lerc-cpp-ref" }
 
 [[bench]]
@@ -37,6 +38,10 @@ harness = false
 
 [[bench]]
 name = "profile_encode"
+harness = false
+
+[[bench]]
+name = "iai_codec"
 harness = false
 
 [dependencies]

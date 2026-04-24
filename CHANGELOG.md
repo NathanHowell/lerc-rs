@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-24
+
+### Changed (breaking)
+
+- `BitMask` is now an enum with `AllValid(usize)` and `Explicit(BitVec)` variants.
+  The decoder produces `AllValid` directly when the blob header reports full
+  validity, so `mask.is_all_valid()` is O(1) and does not allocate or scan.
+  Previously, "all pixels valid" was expressed by an `Explicit` mask with every
+  bit set, which required an O(n) `count_valid() == num_pixels()` check at the
+  consumer.
+- `BitMask::as_bytes` / `as_bytes_mut` now return `Option<&[u8]>` /
+  `Option<&mut [u8]>`; they return `None` for `AllValid` (no bytes stored).
+
+### Added
+
+- `BitMask::is_all_valid` — O(1) for `AllValid`, popcount fallback for `Explicit`.
+- `BitMask::AllValid(n)` pattern matches in downstream code.
+
 ## [0.1.1] - 2026-04-15
 
 ### Changed

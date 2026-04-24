@@ -55,6 +55,14 @@ let blob = lerc::encode_slice(128, 128, &bytes, Precision::Lossless).unwrap();
 // Decode to typed data
 let (pixels, mask, width, height) = lerc::decode_slice::<f32>(&blob).unwrap();
 
+// The decoder returns `BitMask::AllValid(n)` when every pixel is valid,
+// so `is_all_valid` is O(1) — handy for short-circuiting NaN-write loops.
+if !mask.is_all_valid() {
+    for (i, _) in pixels.iter().enumerate() {
+        if !mask.is_valid(i) { /* write NaN / sentinel */ }
+    }
+}
+
 // Or decode to Image for full metadata
 let image = lerc::decode(&blob).unwrap();
 println!("{}×{}, {:?}, {} bands", image.width, image.height, image.data_type, image.bands);

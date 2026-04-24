@@ -305,8 +305,8 @@ fn encode_tile<T: Sample>(
     let mut z_max_f = f64::MIN;
 
     for i in i0..i1 {
-        let mut k = i * n_cols + j0;
-        for _j in j0..j1 {
+        for j in j0..j1 {
+            let k = i * n_cols + j;
             if mask.is_valid(k) {
                 let val = data[k * n_depth + i_depth].to_f64();
                 scratch.valid_data.push(val);
@@ -317,7 +317,6 @@ fn encode_tile<T: Sample>(
                     z_max_f = val;
                 }
             }
-            k += 1;
         }
     }
 
@@ -335,9 +334,9 @@ fn encode_tile<T: Sample>(
         scratch.diff_data.clear();
         let mut overflow = false;
         let mut idx = 0;
-        for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            for _j in j0..j1 {
+        'outer: for i in i0..i1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
                 if mask.is_valid(k) {
                     let cur = data[k * n_depth + i_depth].to_f64();
                     let prev = if let Some(ref rb) = recon_buf {
@@ -350,15 +349,11 @@ fn encode_tile<T: Sample>(
                     // must be representable as i32
                     if T::is_integer() && (diff < i32::MIN as f64 || diff > i32::MAX as f64) {
                         overflow = true;
-                        break;
+                        break 'outer;
                     }
                     scratch.diff_data.push(diff);
                     idx += 1;
                 }
-                k += 1;
-            }
-            if overflow {
-                break;
             }
         }
         !overflow && idx == num_valid
@@ -479,8 +474,8 @@ fn encode_tile<T: Sample>(
         // Apply reconstruction to the buffer
         let mut valid_idx = 0;
         for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            for _j in j0..j1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
                 if mask.is_valid(k) {
                     let recon_val = match recon_info {
                         TileReconInfo::Constant(c) => {
@@ -516,7 +511,6 @@ fn encode_tile<T: Sample>(
                     rb[k] = recon_val;
                     valid_idx += 1;
                 }
-                k += 1;
             }
         }
     }

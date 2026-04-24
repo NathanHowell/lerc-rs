@@ -182,7 +182,7 @@ impl HuffmanCodec {
             return false;
         }
 
-        sort_vec.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        sort_vec.sort_unstable_by_key(|e| core::cmp::Reverse(e.0));
 
         // Assign canonical codes
         let index = sort_vec[0].1 as usize;

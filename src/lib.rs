@@ -392,13 +392,14 @@ impl Image {
         self.width as usize * self.height as usize
     }
 
-    /// Check if all pixels are valid (in the first band's mask).
+    /// Check if all pixels in the first band are valid.
     ///
-    /// Returns `true` if there is no mask (all pixels are implicitly valid)
-    /// or if every pixel in the mask is marked valid.
+    /// Returns `true` if there is no mask (all pixels are implicitly valid),
+    /// if the first band's mask is [`BitMask::AllValid`] (O(1)), or if an
+    /// explicit mask happens to have every bit set (O(n) popcount fallback).
     pub fn all_valid(&self) -> bool {
         match self.valid_masks.first() {
-            Some(m) => m.count_valid() == m.num_pixels(),
+            Some(m) => m.is_all_valid(),
             None => true,
         }
     }

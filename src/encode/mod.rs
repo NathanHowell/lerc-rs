@@ -340,7 +340,11 @@ fn write_blob_payload<T: Sample>(
     if num_valid == 0 || num_valid == num_pixels {
         blob.extend_from_slice(&0i32.to_le_bytes());
     } else {
-        let mask_compressed = rle::compress(mask.as_bytes());
+        // Partial validity: the mask must be Explicit and therefore has bytes.
+        let mask_bytes = mask
+            .as_bytes()
+            .expect("partial validity requires an explicit bitmask");
+        let mask_compressed = rle::compress(mask_bytes);
         let mask_size = mask_compressed.len() as i32;
         blob.extend_from_slice(&mask_size.to_le_bytes());
         blob.extend_from_slice(&mask_compressed);

@@ -324,9 +324,9 @@ fn read_tile<T: Sample>(
 
     if compr_mode == TileCompressionMode::ConstZero as u8 {
         for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            let mut m = k * n_depth + i_depth;
-            for _j in j0..j1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
+                let m = k * n_depth + i_depth;
                 if mask.is_valid(k) {
                     output[m] = if b_diff_enc {
                         output[m - 1]
@@ -334,8 +334,6 @@ fn read_tile<T: Sample>(
                         T::default()
                     };
                 }
-                k += 1;
-                m += n_depth;
             }
         }
         return Ok(());
@@ -348,9 +346,9 @@ fn read_tile<T: Sample>(
 
         let type_size = T::BYTES;
         for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            let mut m = k * n_depth + i_depth;
-            for _j in j0..j1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
+                let m = k * n_depth + i_depth;
                 if mask.is_valid(k) {
                     if *pos + type_size > data.len() {
                         return Err(LercError::BufferTooSmall {
@@ -360,8 +358,6 @@ fn read_tile<T: Sample>(
                     }
                     output[m] = read_typed_value::<T>(data, pos);
                 }
-                k += 1;
-                m += n_depth;
             }
         }
         return Ok(());
@@ -382,9 +378,9 @@ fn read_tile<T: Sample>(
 
     if compr_mode == TileCompressionMode::ConstOffset as u8 {
         for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            let mut m = k * n_depth + i_depth;
-            for _j in j0..j1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
+                let m = k * n_depth + i_depth;
                 if mask.is_valid(k) {
                     if !b_diff_enc {
                         output[m] = T::from_f64(offset);
@@ -393,8 +389,6 @@ fn read_tile<T: Sample>(
                         output[m] = T::from_f64(z.min(z_max));
                     }
                 }
-                k += 1;
-                m += n_depth;
             }
         }
         return Ok(());
@@ -473,9 +467,9 @@ fn read_tile<T: Sample>(
     } else {
         // General path: mask checks and/or diff encoding
         for i in i0..i1 {
-            let mut k = i * n_cols + j0;
-            let mut m = k * n_depth + i_depth;
-            for _j in j0..j1 {
+            for j in j0..j1 {
+                let k = i * n_cols + j;
+                let m = k * n_depth + i_depth;
                 let valid = if all_valid { true } else { mask.is_valid(k) };
                 if valid {
                     let quant = buffer_vec[src_idx] as f64;
@@ -489,8 +483,6 @@ fn read_tile<T: Sample>(
                         output[m] = T::from_f64(z.min(z_max));
                     }
                 }
-                k += 1;
-                m += n_depth;
             }
         }
     }

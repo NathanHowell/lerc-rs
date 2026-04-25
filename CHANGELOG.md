@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `decode_into_with_nodata<T>` convenience that fills invalid pixels with a
+  caller-supplied sentinel.
+
 ### Fixed
 
 - FPL (lossless float) byte-plane level selection on small planes (< 8192 bytes).

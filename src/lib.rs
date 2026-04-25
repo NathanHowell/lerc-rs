@@ -443,3 +443,52 @@ impl Image {
 pub fn decode_into<T: Sample>(data: &[u8], output: &mut [T]) -> Result<DecodeResult> {
     decode::decode_into(data, output)
 }
+
+/// Decode a LERC blob into a pre-allocated buffer, filling invalid pixels with
+/// a caller-supplied sentinel value.
+///
+/// This is a convenience layer over [`decode_into`]: it performs the same decode
+/// (so the same constraints on type and buffer size apply), then walks each
+/// band's validity mask and writes `nodata` into every position that the mask
+/// reports as invalid. For pixels with `depth > 1`, all `depth` slices of an
+/// invalid pixel receive the sentinel.
+///
+/// The returned [`DecodeResult`] still carries `valid_masks`, so callers that
+/// want both the sentinel-filled buffer and the masks (e.g. to distinguish
+/// genuine sentinel-valued pixels from mask-driven fills) have access to both.
+///
+/// Bands whose mask is [`BitMask::AllValid`] are skipped entirely — no writes
+/// occur for those bands.
+pub fn decode_into_with_nodata<T: Sample>(
+    data: &[u8],
+    output: &mut [T],
+    nodata: T,
+) -> Result<DecodeResult> {
+    let result = decode::decode_into(data, output)?;
+
+    let n_cols = result.width as usize;
+    let n_rows = result.height as usize;
+    let n_depth = result.depth as usize;
+    let band_size = n_rows * n_cols * n_depth;
+
+    for (band_idx, mask) in result.valid_masks.iter().enumerate() {
+        if mask.is_all_valid() {
+            continue;
+        }
+        let band_offset = band_idx * band_size;
+        for i in 0..n_rows {
+            let row_start = band_offset + i * n_cols * n_depth;
+            for j in 0..n_cols {
+                let k = i * n_cols + j;
+                if !mask.is_valid(k) {
+                    let base = row_start + j * n_depth;
+                    for m in 0..n_depth {
+                        output[base + m] = nodata;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}

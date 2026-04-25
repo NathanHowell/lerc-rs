@@ -53,7 +53,8 @@ let blob = lerc::encode_slice(128, 128, &bytes, Precision::Lossless).unwrap();
 
 ```rust
 // Decode to typed data
-let (pixels, mask, width, height) = lerc::decode_slice::<f32>(&blob).unwrap();
+let lerc::DecodedSlice { pixels, mask, width, height } =
+    lerc::decode_slice::<f32>(&blob).unwrap();
 
 // The decoder returns `BitMask::AllValid(n)` when every pixel is valid,
 // so `is_all_valid` is O(1) — handy for short-circuiting NaN-write loops.

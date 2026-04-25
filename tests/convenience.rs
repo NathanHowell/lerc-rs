@@ -16,15 +16,14 @@ macro_rules! round_trip_test {
 
             let blob = lerc::encode_slice(width, height, &pixels, Precision::Lossless)
                 .expect("encode failed");
-            let (decoded_pixels, mask, w, h) =
-                lerc::decode_slice::<$ty>(&blob).expect("decode failed");
+            let decoded = lerc::decode_slice::<$ty>(&blob).expect("decode failed");
 
-            assert_eq!(w, width);
-            assert_eq!(h, height);
-            assert_eq!(decoded_pixels, pixels);
+            assert_eq!(decoded.width, width);
+            assert_eq!(decoded.height, height);
+            assert_eq!(decoded.pixels, pixels);
             // All pixels should be valid
             for k in 0..(width * height) as usize {
-                assert!(mask.is_valid(k), "pixel {k} should be valid");
+                assert!(decoded.mask.is_valid(k), "pixel {k} should be valid");
             }
         }
     };
@@ -79,15 +78,14 @@ fn round_trip_f32_masked() {
     let pixels: Vec<f32> = (0..n as u32).map(|i| i as f32 * 1.5).collect();
     let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
-    let (decoded_pixels, decoded_mask, w, h) =
-        lerc::decode_slice::<f32>(&blob).expect("decode failed");
+    let decoded = lerc::decode_slice::<f32>(&blob).expect("decode failed");
 
-    assert_eq!(w, width);
-    assert_eq!(h, height);
-    for k in 0..n {
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (k, &orig) in pixels.iter().enumerate().take(n) {
         if mask.is_valid(k) {
-            assert!(decoded_mask.is_valid(k), "pixel {k} should be valid");
-            assert_eq!(decoded_pixels[k], pixels[k], "pixel {k} value mismatch");
+            assert!(decoded.mask.is_valid(k), "pixel {k} should be valid");
+            assert_eq!(decoded.pixels[k], orig, "pixel {k} value mismatch");
         }
     }
 }
@@ -108,15 +106,14 @@ fn round_trip_u8_masked() {
     let pixels: Vec<u8> = (0..n).map(|i| (i % 256) as u8).collect();
     let blob = lerc::encode_slice_masked(width, height, &pixels, &mask, Precision::Lossless)
         .expect("encode failed");
-    let (decoded_pixels, decoded_mask, w, h) =
-        lerc::decode_slice::<u8>(&blob).expect("decode failed");
+    let decoded = lerc::decode_slice::<u8>(&blob).expect("decode failed");
 
-    assert_eq!(w, width);
-    assert_eq!(h, height);
-    for k in 0..n {
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (k, &orig) in pixels.iter().enumerate().take(n) {
         if mask.is_valid(k) {
-            assert!(decoded_mask.is_valid(k));
-            assert_eq!(decoded_pixels[k], pixels[k]);
+            assert!(decoded.mask.is_valid(k));
+            assert_eq!(decoded.pixels[k], orig);
         }
     }
 }
@@ -188,11 +185,11 @@ fn lossy_round_trip_f64() {
 
     let blob = lerc::encode_slice(width, height, &pixels, Precision::Tolerance(max_z_error))
         .expect("encode failed");
-    let (decoded, _mask, w, h) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
+    let decoded = lerc::decode_slice::<f64>(&blob).expect("decode failed");
 
-    assert_eq!(w, width);
-    assert_eq!(h, height);
-    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.pixels.iter()).enumerate() {
         let diff = (orig - dec).abs();
         assert!(
             diff <= max_z_error,

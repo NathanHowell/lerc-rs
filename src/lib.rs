@@ -146,6 +146,22 @@ impl Default for Image {
     }
 }
 
+/// Decoded pixel data and metadata returned by [`decode_slice`].
+///
+/// Holds the typed pixel buffer, the validity mask, and the image dimensions
+/// for a single-band, single-depth LERC blob.
+#[derive(Debug, Clone)]
+pub struct DecodedSlice<T> {
+    /// Decoded pixel data, one element per pixel, in row-major order.
+    pub pixels: Vec<T>,
+    /// Validity mask indicating which pixels are valid.
+    pub mask: BitMask,
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+}
+
 /// Type-erased pixel data container, one variant per supported data type.
 #[derive(Debug, Clone)]
 pub enum SampleData {
@@ -395,13 +411,13 @@ pub fn encode_slice_masked<T: Sample>(
     encode::encode(&image, max_z_error)
 }
 
-/// Decode a single-band, single-depth LERC blob, returning typed pixel data,
-/// the validity mask, width, and height.
+/// Decode a single-band, single-depth LERC blob into a [`DecodedSlice<T>`]
+/// containing the typed pixel data, validity mask, and image dimensions.
 ///
 /// The pixel type `T` must match the blob's data type. Returns an error on type
 /// mismatch or if the blob contains multiple bands or depths (use [`decode`] for
 /// multi-band/multi-depth blobs to get full shape and per-band masks).
-pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32)> {
+pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<DecodedSlice<T>> {
     let image = decode::decode(blob)?;
     if image.bands > 1 {
         return Err(LercError::InvalidData(alloc::format!(
@@ -429,7 +445,12 @@ pub fn decode_slice<T: Sample>(blob: &[u8]) -> Result<(Vec<T>, BitMask, u32, u32
         .into_iter()
         .next()
         .unwrap_or_else(|| BitMask::all_valid((w as usize) * (h as usize)));
-    Ok((pixels, mask, w, h))
+    Ok(DecodedSlice {
+        pixels,
+        mask,
+        width: w,
+        height: h,
+    })
 }
 
 // ---------------------------------------------------------------------------

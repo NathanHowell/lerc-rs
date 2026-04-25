@@ -1472,11 +1472,11 @@ mod tests {
         let height = 6u32;
         let pixels: Vec<u8> = (0..36).map(|i| (i * 7 % 256) as u8).collect();
         let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, mask, w, h) = crate::decode_slice::<u8>(&blob).unwrap();
-        assert_eq!(w, width);
-        assert_eq!(h, height);
-        assert_eq!(mask.count_valid(), 36);
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<u8>(&blob).unwrap();
+        assert_eq!(result.width, width);
+        assert_eq!(result.height, height);
+        assert_eq!(result.mask.count_valid(), 36);
+        assert_eq!(result.pixels, pixels);
     }
 
     #[test]
@@ -1550,9 +1550,9 @@ mod tests {
         let n = (width * height) as usize;
         let pixels: Vec<i16> = (0..n).map(|i| i as i16 - 32).collect();
         let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, w, h) = crate::decode_slice::<i16>(&blob).unwrap();
-        assert_eq!((w, h), (width, height));
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<i16>(&blob).unwrap();
+        assert_eq!((result.width, result.height), (width, height));
+        assert_eq!(result.pixels, pixels);
     }
 
     #[test]
@@ -1561,8 +1561,8 @@ mod tests {
         let height = 4u32;
         let pixels: Vec<u32> = (0..16).map(|i| i * 1000).collect();
         let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, _, _) = crate::decode_slice::<u32>(&blob).unwrap();
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<u32>(&blob).unwrap();
+        assert_eq!(result.pixels, pixels);
     }
 
     // -----------------------------------------------------------------------
@@ -1632,9 +1632,9 @@ mod tests {
         let height = 8u32;
         let pixels: Vec<u8> = (0..64).map(|i| (i * 4 % 256) as u8).collect();
         let blob = build_one_sweep_blob_u8(width, height, &pixels);
-        let (decoded, _mask, w, h) = crate::decode_slice::<u8>(&blob).unwrap();
-        assert_eq!((w, h), (width, height));
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<u8>(&blob).unwrap();
+        assert_eq!((result.width, result.height), (width, height));
+        assert_eq!(result.pixels, pixels);
     }
 
     /// Build a valid LERC2 blob with one_sweep=1 for f32 data.
@@ -1685,9 +1685,9 @@ mod tests {
     fn decode_one_sweep_blob_f32() {
         let pixels: Vec<f32> = vec![1.5, -2.5, 100.0, 0.0];
         let blob = build_one_sweep_blob_f32(2, 2, &pixels);
-        let (decoded, _mask, w, h) = crate::decode_slice::<f32>(&blob).unwrap();
-        assert_eq!((w, h), (2, 2));
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<f32>(&blob).unwrap();
+        assert_eq!((result.width, result.height), (2, 2));
+        assert_eq!(result.pixels, pixels);
     }
 
     // -----------------------------------------------------------------------
@@ -1736,8 +1736,8 @@ mod tests {
         let n = (width * height) as usize;
         let pixels: Vec<i32> = (0..n).map(|i| (i as i32) * 100 - 10000).collect();
         let blob = crate::encode_slice(width, height, &pixels, crate::Precision::Lossless).unwrap();
-        let (decoded, _mask, _, _) = crate::decode_slice::<i32>(&blob).unwrap();
-        assert_eq!(decoded, pixels);
+        let result = crate::decode_slice::<i32>(&blob).unwrap();
+        assert_eq!(result.pixels, pixels);
     }
 
     #[test]
@@ -1754,8 +1754,8 @@ mod tests {
             crate::Precision::Tolerance(max_z_error as f32),
         )
         .unwrap();
-        let (decoded, _mask, _, _) = crate::decode_slice::<f32>(&blob).unwrap();
-        for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+        let result = crate::decode_slice::<f32>(&blob).unwrap();
+        for (i, (&orig, &dec)) in pixels.iter().zip(result.pixels.iter()).enumerate() {
             assert!(
                 (orig - dec).abs() <= max_z_error as f32,
                 "pixel {i}: orig={orig}, decoded={dec}, error={}",

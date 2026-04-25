@@ -70,10 +70,10 @@ fn round_trip_f32_fpl(width: u32, height: u32, pixels: &[f32]) {
     assert_eq!(info.tolerance, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
-    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
-    assert_eq!(dw, width);
-    assert_eq!(dh, height);
-    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+    let decoded = lerc::decode_slice::<f32>(&blob).expect("decode failed");
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.pixels.iter()).enumerate() {
         assert_eq!(
             orig.to_bits(),
             dec.to_bits(),
@@ -99,10 +99,10 @@ fn round_trip_f64_fpl(width: u32, height: u32, pixels: &[f64]) {
     assert_eq!(info.tolerance, 0.0);
     assert_eq!(info.blob_size as usize, blob.len());
 
-    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
-    assert_eq!(dw, width);
-    assert_eq!(dh, height);
-    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+    let decoded = lerc::decode_slice::<f64>(&blob).expect("decode failed");
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.pixels.iter()).enumerate() {
         assert_eq!(
             orig.to_bits(),
             dec.to_bits(),
@@ -122,10 +122,10 @@ fn round_trip_f32_lossless(width: u32, height: u32, pixels: &[f32]) {
     let blob =
         lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
-    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f32>(&blob).expect("decode failed");
-    assert_eq!(dw, width);
-    assert_eq!(dh, height);
-    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+    let decoded = lerc::decode_slice::<f32>(&blob).expect("decode failed");
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.pixels.iter()).enumerate() {
         assert_eq!(
             orig.to_bits(),
             dec.to_bits(),
@@ -144,10 +144,10 @@ fn round_trip_f64_lossless(width: u32, height: u32, pixels: &[f64]) {
     let blob =
         lerc::encode_slice(width, height, pixels, Precision::Lossless).expect("encode failed");
 
-    let (decoded, _mask, dw, dh) = lerc::decode_slice::<f64>(&blob).expect("decode failed");
-    assert_eq!(dw, width);
-    assert_eq!(dh, height);
-    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.iter()).enumerate() {
+    let decoded = lerc::decode_slice::<f64>(&blob).expect("decode failed");
+    assert_eq!(decoded.width, width);
+    assert_eq!(decoded.height, height);
+    for (i, (&orig, &dec)) in pixels.iter().zip(decoded.pixels.iter()).enumerate() {
         assert_eq!(
             orig.to_bits(),
             dec.to_bits(),

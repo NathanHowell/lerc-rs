@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- FPL (lossless float) byte-plane level selection on small planes (< 8192 bytes).
+  When the snippet-sampling path produced no snippets, Rust fell through to a
+  full-plane delta search that could pick a non-zero level on data already
+  flattened by the row+column predictor (typical for smooth gradients), making
+  the byte plane harder to compress. The C++ reference's empty-snippets path
+  short-circuits to level 0; mirror that. Eliminates 7-22% blob-size regressions
+  vs. the C++ reference on smooth float ramps at sub-8192-byte plane sizes; no
+  effect on larger planes or non-ramp data.
+
 ## [0.2.0] - 2026-04-24
 
 ### Changed (breaking)

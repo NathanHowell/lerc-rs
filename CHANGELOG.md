@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- `decode_slice<T>` now returns `DecodedSlice<T> { pixels, mask, width, height }`
+  instead of a `(Vec<T>, BitMask, u32, u32)` 4-tuple. The named struct removes
+  positional ambiguity between `width` and `height`. Migration: replace tuple
+  destructuring with field access (e.g. `let result = decode_slice(...)?;
+  result.pixels` / `result.width`).
+
 ## [0.2.1] - 2026-04-24
 
 ### Added

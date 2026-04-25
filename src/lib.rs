@@ -217,7 +217,8 @@ pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
 /// Encodes a raster image directly from a borrowed pixel slice, avoiding the
 /// buffer clone forced by the [`Image`]-based [`encode`] API. The pixel type
 /// `T` determines the LERC data type automatically via [`Sample`]; tolerances
-/// are expressed in `f64` regardless of `T` to keep the API boundary uniform.
+/// are expressed in `T` and widened to `f64` internally, matching the typed
+/// slice helpers ([`encode_slice`], [`encode_slice_masked`]).
 ///
 /// # Data layout
 ///
@@ -267,7 +268,7 @@ pub fn encode_borrowed<T: Sample>(
     data: &[T],
     masks: &[BitMask],
     no_data_value: Option<f64>,
-    precision: Precision<f64>,
+    precision: Precision<T>,
 ) -> Result<Vec<u8>> {
     let pixels_per_band = (width as usize) * (height as usize);
     let expected = pixels_per_band * (depth as usize) * (bands as usize);
@@ -300,7 +301,7 @@ pub fn encode_borrowed<T: Sample>(
                 0.0
             }
         }
-        Precision::Tolerance(val) => val,
+        Precision::Tolerance(val) => val.to_f64(),
     };
     encode::encode_borrowed_typed(
         width,

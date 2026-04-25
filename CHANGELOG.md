@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `decode_into_with_nodata<T>` convenience that fills invalid pixels with a
   caller-supplied sentinel.
+- `encode_borrowed<T>` zero-copy multi-band encode entry point that avoids
+  the buffer clone forced by the `Image`-based API.
 
 ### Added (tests)
 

@@ -178,6 +178,10 @@ pub fn decode(data: &[u8]) -> Result<Image> {
 }
 
 /// Encode an image into a LERC blob with the given precision.
+///
+/// This entry point clones the image's pixel buffer when called via the
+/// owning `Image` path. To avoid that clone, see [`encode_borrowed`], which
+/// takes a borrowed `&[T]` and image-shape parameters directly.
 pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
     let max_z_error = match precision {
         Precision::Lossless => {
@@ -192,6 +196,108 @@ pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
     encode::encode(image, max_z_error)
 }
 
+/// Zero-copy multi-band encode entry point.
+///
+/// Encodes a raster image directly from a borrowed pixel slice, avoiding the
+/// buffer clone forced by the [`Image`]-based [`encode`] API. The pixel type
+/// `T` determines the LERC data type automatically via [`Sample`]; tolerances
+/// are expressed in `f64` regardless of `T` to keep the API boundary uniform.
+///
+/// # Data layout
+///
+/// `data` is band-major: outermost is `band`, then row-major within each band,
+/// then `depth` slices interleaved per pixel. Concretely, the value for band
+/// `b`, row `r`, column `c`, depth `d` is at index
+/// `b * (width * height * depth) + (r * width + c) * depth + d`.
+///
+/// `data.len()` must equal `width * height * depth * bands`.
+///
+/// # Validity masks
+///
+/// `masks.len()` must equal `bands`, with one [`BitMask`] per band (each
+/// having `num_pixels() == width * height`). For fully valid bands, pass
+/// [`BitMask::all_valid(width as usize * height as usize)`](BitMask::all_valid).
+///
+/// # Errors
+///
+/// Returns [`LercError::InvalidData`] if the data length, the number of
+/// masks, or any mask's pixel count does not match the declared shape.
+///
+/// # Examples
+///
+/// ```
+/// use lerc::{Precision, encode_borrowed};
+/// use lerc::bitmask::BitMask;
+///
+/// let width = 4u32;
+/// let height = 3u32;
+/// let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
+/// let masks = [BitMask::all_valid((width * height) as usize)];
+/// let blob = encode_borrowed::<f32>(
+///     width, height, 1, 1,
+///     &pixels,
+///     &masks,
+///     None,
+///     Precision::Lossless,
+/// ).expect("encode failed");
+/// assert!(!blob.is_empty());
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn encode_borrowed<T: Sample>(
+    width: u32,
+    height: u32,
+    depth: u32,
+    bands: u32,
+    data: &[T],
+    masks: &[BitMask],
+    no_data_value: Option<f64>,
+    precision: Precision<f64>,
+) -> Result<Vec<u8>> {
+    let pixels_per_band = (width as usize) * (height as usize);
+    let expected = pixels_per_band * (depth as usize) * (bands as usize);
+    if data.len() != expected {
+        return Err(LercError::InvalidData(alloc::format!(
+            "data length {} does not match width*height*depth*bands {expected}",
+            data.len()
+        )));
+    }
+    if masks.len() != bands as usize {
+        return Err(LercError::InvalidData(alloc::format!(
+            "masks length {} does not match bands {}",
+            masks.len(),
+            bands
+        )));
+    }
+    for (i, mask) in masks.iter().enumerate() {
+        if mask.num_pixels() != pixels_per_band {
+            return Err(LercError::InvalidData(alloc::format!(
+                "mask[{i}] pixel count {} does not match width*height {pixels_per_band}",
+                mask.num_pixels()
+            )));
+        }
+    }
+    let max_z_error: f64 = match precision {
+        Precision::Lossless => {
+            if T::is_integer() {
+                0.5
+            } else {
+                0.0
+            }
+        }
+        Precision::Tolerance(val) => val,
+    };
+    encode::encode_borrowed_typed(
+        width,
+        height,
+        depth,
+        bands,
+        data,
+        masks,
+        no_data_value,
+        max_z_error,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Typed convenience encode/decode helpers
 // ---------------------------------------------------------------------------
@@ -200,6 +306,9 @@ pub fn encode(image: &Image, precision: Precision<f64>) -> Result<Vec<u8>> {
 ///
 /// The pixel type `T` determines the LERC data type automatically via `Sample`.
 /// Returns an error if `data.len() != width * height`.
+///
+/// This helper internally clones `data` into an owned `Image`. For zero-copy
+/// encoding, including multi-band layouts, see [`encode_borrowed`].
 pub fn encode_slice<T: Sample>(
     width: u32,
     height: u32,
@@ -240,6 +349,9 @@ pub fn encode_slice<T: Sample>(
 ///
 /// The pixel type `T` determines the LERC data type automatically via `Sample`.
 /// Returns an error if `data.len() != width * height` or if the mask size does not match.
+///
+/// This helper internally clones `data` into an owned `Image`. For zero-copy
+/// encoding, including multi-band layouts, see [`encode_borrowed`].
 pub fn encode_slice_masked<T: Sample>(
     width: u32,
     height: u32,

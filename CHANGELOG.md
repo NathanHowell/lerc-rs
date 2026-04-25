@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `decode_into_with_nodata<T>` convenience that fills invalid pixels with a
   caller-supplied sentinel.
 
+### Added (tests)
+
+- `tests/cpp_byte_identity.rs` — wire-format regression tests: an
+  `Explicit`-mask-with-every-bit-set canonicalization pin (AllValid fast
+  path against itself) and byte-identity pins for `f32`/`f64` lossless
+  encodes against the C++ reference encoder.
+
 ### Fixed
 
 - FPL (lossless float) byte-plane level selection on small planes (< 8192 bytes).

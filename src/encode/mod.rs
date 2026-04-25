@@ -19,22 +19,113 @@ use tiles::{encode_tiles, select_block_size};
 
 pub fn encode(image: &Image, max_z_error: f64) -> Result<Vec<u8>> {
     match &image.data {
-        SampleData::I8(d) => encode_slice(image, d, max_z_error),
-        SampleData::U8(d) => encode_slice(image, d, max_z_error),
-        SampleData::I16(d) => encode_slice(image, d, max_z_error),
-        SampleData::U16(d) => encode_slice(image, d, max_z_error),
-        SampleData::I32(d) => encode_slice(image, d, max_z_error),
-        SampleData::U32(d) => encode_slice(image, d, max_z_error),
-        SampleData::F32(d) => encode_slice(image, d, max_z_error),
-        SampleData::F64(d) => encode_slice(image, d, max_z_error),
+        SampleData::I8(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::U8(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::I16(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::U16(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::I32(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::U32(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::F32(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
+        SampleData::F64(d) => encode_borrowed_typed(
+            image.width,
+            image.height,
+            image.depth,
+            image.bands,
+            d,
+            &image.valid_masks,
+            image.no_data_value,
+            max_z_error,
+        ),
     }
 }
 
-fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Result<Vec<u8>> {
-    let width = image.width as usize;
-    let height = image.height as usize;
-    let n_depth = image.depth as usize;
-    let n_bands = image.bands as usize;
+/// Borrowed-slice multi-band encode entry point.
+///
+/// Takes the typed `&[T]` and image-shape parameters explicitly, avoiding
+/// the buffer clone required by the [`Image`]-based API. The data layout is
+/// band-major: outermost is `band`, then row-major within each band, then
+/// `depth` slices interleaved per pixel.
+///
+/// This is the shared core used by both the public [`crate::encode_borrowed`]
+/// API and the internal [`encode`] dispatch from `&Image`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn encode_borrowed_typed<T: Sample>(
+    width: u32,
+    height: u32,
+    depth: u32,
+    bands: u32,
+    data: &[T],
+    valid_masks: &[BitMask],
+    no_data_value: Option<f64>,
+    max_z_error: f64,
+) -> Result<Vec<u8>> {
+    let width = width as usize;
+    let height = height as usize;
+    let n_depth = depth as usize;
+    let n_bands = bands as usize;
     let band_size = width * height * n_depth;
 
     let max_z_error = if T::is_integer() {
@@ -48,16 +139,8 @@ fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Resul
         // Negative maxZError signals bit-plane compression request
         let max_z_error = if max_z_error < 0.0 {
             let eps = -max_z_error;
-            try_bit_plane_compression::<T>(
-                data,
-                &image.valid_masks,
-                image.width as usize,
-                image.height as usize,
-                n_depth,
-                n_bands,
-                eps,
-            )
-            .unwrap_or(0.0)
+            try_bit_plane_compression::<T>(data, valid_masks, width, height, n_depth, n_bands, eps)
+                .unwrap_or(0.0)
         } else {
             max_z_error
         };
@@ -73,11 +156,11 @@ fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Resul
     let max_z_error = if !T::is_integer() && max_z_error > 0.0 {
         let mut raised = max_z_error;
         // We need any band's mask; use the first one for the scan.
-        let mask = if !image.valid_masks.is_empty() {
-            &image.valid_masks[0]
+        let mask = if !valid_masks.is_empty() {
+            &valid_masks[0]
         } else {
             // Should not happen for a valid image, but be safe.
-            &image.valid_masks[0]
+            &valid_masks[0]
         };
         if try_raise_max_z_error(data, mask, width, height, n_depth, &mut raised) {
             raised
@@ -92,14 +175,23 @@ fn encode_slice<T: Sample>(image: &Image, data: &[T], max_z_error: f64) -> Resul
 
     for band in 0..n_bands {
         let band_data = &data[band * band_size..(band + 1) * band_size];
-        let mask = if band < image.valid_masks.len() {
-            &image.valid_masks[band]
+        let mask = if band < valid_masks.len() {
+            &valid_masks[band]
         } else {
-            &image.valid_masks[0]
+            &valid_masks[0]
         };
 
         let blobs_more = (n_bands - 1 - band) as i32;
-        let blob = encode_one_band(band_data, mask, image, max_z_error, blobs_more)?;
+        let blob = encode_one_band(
+            band_data,
+            mask,
+            width,
+            height,
+            n_depth,
+            no_data_value,
+            max_z_error,
+            blobs_more,
+        )?;
         result.extend_from_slice(&blob);
     }
 
@@ -412,20 +504,21 @@ fn write_blob_payload<T: Sample>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_one_band<T: Sample>(
     data: &[T],
     mask: &BitMask,
-    image: &Image,
+    width: usize,
+    height: usize,
+    n_depth: usize,
+    image_no_data: Option<f64>,
     max_z_error: f64,
     n_blobs_more: i32,
 ) -> Result<Vec<u8>> {
-    let width = image.width as usize;
-    let height = image.height as usize;
-    let n_depth = image.depth as usize;
     let num_valid = mask.count_valid().min(width * height);
 
     let nd_f64 = if n_depth > 1 {
-        image.no_data_value.map(|nd| T::from_f64(nd).to_f64())
+        image_no_data.map(|nd| T::from_f64(nd).to_f64())
     } else {
         None
     };
@@ -439,7 +532,7 @@ fn encode_one_band<T: Sample>(
         height,
         n_depth,
         num_valid,
-        image_no_data: image.no_data_value,
+        image_no_data,
         nd_f64,
         max_z_error,
     };

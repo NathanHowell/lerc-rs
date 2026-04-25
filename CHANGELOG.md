@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-24
+
+### Changed (breaking)
+
+- `encode_borrowed<T>` now takes `Precision<T>` instead of `Precision<f64>`,
+  matching `encode_slice<T>` and `encode_slice_masked<T>`. Tolerances are
+  expressed in the pixel type and widened to `f64` internally. Migration:
+  drop the `as f64` cast on the tolerance value (e.g.
+  `Precision::Tolerance(max_z_error as f64)` → `Precision::Tolerance(max_z_error)`
+  when `max_z_error: T`).
+
 ## [0.3.0] - 2026-04-24
 
 ### Changed (breaking)

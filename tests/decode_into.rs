@@ -390,3 +390,310 @@ fn decode_into_generic_api() {
     };
     assert_eq!(&output, expected);
 }
+
+// ---------------------------------------------------------------------------
+// decode_into_with_nodata tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn decode_into_with_nodata_f32_single_band() {
+    let width = 16u32;
+    let height = 16u32;
+    let total = (width * height) as usize;
+
+    // Mark every 4th pixel as invalid.
+    let mut mask = BitMask::all_valid(total);
+    let mut invalid_indices = Vec::new();
+    for k in 0..total {
+        if k % 4 == 0 {
+            mask.set_invalid(k);
+            invalid_indices.push(k);
+        }
+    }
+
+    let pixels: Vec<f32> = (0..total)
+        .map(|i| {
+            if mask.is_valid(i) {
+                i as f32 * 0.5
+            } else {
+                0.0
+            }
+        })
+        .collect();
+
+    let image = Image {
+        width,
+        height,
+        depth: 1,
+        bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![mask.clone()],
+        data: SampleData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
+
+    let mut output = vec![0.0f32; total];
+    let result = lerc::decode_into_with_nodata::<f32>(&encoded, &mut output, f32::NAN)
+        .expect("decode_into_with_nodata failed");
+
+    // Mask is still returned to the caller.
+    assert_eq!(result.valid_masks.len(), 1);
+    let result_mask = &result.valid_masks[0];
+
+    for k in 0..total {
+        let row = (k / width as usize) as u32;
+        let col = (k % width as usize) as u32;
+        let label = format!("pixel ({row}, {col}) idx {k}");
+        if result_mask.is_valid(k) {
+            assert!(
+                !output[k].is_nan(),
+                "{label} should be valid and not NaN, got {}",
+                output[k]
+            );
+            assert!(
+                (output[k] - pixels[k]).abs() <= 0.001,
+                "{label}: expected ~{}, got {}",
+                pixels[k],
+                output[k]
+            );
+        } else {
+            assert!(
+                output[k].is_nan(),
+                "{label} should be NaN, got {}",
+                output[k]
+            );
+        }
+    }
+}
+
+#[test]
+fn decode_into_with_nodata_i32_single_band() {
+    let width = 12u32;
+    let height = 8u32;
+    let total = (width * height) as usize;
+
+    let mut mask = BitMask::all_valid(total);
+    for k in [0usize, 3, 7, 17, 50, total - 1] {
+        mask.set_invalid(k);
+    }
+
+    let pixels: Vec<i32> = (0..total)
+        .map(|i| {
+            if mask.is_valid(i) {
+                (i as i32) * 100 - 5000
+            } else {
+                0
+            }
+        })
+        .collect();
+
+    let image = Image {
+        width,
+        height,
+        depth: 1,
+        bands: 1,
+        data_type: DataType::Int,
+        valid_masks: vec![mask.clone()],
+        data: SampleData::I32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
+
+    let sentinel = i32::MIN;
+    let mut output = vec![0i32; total];
+    let result = lerc::decode_into_with_nodata::<i32>(&encoded, &mut output, sentinel)
+        .expect("decode_into_with_nodata failed");
+
+    let result_mask = &result.valid_masks[0];
+    for k in 0..total {
+        if result_mask.is_valid(k) {
+            assert_eq!(output[k], pixels[k], "valid pixel {k} mismatch");
+            assert_ne!(
+                output[k], sentinel,
+                "valid pixel {k} should not be sentinel"
+            );
+        } else {
+            assert_eq!(output[k], sentinel, "invalid pixel {k} should be sentinel");
+        }
+    }
+}
+
+#[test]
+fn decode_into_with_nodata_depth3_writes_all_slices() {
+    // Single band, depth = 3. Confirm the sentinel lands in every depth slice
+    // of every invalid pixel.
+    let width = 8u32;
+    let height = 8u32;
+    let depth = 3u32;
+    let pixel_count = (width * height) as usize;
+    let total = pixel_count * depth as usize;
+
+    let mut mask = BitMask::all_valid(pixel_count);
+    let invalid: Vec<usize> = vec![0, 5, 11, 33, 63];
+    for &k in &invalid {
+        mask.set_invalid(k);
+    }
+
+    // Build interleaved depth-3 pixels: row-major over (row, col, d).
+    let mut pixels = vec![0.0f32; total];
+    for i in 0..height as usize {
+        for j in 0..width as usize {
+            let k = i * width as usize + j;
+            let base = (i * width as usize + j) * depth as usize;
+            if mask.is_valid(k) {
+                pixels[base] = k as f32;
+                pixels[base + 1] = k as f32 + 0.25;
+                pixels[base + 2] = k as f32 + 0.5;
+            }
+        }
+    }
+
+    let image = Image {
+        width,
+        height,
+        depth,
+        bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![mask.clone()],
+        data: SampleData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Tolerance(0.001)).expect("encode failed");
+
+    let sentinel: f32 = -1.0e30;
+    let mut output = vec![0.0f32; total];
+    let result = lerc::decode_into_with_nodata::<f32>(&encoded, &mut output, sentinel)
+        .expect("decode_into_with_nodata failed");
+
+    let result_mask = &result.valid_masks[0];
+    for k in 0..pixel_count {
+        let base = k * depth as usize;
+        if result_mask.is_valid(k) {
+            for d in 0..depth as usize {
+                assert!(
+                    (output[base + d] - pixels[base + d]).abs() <= 0.001,
+                    "valid pixel {k}, depth {d}: expected ~{}, got {}",
+                    pixels[base + d],
+                    output[base + d]
+                );
+            }
+        } else {
+            for d in 0..depth as usize {
+                assert_eq!(
+                    output[base + d],
+                    sentinel,
+                    "invalid pixel {k}, depth slice {d} should be sentinel"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn decode_into_with_nodata_all_valid_does_not_write_sentinel() {
+    // When the mask is AllValid, the function must skip the band entirely and
+    // never write the sentinel into output.
+    let width = 16u32;
+    let height = 16u32;
+    let total = (width * height) as usize;
+
+    let pixels: Vec<f32> = (0..total).map(|i| i as f32 + 0.125).collect();
+
+    let image = Image {
+        width,
+        height,
+        depth: 1,
+        bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid(total)],
+        data: SampleData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
+
+    let sentinel: f32 = f32::NAN;
+    let mut output = vec![0.0f32; total];
+    let result = lerc::decode_into_with_nodata::<f32>(&encoded, &mut output, sentinel)
+        .expect("decode_into_with_nodata failed");
+
+    // No NaNs should have been introduced.
+    for (k, &v) in output.iter().enumerate() {
+        assert!(!v.is_nan(), "pixel {k} unexpectedly NaN");
+    }
+    // And the mask returned should report all-valid.
+    assert!(result.valid_masks[0].is_all_valid());
+    assert_eq!(output, pixels);
+}
+
+#[test]
+fn decode_into_with_nodata_multiband_mixed_masks() {
+    // Two bands: first all-valid, second with explicit invalid pixels.
+    // Ensures band offsetting is correct and that all-valid bands are skipped.
+    let width = 8u32;
+    let height = 8u32;
+    let bands = 2u32;
+    let band_size = (width * height) as usize;
+    let total = band_size * bands as usize;
+
+    let mut band0_pixels: Vec<u16> = (0..band_size).map(|i| i as u16).collect();
+    let mut band1_pixels: Vec<u16> = (0..band_size).map(|i| (i as u16) * 3 + 7).collect();
+
+    let band0_mask = BitMask::all_valid(band_size);
+    let mut band1_mask = BitMask::all_valid(band_size);
+    let invalid_band1: Vec<usize> = vec![0, 1, 5, 17, 40, band_size - 1];
+    for &k in &invalid_band1 {
+        band1_mask.set_invalid(k);
+    }
+    // Concatenate band 0 then band 1.
+    let mut pixels = Vec::with_capacity(total);
+    pixels.append(&mut band0_pixels);
+    pixels.append(&mut band1_pixels);
+
+    let image = Image {
+        width,
+        height,
+        depth: 1,
+        bands,
+        data_type: DataType::UShort,
+        valid_masks: vec![band0_mask, band1_mask.clone()],
+        data: SampleData::U16(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Lossless).expect("encode failed");
+
+    let sentinel: u16 = u16::MAX;
+    let mut output = vec![0u16; total];
+    let result = lerc::decode_into_with_nodata::<u16>(&encoded, &mut output, sentinel)
+        .expect("decode_into_with_nodata failed");
+
+    assert_eq!(result.bands, bands);
+
+    // Band 0 should be untouched by the sentinel-fill logic and equal to the originals.
+    for k in 0..band_size {
+        assert_eq!(output[k], pixels[k], "band 0 pixel {k} mismatch");
+    }
+
+    // Band 1 should have sentinel only at the invalid indices.
+    let band1_mask_out = &result.valid_masks[1];
+    for k in 0..band_size {
+        let idx = band_size + k;
+        if band1_mask_out.is_valid(k) {
+            assert_eq!(output[idx], pixels[idx], "band 1 valid pixel {k} mismatch");
+            assert_ne!(
+                output[idx], sentinel,
+                "band 1 valid pixel {k} should not be sentinel"
+            );
+        } else {
+            assert_eq!(
+                output[idx], sentinel,
+                "band 1 invalid pixel {k} should be sentinel"
+            );
+        }
+    }
+}

@@ -520,8 +520,10 @@ fn get_best_level(plane: &[u8], max_delta: u8) -> u8 {
 
     let count = count as usize;
     if count == 0 {
-        // Plane too small for snippet sampling; fall back to testing full plane
-        return get_best_level_full(plane, max_delta);
+        // Plane too small for snippet sampling. C++ getBestLevel2 reaches the
+        // empty-snippets branch where every level scores 0; the `l == 0`
+        // short-circuit then locks in level 0. Mirror that explicitly.
+        return 0;
     }
 
     let top_margin = (size as f64 - (count * TARGET_SAMPLE_SIZE) as f64) / (2.0 * count as f64);

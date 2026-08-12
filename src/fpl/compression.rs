@@ -414,8 +414,7 @@ mod tests {
         for &b in &data {
             histo[b as usize] += 1;
         }
-        if let Some(compressed) = encode_fpl_huffman_with_histo_bounded(&data, &histo, usize::MAX)
-        {
+        if let Some(compressed) = encode_fpl_huffman_with_histo_bounded(&data, &histo, usize::MAX) {
             let decompressed = extract_buffer(&compressed, data.len()).unwrap();
             assert_eq!(decompressed, data);
         }

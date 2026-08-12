@@ -36,7 +36,6 @@ impl TreeNode {
             child1: None,
         }
     }
-
 }
 
 fn get_index_wrap_around(i: i32, size: i32) -> i32 {

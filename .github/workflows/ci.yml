@@ -60,11 +60,38 @@ jobs:
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --target wasm32-wasip1
-      - run: cargo check --target wasm32-unknown-unknown
+      - run: cargo check --target wasm32-unknown-unknown --all-targets
+      - run: cargo check --target wasm32-unknown-unknown --all-targets --no-default-features --features alloc
+
+  no-std:
+    name: no_std (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["--no-default-features", "--no-default-features --features alloc"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci ${{ matrix.features }}
 
   clippy:
-    name: Clippy
+    name: Clippy (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: default
+            args: ""
+          - name: no-default-features
+            args: "--no-default-features"
+          - name: alloc
+            args: "--no-default-features --features alloc"
+          - name: all-features
+            args: "--all-features"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,7 +100,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy ${{ matrix.args }} --all-targets -- -D warnings
 
   fmt:
     name: Format

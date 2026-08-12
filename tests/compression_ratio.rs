@@ -96,7 +96,12 @@ fn ratio_f32_lossy() {
     );
 
     // Lossy tiling should be byte-for-byte identical or very close
-    check_ratio("f32_lossy_gradient", rust_blob.len(), cpp_blob.len(), 1.02);
+    check_ratio(
+        "f32_lossy_gradient",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO,
+    );
 }
 
 #[test]
@@ -117,7 +122,12 @@ fn ratio_u8_lossless() {
     );
 
     // u8 lossless Huffman should be byte-for-byte identical or very close
-    check_ratio("u8_lossless_ramp", rust_blob.len(), cpp_blob.len(), 1.02);
+    check_ratio(
+        "u8_lossless_ramp",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO,
+    );
 }
 
 #[test]
@@ -219,7 +229,12 @@ fn ratio_reference_california() {
         max_z_err,
     );
 
-    check_ratio("california_lossy", rust_blob.len(), cpp_blob.len(), 1.02);
+    check_ratio(
+        "california_lossy",
+        rust_blob.len(),
+        cpp_blob.len(),
+        MAX_RATIO,
+    );
 
     // Also check lossless
     let rust_blob_ll = lerc::encode_slice(width, height, data, Precision::Lossless).unwrap();
@@ -276,6 +291,6 @@ fn ratio_reference_bluemarble() {
         "bluemarble_u8_lossless",
         rust_blob.len(),
         cpp_blob.len(),
-        1.02,
+        MAX_RATIO,
     );
 }

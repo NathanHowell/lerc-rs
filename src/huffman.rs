@@ -36,31 +36,6 @@ impl TreeNode {
             child1: None,
         }
     }
-
-    fn internal(c0: Box<TreeNode>, c1: Box<TreeNode>) -> Self {
-        Self {
-            value: -1,
-            child0: Some(c0),
-            child1: Some(c1),
-        }
-    }
-
-    fn tree_to_lut(&self, num_bits: u16, bits: u32, table: &mut [CodeEntry]) -> bool {
-        if let (Some(c0), Some(c1)) = (&self.child0, &self.child1) {
-            if num_bits == 32 {
-                return false;
-            }
-            if !c0.tree_to_lut(num_bits + 1, bits << 1, table) {
-                return false;
-            }
-            if !c1.tree_to_lut(num_bits + 1, (bits << 1) + 1, table) {
-                return false;
-            }
-        } else {
-            table[self.value as usize] = (num_bits, bits);
-        }
-        true
-    }
 }
 
 fn get_index_wrap_around(i: i32, size: i32) -> i32 {
@@ -712,13 +687,6 @@ fn compute_num_bytes_needed_simple(num_elem: u32, max_elem: u32) -> u32 {
     1 + num_bytes_uint + ((num_elem * num_bits + 7) >> 3)
 }
 
-/// Encode data using a pre-built HuffmanCodec. Returns the encoded bytes.
-/// If a histogram is provided, it is used to compute the total bit count
-/// (avoiding a full scan of the data for that purpose).
-pub fn encode_huffman_with_codec(codec: &HuffmanCodec, data: &[u8]) -> Option<Vec<u8>> {
-    encode_huffman_with_codec_histo(codec, data, None)
-}
-
 /// Pack a code table slice into a `[u64; 256]` array where each entry is
 /// `(len as u64) << 32 | code as u64`. This allows a single load per symbol
 /// lookup instead of two loads from a tuple struct.
@@ -836,21 +804,6 @@ pub fn encode_huffman_with_codec_histo(
     Some(result)
 }
 
-/// Encode data using Huffman coding. Returns the encoded bytes.
-pub fn encode_huffman(
-    data: &[u8],
-    histo: &[i32],
-    histo_size: usize,
-) -> Option<(HuffmanCodec, Vec<u8>)> {
-    let mut codec = HuffmanCodec::new();
-    if !codec.compute_codes(&histo[..histo_size]) {
-        return None;
-    }
-
-    let result = encode_huffman_with_codec(&codec, data)?;
-    Some((codec, result))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -901,7 +854,9 @@ mod tests {
             histo[b as usize] += 1;
         }
 
-        let (_codec, encoded) = encode_huffman(&data, &histo, 256).unwrap();
+        let mut codec = HuffmanCodec::new();
+        assert!(codec.compute_codes(&histo));
+        let encoded = encode_huffman_with_codec_histo(&codec, &data, None).unwrap();
 
         // Decode
         let mut codec2 = HuffmanCodec::new();

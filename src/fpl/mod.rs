@@ -579,30 +579,6 @@ fn get_best_level(plane: &[u8], max_delta: u8) -> u8 {
     ret
 }
 
-/// Fallback for planes too small for snippet sampling: test each delta level
-/// with entropy estimation on the full plane.
-fn get_best_level_full(plane: &[u8], max_delta: u8) -> u8 {
-    let mut copy = plane.to_vec();
-    let mut best_comp = compression::estimate_compressed_size(&copy);
-    let mut ret = 0u8;
-
-    for l in 1..=max_delta {
-        // Apply one delta level
-        for i in (l as usize..copy.len()).rev() {
-            copy[i] = copy[i].wrapping_sub(copy[i - 1]);
-        }
-        let comp = compression::estimate_compressed_size(&copy);
-        if comp < best_comp {
-            best_comp = comp;
-            ret = l;
-        } else {
-            break;
-        }
-    }
-
-    ret
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

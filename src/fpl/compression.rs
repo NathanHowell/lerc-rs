@@ -263,23 +263,6 @@ fn encode_raw(data: &[u8]) -> Vec<u8> {
     buf
 }
 
-fn encode_rle(data: &[u8]) -> Option<Vec<u8>> {
-    if data.is_empty() {
-        return None;
-    }
-
-    let first = data[0];
-    if data.iter().all(|&b| b == first) {
-        let mut buf = Vec::with_capacity(6);
-        buf.push(COMPRESS_RLE);
-        buf.push(first);
-        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        Some(buf)
-    } else {
-        None
-    }
-}
-
 fn encode_packbits(data: &[u8]) -> Vec<u8> {
     // Matches C++ fpl_EsriHuffman encodePackBits format:
     //   Literal header: (count - 1), range 0..=127, followed by count data bytes
@@ -384,20 +367,6 @@ fn encode_fpl_huffman_with_histo_bounded(
     Some(buf)
 }
 
-fn encode_fpl_huffman(data: &[u8]) -> Option<Vec<u8>> {
-    if data.len() < 4 {
-        return None;
-    }
-
-    let mut histo = [0i32; 256];
-    for &b in data {
-        histo[b as usize] += 1;
-    }
-
-    // Use usize::MAX as bound so we never skip
-    encode_fpl_huffman_with_histo_bounded(data, &histo, usize::MAX)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,7 +382,8 @@ mod tests {
     #[test]
     fn round_trip_rle() {
         let data = vec![42u8; 200];
-        let compressed = encode_rle(&data).unwrap();
+        let compressed = compress_buffer(&data);
+        assert_eq!(compressed[0], COMPRESS_RLE);
         let decompressed = extract_buffer(&compressed, data.len()).unwrap();
         assert_eq!(decompressed, data);
     }
@@ -440,7 +410,11 @@ mod tests {
     #[test]
     fn round_trip_huffman() {
         let data: Vec<u8> = (0..500).map(|i| (i * 13 % 256) as u8).collect();
-        if let Some(compressed) = encode_fpl_huffman(&data) {
+        let mut histo = [0i32; 256];
+        for &b in &data {
+            histo[b as usize] += 1;
+        }
+        if let Some(compressed) = encode_fpl_huffman_with_histo_bounded(&data, &histo, usize::MAX) {
             let decompressed = extract_buffer(&compressed, data.len()).unwrap();
             assert_eq!(decompressed, data);
         }

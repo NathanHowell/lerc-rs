@@ -16,6 +16,54 @@ type CodeEntry = (u16, u32);
 /// Decode LUT entry: (code_length, symbol). -1 means not in LUT.
 type DecodeLutEntry = (i16, i16);
 
+/// Tracks position while decoding a Huffman-coded bitstream, caching the
+/// last-read little-endian u32 word.
+///
+/// `decode_one_value` is called once per symbol (once per pixel, in the
+/// common case), but consecutive calls usually land in the same 4-byte
+/// word -- e.g. a 2-bit code only advances the word every ~16 calls. Without
+/// this cache, every call re-reads and re-parses the same bytes from `data`.
+pub struct BitCursor {
+    pub byte_pos: usize,
+    pub bit_pos: i32,
+    word: u32,
+    word_pos: usize,
+    pub load_calls: u64,
+    pub load_misses: u64,
+}
+
+impl BitCursor {
+    pub fn new(byte_pos: usize) -> Self {
+        Self {
+            byte_pos,
+            bit_pos: 0,
+            word: 0,
+            word_pos: usize::MAX,
+            load_calls: 0,
+            load_misses: 0,
+        }
+    }
+
+    #[inline]
+    fn load(&mut self, data: &[u8], pos: usize) -> Result<u32> {
+        self.load_calls += 1;
+        if self.word_pos == pos {
+            return Ok(self.word);
+        }
+        self.load_misses += 1;
+        if pos + 4 > data.len() {
+            return Err(LercError::BufferTooSmall {
+                needed: pos + 4,
+                available: data.len(),
+            });
+        }
+        let word = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+        self.word = word;
+        self.word_pos = pos;
+        Ok(word)
+    }
+}
+
 pub struct HuffmanCodec {
     code_table: Vec<CodeEntry>,
     decode_lut: Vec<DecodeLutEntry>,
@@ -514,73 +562,64 @@ impl HuffmanCodec {
     /// `src` is the data starting at the current byte position.
     /// `bit_pos` is the bit offset within the current u32 word (0..31).
     /// Returns the decoded symbol value.
+    #[inline]
     pub fn decode_one_value(
         &self,
         data: &[u8],
-        byte_pos: &mut usize,
-        bit_pos: &mut i32,
+        cur: &mut BitCursor,
         num_bits_lut: i32,
     ) -> Result<i32> {
-        if *byte_pos + 4 > data.len() {
-            return Err(LercError::BufferTooSmall {
-                needed: *byte_pos + 4,
-                available: data.len(),
-            });
-        }
+        let temp = cur.load(data, cur.byte_pos)?;
+        let mut val_tmp = (temp << cur.bit_pos) >> (32 - num_bits_lut);
 
-        let temp = u32::from_le_bytes(data[*byte_pos..*byte_pos + 4].try_into().unwrap());
-        let mut val_tmp = (temp << *bit_pos) >> (32 - num_bits_lut);
-
-        if 32 - *bit_pos < num_bits_lut {
-            if *byte_pos + 8 > data.len() {
-                return Err(LercError::BufferTooSmall {
-                    needed: *byte_pos + 8,
-                    available: data.len(),
-                });
-            }
-            let temp2 = u32::from_le_bytes(data[*byte_pos + 4..*byte_pos + 8].try_into().unwrap());
-            val_tmp |= temp2 >> (64 - *bit_pos - num_bits_lut);
+        if 32 - cur.bit_pos < num_bits_lut {
+            let temp2 = cur.load(data, cur.byte_pos + 4)?;
+            val_tmp |= temp2 >> (64 - cur.bit_pos - num_bits_lut);
         }
 
         let entry = self.decode_lut[val_tmp as usize];
         if entry.0 >= 0 {
             let value = entry.1 as i32;
-            *bit_pos += entry.0 as i32;
-            if *bit_pos >= 32 {
-                *bit_pos -= 32;
-                *byte_pos += 4;
+            cur.bit_pos += entry.0 as i32;
+            if cur.bit_pos >= 32 {
+                cur.bit_pos -= 32;
+                cur.byte_pos += 4;
             }
             return Ok(value);
         }
 
-        // Tree traversal for long codes
+        // Codes longer than the LUT are rare (only when the alphabet is
+        // large/skewed enough that canonical Huffman needs > MAX_NUM_BITS_LUT
+        // bits for some symbol). Keeping that traversal out of this function
+        // keeps the common LUT path small enough to inline into the
+        // per-pixel decode loops.
+        self.decode_one_value_tree(data, cur)
+    }
+
+    /// Tree traversal for codes longer than the LUT. Only reached when the
+    /// LUT lookup in [`decode_one_value`](Self::decode_one_value) misses.
+    #[cold]
+    fn decode_one_value_tree(&self, data: &[u8], cur: &mut BitCursor) -> Result<i32> {
         let root = self
             .tree_root
             .as_ref()
             .ok_or(LercError::InvalidData("no huffman tree".into()))?;
 
         // Skip leading zero bits
-        *bit_pos += self.num_bits_to_skip_in_tree;
-        if *bit_pos >= 32 {
-            *bit_pos -= 32;
-            *byte_pos += 4;
+        cur.bit_pos += self.num_bits_to_skip_in_tree;
+        if cur.bit_pos >= 32 {
+            cur.bit_pos -= 32;
+            cur.byte_pos += 4;
         }
 
         let mut node = &**root;
         loop {
-            if *byte_pos + 4 > data.len() {
-                return Err(LercError::BufferTooSmall {
-                    needed: *byte_pos + 4,
-                    available: data.len(),
-                });
-            }
-
-            let temp = u32::from_le_bytes(data[*byte_pos..*byte_pos + 4].try_into().unwrap());
-            let bit = (temp << *bit_pos) >> 31;
-            *bit_pos += 1;
-            if *bit_pos == 32 {
-                *bit_pos = 0;
-                *byte_pos += 4;
+            let temp = cur.load(data, cur.byte_pos)?;
+            let bit = (temp << cur.bit_pos) >> 31;
+            cur.bit_pos += 1;
+            if cur.bit_pos == 32 {
+                cur.bit_pos = 0;
+                cur.byte_pos += 4;
             }
 
             node = if bit != 0 {
@@ -865,12 +904,11 @@ mod tests {
         codec2.read_code_table(&encoded, &mut pos, 6).unwrap();
         let num_bits_lut = codec2.build_tree_from_codes().unwrap();
 
-        let mut byte_pos = pos;
-        let mut bit_pos = 0i32;
+        let mut cur = BitCursor::new(pos);
         let mut decoded = Vec::new();
         for _ in 0..data.len() {
             let val = codec2
-                .decode_one_value(&encoded, &mut byte_pos, &mut bit_pos, num_bits_lut)
+                .decode_one_value(&encoded, &mut cur, num_bits_lut)
                 .unwrap();
             decoded.push(val as u8);
         }

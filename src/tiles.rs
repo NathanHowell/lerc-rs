@@ -507,6 +507,8 @@ pub(crate) fn read_typed_value<T: Sample>(data: &[u8], pos: &mut usize) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     // -----------------------------------------------------------------------
     // read_variable_data_type

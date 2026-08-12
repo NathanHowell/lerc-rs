@@ -46,4 +46,5 @@ harness = false
 
 [dependencies]
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
+libm = { version = "0.2.16", default-features = false }
 thiserror = { version = "2.0.18", default-features = false }

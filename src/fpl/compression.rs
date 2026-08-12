@@ -232,7 +232,7 @@ pub(super) fn estimate_compressed_size(data: &[u8]) -> usize {
     for &count in &table {
         if count > 0 {
             let p = total_count as f64 / count as f64;
-            let bits = p.log2();
+            let bits = crate::mathutils::log2(p);
             total_bits += bits * count as f64;
         }
     }
@@ -250,7 +250,7 @@ fn compute_entropy_bits_per_byte(histo: &[i32; 256], total: usize) -> f64 {
     for &count in histo.iter() {
         if count > 0 {
             let p = count as f64 / n;
-            entropy -= p * p.log2();
+            entropy -= p * crate::mathutils::log2(p);
         }
     }
     entropy

@@ -1073,8 +1073,8 @@ fn cpp_encode_rust_decode_f32_lossless_fpl() {
     );
 
     let image = lerc::decode(&blob).unwrap();
-    assert_eq!(image.width, width as u32);
-    assert_eq!(image.height, height as u32);
+    assert_eq!(image.width, width);
+    assert_eq!(image.height, height);
     assert_eq!(image.data_type, DataType::Float);
 
     let decoded = image.as_typed::<f32>().unwrap();

@@ -23,20 +23,15 @@ pub mod types;
 pub mod bitmask;
 pub(crate) mod bitstuffer;
 /// Fletcher-32 checksum used by the LERC2 format.
-#[allow(dead_code)]
 pub mod checksum;
-#[allow(dead_code)]
 pub(crate) mod header;
-#[allow(dead_code)]
 pub(crate) mod huffman;
 pub(crate) mod rle;
 
 pub(crate) mod decode;
 pub(crate) mod encode;
-#[allow(dead_code)]
 pub(crate) mod fpl;
 pub(crate) mod lerc1;
-#[allow(dead_code)]
 pub(crate) mod tiles;
 
 pub use error::{LercError, Result};

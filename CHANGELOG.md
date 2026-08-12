@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-12
+
+### Fixed
+
+- The `no_std` build (`--no-default-features`, optionally with `alloc`)
+  actually compiles now. It previously failed: several modules used
+  `alloc::boxed::Box`/`alloc::vec::Vec`/`vec!` without importing them
+  (papered over by `std`'s prelude), and `f64::floor`/`round`/`log2`/`sqrt`
+  aren't `core` methods (`std` links the platform's libm for them). A new
+  internal `mathutils` module dispatches to `std`'s methods when the `std`
+  feature is enabled and to the pure-Rust `libm` crate otherwise.
+- `cargo build --target wasm32-unknown-unknown --all-targets` actually
+  compiles now. The `[[bench]]` targets weren't gated for wasm32, but their
+  implementations depend on `criterion`/`lerc-cpp-ref`, which are only
+  available as dev-dependencies on non-wasm32 targets. Each bench's real
+  implementation moved under `benches/impl/`, with a thin wasm32-aware
+  entry point left in its place.
+
+### Changed (internal)
+
+- Removed the blanket `#[allow(dead_code)]` module annotations, along with
+  the dead code they had been masking (some genuinely unused, some
+  superseded duplicate helpers). No public API changes.
+- CI now covers the configurations that let the above two issues through:
+  a `no-std` job runs the test suite under `--no-default-features` and
+  `--no-default-features --features alloc`, `test-wasm` checks
+  `--all-targets` (including the alloc-only build) instead of just the
+  library, and `clippy` runs as a matrix over default,
+  `--no-default-features`, alloc-only, and `--all-features` so
+  feature-gated code (e.g. `cpp-validation`-only tests) is actually linted.
+- Updated dependencies to their latest semver-compatible versions.
+
 ## [0.4.0] - 2026-04-24
 
 ### Changed (breaking)

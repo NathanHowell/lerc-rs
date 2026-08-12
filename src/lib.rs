@@ -32,6 +32,7 @@ pub(crate) mod decode;
 pub(crate) mod encode;
 pub(crate) mod fpl;
 pub(crate) mod lerc1;
+pub(crate) mod mathutils;
 pub(crate) mod tiles;
 
 pub use error::{LercError, Result};

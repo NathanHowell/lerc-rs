@@ -68,7 +68,7 @@ pub(super) fn try_raise_max_z_error<T: Sample>(
                     if z == (z as i64) as f64 {
                         break;
                     }
-                    let delta = (z + 0.5).floor() - z;
+                    let delta = crate::mathutils::floor(z + 0.5) - z;
                     let delta = delta.abs();
                     if delta > round_err[n] {
                         round_err[n] = delta;
@@ -98,7 +98,7 @@ pub(super) fn try_raise_max_z_error<T: Sample>(
                         if z == (z as i64) as f64 {
                             break;
                         }
-                        let delta = (z + 0.5).floor() - z;
+                        let delta = crate::mathutils::floor(z + 0.5) - z;
                         let delta = delta.abs();
                         if delta > round_err[n] {
                             round_err[n] = delta;
@@ -362,7 +362,7 @@ pub(super) fn compute_no_data_sentinel<T: Sample>(min_val: f64, max_z_error: f64
         let low_limit = T::min_representable();
 
         for &c in candidates {
-            let c = c.floor();
+            let c = crate::mathutils::floor(c);
             if c >= low_limit && c < threshold && c == (c as i64) as f64 {
                 return Some(c);
             }
@@ -399,7 +399,7 @@ pub(super) fn compute_no_data_sentinel<T: Sample>(min_val: f64, max_z_error: f64
         }
         // candidate for large min values
         let cand = if min_val > 0.0 {
-            (min_val / 2.0).floor()
+            crate::mathutils::floor(min_val / 2.0)
         } else {
             min_val * 2.0
         };

@@ -140,6 +140,7 @@ impl BitMask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn new_all_invalid() {

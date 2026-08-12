@@ -145,7 +145,7 @@ pub(crate) fn encode_borrowed_typed<T: Sample>(
             max_z_error
         };
 
-        max_z_error.floor().max(0.5)
+        crate::mathutils::floor(max_z_error).max(0.5)
     } else {
         max_z_error.max(0.0)
     };

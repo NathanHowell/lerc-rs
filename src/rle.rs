@@ -105,6 +105,8 @@ pub fn decompress(input: &[u8], expected_size: usize) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn round_trip_empty() {

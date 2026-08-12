@@ -340,8 +340,8 @@ fn generate_test_blocks(width: usize, height: usize) -> Vec<TestBlock> {
 
     const BLOCK_TARGET_SIZE: usize = 8 * 1024;
 
-    let t = (size as f64 / BLOCK_TARGET_SIZE as f64).round();
-    let mut count = (t + 1.0).sqrt().round() as usize;
+    let t = crate::mathutils::round(size as f64 / BLOCK_TARGET_SIZE as f64);
+    let mut count = crate::mathutils::round(crate::mathutils::sqrt(t + 1.0)) as usize;
     // count is always >= 1
 
     let mut block_height = BLOCK_TARGET_SIZE / width;
@@ -511,8 +511,8 @@ fn get_best_level(plane: &[u8], max_delta: u8) -> u8 {
     let size = plane.len();
     const TARGET_SAMPLE_SIZE: usize = 1024 * 8;
 
-    let t = (size as f64 / TARGET_SAMPLE_SIZE as f64).round();
-    let mut count = (t + 1.0).sqrt().round() as isize;
+    let t = crate::mathutils::round(size as f64 / TARGET_SAMPLE_SIZE as f64);
+    let mut count = crate::mathutils::round(crate::mathutils::sqrt(t + 1.0)) as isize;
 
     while count as usize * TARGET_SAMPLE_SIZE > size && count > 0 {
         count -= 1;

@@ -366,6 +366,8 @@ fn apply_byte_order_f64(data: &mut [u8], width: usize, height: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn sub_add_32_bit_flt_known_values() {

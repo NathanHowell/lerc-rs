@@ -769,8 +769,7 @@ pub fn encode_huffman_with_codec_histo(
     // starts with <32 valid bits, we need at most one flush per code (already
     // handled inside accum_and_flush). Unrolling reduces loop overhead and
     // branch mispredictions.
-    let chunks = data.chunks_exact(4);
-    let remainder = chunks.remainder();
+    let (chunks, remainder) = data.as_chunks::<4>();
 
     for chunk in chunks {
         let p0 = packed_ct[chunk[0] as usize];

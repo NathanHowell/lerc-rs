@@ -91,7 +91,7 @@ fn decode_packbits(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
 fn decode_fpl_huffman(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
     // FPL Huffman: simplified Huffman for byte values
     // Read code table, then decode
-    use crate::huffman::HuffmanCodec;
+    use crate::huffman::{BitCursor, HuffmanCodec};
 
     let mut codec = HuffmanCodec::new();
     let mut pos = 0;
@@ -99,11 +99,10 @@ fn decode_fpl_huffman(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
     let num_bits_lut = codec.build_tree_from_codes()?;
 
     let mut result = Vec::with_capacity(expected_size);
-    let mut byte_pos = pos;
-    let mut bit_pos = 0i32;
+    let mut cur = BitCursor::new(pos);
 
     for _ in 0..expected_size {
-        let val = codec.decode_one_value(data, &mut byte_pos, &mut bit_pos, num_bits_lut)?;
+        let val = codec.decode_one_value(data, &mut cur, num_bits_lut)?;
         result.push(val as u8);
     }
 

@@ -5,7 +5,7 @@ use crate::bitmask::BitMask;
 use crate::error::{LercError, Result};
 use crate::fpl;
 use crate::header::{self, HeaderInfo};
-use crate::huffman::HuffmanCodec;
+use crate::huffman::{BitCursor, HuffmanCodec};
 use crate::rle;
 use crate::tiles;
 use crate::types::{DataType, Sample};
@@ -513,9 +513,8 @@ fn decode_huffman<T: Sample>(
     let width = header.n_cols as usize;
     let n_depth = header.n_depth as usize;
 
-    let mut byte_pos = *pos;
-    let mut bit_pos = 0i32;
-    let start_byte_pos = byte_pos;
+    let mut cur = BitCursor::new(*pos);
+    let start_byte_pos = cur.byte_pos;
 
     let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
 
@@ -531,12 +530,7 @@ fn decode_huffman<T: Sample>(
                     let m = k * n_depth + i_depth;
 
                     if all_valid || mask.is_valid(k) {
-                        let val = codec.decode_one_value(
-                            data,
-                            &mut byte_pos,
-                            &mut bit_pos,
-                            num_bits_lut,
-                        )?;
+                        let val = codec.decode_one_value(data, &mut cur, num_bits_lut)?;
                         let delta = val - offset;
 
                         let predicted = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
@@ -572,12 +566,7 @@ fn decode_huffman<T: Sample>(
                 if all_valid || mask.is_valid(k) {
                     let m0 = k * n_depth;
                     for m in 0..n_depth {
-                        let val = codec.decode_one_value(
-                            data,
-                            &mut byte_pos,
-                            &mut bit_pos,
-                            num_bits_lut,
-                        )?;
+                        let val = codec.decode_one_value(data, &mut cur, num_bits_lut)?;
                         output[m0 + m] = T::from_f64((val - offset) as f64);
                     }
                 }
@@ -588,8 +577,8 @@ fn decode_huffman<T: Sample>(
     }
 
     // Advance past the consumed data (including read-ahead padding)
-    let num_uints = if bit_pos > 0 { 1usize } else { 0 } + 1; // +1 for decode LUT read-ahead
-    let consumed = (byte_pos - start_byte_pos) + num_uints * 4;
+    let num_uints = if cur.bit_pos > 0 { 1usize } else { 0 } + 1; // +1 for decode LUT read-ahead
+    let consumed = (cur.byte_pos - start_byte_pos) + num_uints * 4;
     *pos = start_byte_pos + consumed;
 
     Ok(())

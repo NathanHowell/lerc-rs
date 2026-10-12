@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::header::HeaderInfo;
 use crate::types::{DataType, Sample};
 
-use inner::{RangeCoding, TileInnerParams, classify_range, encode_tile_inner};
+use inner::{RangeCoding, TileInnerParams, encode_tile_inner};
 use u8_fast::encode_tiles_u8_fast;
 
 /// The micro-block size Lerc2 encodes with first, and the one it may switch to.
@@ -323,7 +323,7 @@ fn encode_tile<T: Sample>(
         src_data_type: header.data_type,
         b_diff_enc: false,
     };
-    encode_tile_inner::<T>(
+    let non_diff_coding = encode_tile_inner::<T>(
         &mut scratch.tile_buf,
         &scratch.valid_data,
         &mut scratch.quant_vec,
@@ -334,13 +334,11 @@ fn encode_tile<T: Sample>(
     // Save the non-diff quantized values before the diff attempt overwrites quant_vec
     scratch.non_diff_quant.clear();
     scratch.non_diff_quant.extend_from_slice(&scratch.quant_vec);
-    let non_diff_z_min = z_min_f;
-    let non_diff_z_max = z_max_f;
 
     // Encode with diff (if available)
     let mut used_diff = false;
     let mut diff_z_min = 0.0f64;
-    let mut diff_z_max = 0.0f64;
+    let mut diff_coding = RangeCoding::ConstZero;
     if has_diff {
         let mut diff_min = f64::MAX;
         let mut diff_max = f64::MIN;
@@ -353,7 +351,6 @@ fn encode_tile<T: Sample>(
             }
         }
         diff_z_min = diff_min;
-        diff_z_max = diff_max;
         // Append diff encoding after the non-diff data in tile_buf
         let diff_start = scratch.tile_buf.len();
         let diff_params = TileInnerParams {
@@ -366,7 +363,7 @@ fn encode_tile<T: Sample>(
             src_data_type: header.data_type,
             b_diff_enc: true,
         };
-        encode_tile_inner::<T>(
+        diff_coding = encode_tile_inner::<T>(
             &mut scratch.tile_buf,
             &scratch.diff_data,
             &mut scratch.quant_vec,
@@ -394,29 +391,16 @@ fn encode_tile<T: Sample>(
             header.z_max
         };
 
-        // Determine reconstruction info based on the chosen encoding path
+        // Reconstruct from the coding the chosen attempt actually wrote.
         let recon_info = if used_diff {
-            // Diff encoding was chosen; reconstruct from diff quantized values
-            let rp = ReconParams {
-                num_valid,
-                z_min_f: diff_z_min,
-                z_max_f: diff_z_max,
-                max_z_error,
-                max_val_to_quantize,
-                z_max_depth,
-            };
-            classify_recon(&rp)
+            debug_assert_ne!(
+                diff_coding,
+                RangeCoding::Raw,
+                "a raw diff block is a sentinel and cannot win the size comparison"
+            );
+            recon_info(diff_coding, diff_z_min, max_z_error, z_max_depth)
         } else {
-            // Non-diff encoding was chosen; reconstruct from original quantized values
-            let rp = ReconParams {
-                num_valid,
-                z_min_f: non_diff_z_min,
-                z_max_f: non_diff_z_max,
-                max_z_error,
-                max_val_to_quantize,
-                z_max_depth,
-            };
-            classify_recon(&rp)
+            recon_info(non_diff_coding, z_min_f, max_z_error, z_max_depth)
         };
 
         // Apply reconstruction to the buffer
@@ -466,49 +450,26 @@ fn encode_tile<T: Sample>(
     Ok(())
 }
 
-/// Parameters for classifying how a tile was encoded for reconstruction.
-struct ReconParams {
-    num_valid: usize,
-    z_min_f: f64,
-    z_max_f: f64,
-    max_z_error: f64,
-    max_val_to_quantize: f64,
-    z_max_depth: f64,
-}
-
-/// Classify how a tile was encoded and return reconstruction info.
+/// What the decoder rebuilds for a block written with `written` (as returned
+/// by `encode_tile_inner`) at offset `z_min_f`.
 ///
-/// The block's coding comes from [`classify_range`], the same decision
-/// `encode_tile_inner` wrote it with, so the reconstruction tracks what the
-/// decoder will rebuild.
-fn classify_recon(p: &ReconParams) -> TileReconInfo {
-    let ReconParams {
-        num_valid,
-        z_min_f,
-        z_max_f,
-        max_z_error,
-        max_val_to_quantize,
-        z_max_depth,
-    } = *p;
-    match classify_range(
-        num_valid,
-        z_min_f,
-        z_max_f,
-        max_z_error,
-        max_val_to_quantize,
-    ) {
+/// This must follow the coding written, not re-derive it from the range: a
+/// quantized block whose bit-stuffed form came out no smaller than raw is
+/// stored raw, and the decoder reads its values back exactly. Reconstructing
+/// it as quantized left the next depth slice's diffs carrying the up-to-
+/// `max_z_error` gap between the two, so that slice decoded up to
+/// 2 × `max_z_error` off.
+fn recon_info(
+    written: RangeCoding,
+    z_min_f: f64,
+    max_z_error: f64,
+    z_max_depth: f64,
+) -> TileReconInfo {
+    match written {
         RangeCoding::ConstZero => TileReconInfo::Constant(0.0),
         // Every value is within max_z_error of z_min; the decoder rebuilds z_min.
         RangeCoding::Constant => TileReconInfo::Constant(z_min_f),
-        // A raw block cannot be diff encoded (the diff attempt writes a
-        // sentinel that always loses), so this is the non-diff path, whose
-        // values are stored exactly.
         RangeCoding::Raw => TileReconInfo::RawBinary,
-        // When the bit-stuffed form came out larger than raw, the encoder
-        // stored the block raw instead and the decoder reads it back exactly;
-        // reconstructing it as quantized is then off by at most max_z_error,
-        // as the C++ encoder's ScaleBack is. Raw cannot carry a diff, so the
-        // fallback only happens on the non-diff path.
         RangeCoding::Quantized { .. } => TileReconInfo::Quantized {
             offset: z_min_f,
             inv_scale: 2.0 * max_z_error,
@@ -582,90 +543,29 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // classify_recon
+    // recon_info
     // -----------------------------------------------------------------------
 
     #[test]
-    fn classify_recon_const_zero_num_valid_zero() {
-        let rp = ReconParams {
-            num_valid: 0,
-            z_min_f: f64::MAX,
-            z_max_f: f64::MIN,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-        };
-        let info = classify_recon(&rp);
-        match info {
+    fn recon_info_const_zero_rebuilds_zero() {
+        match recon_info(RangeCoding::ConstZero, 5.0, 0.5, 255.0) {
             TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
             _ => panic!("expected Constant(0.0)"),
         }
     }
 
     #[test]
-    fn classify_recon_const_zero_zmin_zmax_zero() {
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: 0.0,
-            z_max_f: 0.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-        };
-        let info = classify_recon(&rp);
-        match info {
-            TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
-            _ => panic!("expected Constant(0.0)"),
-        }
-    }
-
-    #[test]
-    fn classify_recon_const_offset() {
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: 42.0,
-            z_max_f: 42.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-        };
-        let info = classify_recon(&rp);
-        match info {
-            TileReconInfo::Constant(c) => assert_eq!(c, 42.0),
-            _ => panic!("expected Constant(42.0)"),
-        }
-    }
-
-    #[test]
-    fn classify_recon_sub_tolerance_range_is_constant_at_z_min() {
-        // A range under half a quantization step is written as a constant
-        // block at z_min, so the decoder rebuilds z_min for every value.
-        let rp = ReconParams {
-            num_valid: 64,
-            z_min_f: 1000.0,
-            z_max_f: 1000.018,
-            max_z_error: 0.02,
-            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
-            z_max_depth: 2000.0,
-        };
-        match classify_recon(&rp) {
+    fn recon_info_constant_rebuilds_z_min() {
+        // Including a sub-tolerance range: every value comes back as z_min.
+        match recon_info(RangeCoding::Constant, 1000.0, 0.02, 2000.0) {
             TileReconInfo::Constant(c) => assert_eq!(c, 1000.0),
             _ => panic!("expected Constant(1000.0)"),
         }
     }
 
     #[test]
-    fn classify_recon_quantized() {
-        let rp = ReconParams {
-            num_valid: 8,
-            z_min_f: 0.0,
-            z_max_f: 7.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-        };
-        let info = classify_recon(&rp);
-        match info {
+    fn recon_info_quantized_rebuilds_the_lattice() {
+        match recon_info(RangeCoding::Quantized { max_elem: 7 }, 0.0, 0.5, 255.0) {
             TileReconInfo::Quantized {
                 offset,
                 inv_scale,
@@ -680,36 +580,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_recon_raw_binary() {
-        // For need_quantize = false with z_min != z_max:
-        //   max_z_error > 0 and max_val > max_val_to_quantize => need_quantize = false.
-        let z_min = 0.0;
-        let z_max = 1e18; // huge range
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: z_min,
-            z_max_f: z_max,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
-            z_max_depth: 1e18,
-        };
-        let info = classify_recon(&rp);
-        match info {
-            TileReconInfo::RawBinary => {}
-            _ => panic!(
-                "expected RawBinary, got {:?}",
-                match info {
-                    TileReconInfo::Constant(c) => alloc::format!("Constant({c})"),
-                    TileReconInfo::Quantized {
-                        offset,
-                        inv_scale,
-                        z_max,
-                    } => alloc::format!(
-                        "Quantized(offset={offset}, inv_scale={inv_scale}, z_max={z_max})"
-                    ),
-                    TileReconInfo::RawBinary => "RawBinary".into(),
-                }
-            ),
-        }
+    fn recon_info_raw_rebuilds_the_values() {
+        assert!(matches!(
+            recon_info(RangeCoding::Raw, 0.0, 0.5, 1e18),
+            TileReconInfo::RawBinary
+        ));
     }
 }

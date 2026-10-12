@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lossy_flat_0.02` case covers the low-bit-rate path). The u8 lossless
   Huffman comparison now reuses the chosen tiling instead of encoding the
   tiles a second time.
+- Lossy multi-depth encoding no longer lets a depth slice decode up to
+  2 × `max_z_error` off. The encoder diffs each slice against its own
+  reconstruction of the previous one, and reconstructed every quantized
+  block as quantized — including one whose bit-stuffed form was no smaller
+  than raw and was stored raw, which the decoder reads back exactly. Small or
+  sparsely valid blocks with a wide range hit this. The reconstruction now
+  follows the coding the encoder actually wrote.
 
 ## [0.5.0] - 2026-08-12
 

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Lossy encoding codes a micro-block whose value range is under half a
+  quantization step (`(z_max - z_min) / (2 * max_z_error)` rounds to 0) as a
+  constant at `z_min`, as Esri's Lerc2 does; every value is within
+  `max_z_error` of it. Such blocks were stored as raw values instead — 32 bits
+  per pixel for `f32` — so near-flat data with noise below the tolerance
+  compressed several times worse than with the reference encoder (220× on a
+  synthetic flat `f32` raster, ~3× on real flat terrain tiles). The
+  block-coding decision now lives in one function shared by the encoder and
+  its multi-depth reconstruction, so the two cannot drift apart again.
+
 ## [0.5.0] - 2026-08-12
 
 ### Fixed

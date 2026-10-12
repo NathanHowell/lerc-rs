@@ -18,6 +18,14 @@ fn make_f32_gradient(width: usize, height: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Flat ground carrying noise under a 0.02 tolerance: every micro-block is a
+/// constant, the low-bit-rate case where the encoder also tries 16 × 16 blocks.
+fn make_f32_flat(width: usize, height: usize) -> Vec<f32> {
+    (0..width * height)
+        .map(|i| 1000.0 + 0.001 * ((i * 7919) % 17) as f32)
+        .collect()
+}
+
 fn make_u8_image(width: usize, height: usize) -> Vec<u8> {
     (0..width * height)
         .map(|i| ((i * 7 + 13) % 256) as u8)
@@ -139,6 +147,39 @@ fn bench_encode_f32(c: &mut Criterion) {
                         1,
                         Some(&valid),
                         0.01,
+                    )
+                });
+            },
+        );
+
+        // Lossy, flat: sub-tolerance noise
+        let flat = make_f32_flat(size, size);
+        let flat_image = Image {
+            data: SampleData::F32(flat.clone()),
+            ..image.clone()
+        };
+        group.bench_with_input(
+            BenchmarkId::new("lossy_flat_0.02/rust", size),
+            &flat_image,
+            |b, img| {
+                b.iter(|| lerc::encode(img, Precision::Tolerance(0.02)).unwrap());
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("lossy_flat_0.02/cpp", size),
+            &flat,
+            |b, px| {
+                b.iter(|| {
+                    cpp::encode(
+                        px,
+                        cpp::DT_FLOAT,
+                        size as i32,
+                        size as i32,
+                        1,
+                        1,
+                        Some(&valid),
+                        0.02,
                     )
                 });
             },

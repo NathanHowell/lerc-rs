@@ -15,7 +15,7 @@ use crate::{Image, SampleData};
 
 use huffman::{is_high_entropy_u8, try_encode_huffman_int};
 use optimizations::{compute_no_data_sentinel, try_bit_plane_compression, try_raise_max_z_error};
-use tiles::{encode_tiles, select_block_size};
+use tiles::encode_tiles_at_best_block_size;
 
 pub fn encode(image: &Image, max_z_error: f64) -> Result<Vec<u8>> {
     match &image.data {
@@ -414,6 +414,9 @@ fn process_no_data<T: Sample>(
 }
 
 /// Write the blob payload: mask, ranges, and encoded pixel data.
+///
+/// Sets `hd.micro_block_size` when the pixels are tiled, so the header must be
+/// written after the payload is built.
 fn write_blob_payload<T: Sample>(
     blob: &mut Vec<u8>,
     encode_data: &[T],
@@ -467,25 +470,7 @@ fn write_blob_payload<T: Sample>(
     let try_huffman_int =
         matches!(T::DATA_TYPE, DataType::Char | DataType::Byte) && hd.max_z_error == 0.5;
 
-    if try_huffman_int {
-        let skip_huffman = is_high_entropy_u8(encode_data, mask, hd);
-        if !skip_huffman && let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd) {
-            let mut tiling_blob = Vec::new();
-            encode_tiles(
-                &mut tiling_blob,
-                encode_data,
-                mask,
-                hd,
-                &stats.z_min_vec,
-                &stats.z_max_vec,
-            )?;
-            if huffman_blob.len() < tiling_blob.len() {
-                blob.extend_from_slice(&huffman_blob);
-                return Ok(());
-            }
-        }
-        blob.push(ImageEncodeMode::Tiling as u8);
-    } else if try_huffman_flt {
+    if try_huffman_flt {
         let is_double = T::DATA_TYPE == DataType::Double;
         let fpl_data = fpl::encode_huffman_flt(encode_data, is_double, width, height, n_depth)?;
         blob.push(ImageEncodeMode::DeltaDeltaHuffman as u8);
@@ -493,14 +478,23 @@ fn write_blob_payload<T: Sample>(
         return Ok(());
     }
 
-    encode_tiles(
-        blob,
-        encode_data,
-        mask,
-        hd,
-        &stats.z_min_vec,
-        &stats.z_max_vec,
-    )?;
+    let tiles =
+        encode_tiles_at_best_block_size(encode_data, mask, hd, &stats.z_min_vec, &stats.z_max_vec)?;
+    hd.micro_block_size = tiles.micro_block_size;
+
+    if try_huffman_int {
+        let skip_huffman = is_high_entropy_u8(encode_data, mask, hd);
+        if !skip_huffman
+            && let Some(huffman_blob) = try_encode_huffman_int(encode_data, mask, hd)
+            && huffman_blob.len() < tiles.bytes.len()
+        {
+            blob.extend_from_slice(&huffman_blob);
+            return Ok(());
+        }
+        blob.push(ImageEncodeMode::Tiling as u8);
+    }
+
+    blob.extend_from_slice(&tiles.bytes);
     Ok(())
 }
 
@@ -570,23 +564,21 @@ fn encode_one_band<T: Sample>(
         no_data_val_orig: nd_result.no_data_val_orig,
     };
 
-    // 4. Select block size (skip for FPL path).
-    if !try_huffman_flt {
-        let best_block_size =
-            select_block_size::<T>(encode_data, mask, &hd, &stats.z_min_vec, &stats.z_max_vec)?;
-        hd.micro_block_size = best_block_size;
-    }
-
-    // 5. Write header + payload, finalize checksum.
-    let mut blob = header::write_header(&hd);
+    // 4. Build the payload; tiling picks the micro-block size, which the
+    //    header records, so the header is written after it.
+    let mut payload = Vec::new();
     write_blob_payload(
-        &mut blob,
+        &mut payload,
         encode_data,
         mask,
         &mut hd,
         &stats,
         try_huffman_flt,
     )?;
+
+    // 5. Write header + payload, finalize checksum.
+    let mut blob = header::write_header(&hd);
+    blob.extend_from_slice(&payload);
     header::finalize_blob(&mut blob);
     Ok(blob)
 }

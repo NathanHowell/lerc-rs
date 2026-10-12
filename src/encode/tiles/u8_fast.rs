@@ -1,43 +1,9 @@
 use alloc::vec::Vec;
 
-use crate::error::Result;
 use crate::header::HeaderInfo;
-use crate::types::{Sample, TileCompressionMode, TileRect};
+use crate::types::{TileCompressionMode, TileRect};
 
-use super::ScratchBuffers;
-
-/// Fast block size selection for u8 lossless, all-valid, single-depth images.
-pub(super) fn select_block_size_u8_fast(data: &[u8], hd: &HeaderInfo) -> i32 {
-    let n_rows = hd.n_rows as usize;
-    let n_cols = hd.n_cols as usize;
-    let version = hd.version;
-    let pattern: u8 = if version >= 5 { 14 } else { 15 };
-    let mut quant_buf = [0u32; 256];
-
-    let mut size8 = 0usize;
-    let mut buf8 = Vec::with_capacity(512);
-    for &(i0, i1, j0, j1) in &super::sample_tile_positions(n_rows, n_cols, 8) {
-        buf8.clear();
-        let rect = TileRect { i0, i1, j0, j1 };
-        let integrity = ((j0 as u8 >> 3) & pattern) << 2;
-        encode_single_u8_tile(&mut buf8, data, n_cols, rect, integrity, &mut quant_buf);
-        size8 += buf8.len();
-    }
-
-    let mut size16 = 0usize;
-    let mut buf16 = Vec::with_capacity(512);
-    for &(i0, i1, j0, j1) in &super::sample_tile_positions(n_rows, n_cols, 16) {
-        buf16.clear();
-        let rect = TileRect { i0, i1, j0, j1 };
-        let integrity = ((j0 as u8 >> 3) & pattern) << 2;
-        encode_single_u8_tile(&mut buf16, data, n_cols, rect, integrity, &mut quant_buf);
-        size16 += buf16.len();
-    }
-
-    if size16 < size8 { 16 } else { 8 }
-}
-
-/// Encode a single u8 tile (used by select_block_size_u8_fast and encode_tiles_u8_fast).
+/// Encode a single u8 tile (used by encode_tiles_u8_fast).
 ///
 /// Combines min/max scan, quantization, histogram building, LUT decision, and encoding
 /// into minimal passes over the data.
@@ -231,22 +197,6 @@ pub(super) fn encode_tiles_u8_fast(
             encode_single_u8_tile(blob, data, n_cols, rect, integrity, quant_buf);
         }
     }
-}
-
-/// Encode a single tile and return its byte count (without appending to blob).
-/// This is used by `select_block_size` for sampling.
-pub(super) fn encode_tile_to_count<T: Sample>(
-    ctx: &super::TileEncodeContext<'_, T>,
-    rect: crate::types::TileRect,
-    i_depth: usize,
-    scratch: &mut ScratchBuffers,
-) -> Result<usize> {
-    let mut tmp = Vec::new();
-    super::encode_tile(
-        &mut tmp, ctx, rect, i_depth, scratch,
-        None, // No reconstruction buffer needed for size estimation
-    )?;
-    Ok(tmp.len())
 }
 
 #[cfg(test)]

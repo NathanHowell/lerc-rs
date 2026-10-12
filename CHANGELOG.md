@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   synthetic flat `f32` raster, ~3× on real flat terrain tiles). The
   block-coding decision now lives in one function shared by the encoder and
   its multi-depth reconstruction, so the two cannot drift apart again.
+- The micro-block size is chosen as Esri's Lerc2 chooses it: encode at
+  8×8, and when that comes to under 1.5 bits per pixel encode again at 16×16
+  and keep it if no larger. The encoder used to sample eight 8×8 and eight
+  16×16 blocks and compare the byte totals, which priced four times as many
+  pixels at 16 and so favoured 8 — on flat data, where every block of either
+  size is one constant, the totals tied and 8×8 won at four times the size.
+  Output for data above 1.5 bits per pixel is unchanged on the reference
+  rasters, and encode time is within ±2% on the benchmarks (a new
+  `lossy_flat_0.02` case covers the low-bit-rate path). The u8 lossless
+  Huffman comparison now reuses the chosen tiling instead of encoding the
+  tiles a second time.
 
 ## [0.5.0] - 2026-08-12
 

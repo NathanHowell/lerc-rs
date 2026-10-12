@@ -166,12 +166,41 @@ fn sub_tolerance_depth_diffs_are_coded_as_constant_blocks() {
     assert_within_tolerance(f32_pixels(&image), f32_pixels(&decoded), "three depths");
 }
 
-/// The same blobs against Esri's reference, which must decode them within
-/// the tolerance.
+/// The same blobs against Esri's reference: it must decode them within the
+/// tolerance, and on a single depth the two encoders should agree on size —
+/// which takes both the constant blocks and the reference's choice of 16 × 16
+/// micro-blocks at this bit rate. (The reference encoder diff-encodes integer
+/// lossless data only, so it has no size to compare on the lossy diff path.)
 #[cfg(feature = "cpp-validation")]
 mod cpp_reference {
     use super::*;
     use lerc_cpp_ref::{self as cpp, DT_FLOAT};
+
+    /// The bound `compression_ratio.rs` holds the tiling path to.
+    const MAX_RATIO: f64 = 1.02;
+
+    #[test]
+    fn sub_tolerance_noise_matches_the_reference_size() {
+        let data = flat_ground();
+        let rust_blob = encode_single_depth(&data);
+        let cpp_blob = cpp::encode(
+            &data,
+            DT_FLOAT,
+            WIDTH as i32,
+            HEIGHT as i32,
+            1,
+            1,
+            None,
+            MAX_Z_ERROR,
+        );
+        let ratio = rust_blob.len() as f64 / cpp_blob.len() as f64;
+        assert!(
+            ratio <= MAX_RATIO,
+            "rust {} bytes vs cpp {} bytes: ratio {ratio:.3} exceeds {MAX_RATIO}",
+            rust_blob.len(),
+            cpp_blob.len()
+        );
+    }
 
     #[test]
     fn reference_decodes_sub_tolerance_constant_blocks() {

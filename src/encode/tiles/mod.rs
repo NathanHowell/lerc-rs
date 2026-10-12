@@ -10,128 +10,78 @@ use crate::header::HeaderInfo;
 use crate::types::{DataType, Sample};
 
 use inner::{RangeCoding, TileInnerParams, classify_range, encode_tile_inner};
-use u8_fast::{encode_tile_to_count, encode_tiles_u8_fast, select_block_size_u8_fast};
+use u8_fast::encode_tiles_u8_fast;
 
-/// Pick representative tile positions for sampling at a given block size.
-fn sample_tile_positions(
-    n_rows: usize,
-    n_cols: usize,
-    mb_size: usize,
-) -> Vec<(usize, usize, usize, usize)> {
-    let num_tv = n_rows.div_ceil(mb_size);
-    let num_th = n_cols.div_ceil(mb_size);
+/// The micro-block size Lerc2 encodes with first, and the one it may switch to.
+const MICRO_BLOCK_SIZE: i32 = 8;
+const MICRO_BLOCK_SIZE_DOUBLED: i32 = 2 * MICRO_BLOCK_SIZE;
 
-    let mut positions = vec![
-        (0, 0),
-        (0, num_th.saturating_sub(1)),
-        (num_tv.saturating_sub(1), 0),
-        (num_tv.saturating_sub(1), num_th.saturating_sub(1)),
-        (num_tv / 2, num_th / 2),
-        (0, num_th / 2),
-        (num_tv / 2, 0),
-        (num_tv.saturating_sub(1), num_th / 2),
-    ];
-
-    positions.sort();
-    positions.dedup();
-
-    positions
-        .into_iter()
-        .map(|(it, jt)| {
-            let i0 = it * mb_size;
-            let i1 = (i0 + mb_size).min(n_rows);
-            let j0 = jt * mb_size;
-            let j1 = (j0 + mb_size).min(n_cols);
-            (i0, i1, j0, j1)
-        })
-        .collect()
+/// Tiles encoded at the micro-block size they were chosen for.
+pub(super) struct EncodedTiles {
+    pub(super) micro_block_size: i32,
+    pub(super) bytes: Vec<u8>,
 }
 
-/// Try encoding a sample of tiles at both block sizes 8 and 16, return whichever
-/// produces smaller output. Instead of encoding ALL tiles twice, we sample a
-/// small number of representative tiles to make the decision.
-pub(super) fn select_block_size<T: Sample>(
+/// Encode every tile at the micro-block size Esri's Lerc2 would choose
+/// (`Lerc2::ComputeNumBytesNeededToWrite` in `Lerc2.cpp`).
+///
+/// Encode at 8 × 8 first. When that comes to under 1.5 bits per pixel, the
+/// per-block headers (a flag byte and an offset per block) are a large share
+/// of the bytes, so encode again at 16 × 16 — a quarter of the headers — and
+/// keep it if it is no larger. Ties go to 16, which has fewer blocks to
+/// decode. Esri also skips the second pass when bit stuffing is ineffective
+/// (8 × 8 tiling at four times the raw size or more) and for images no
+/// larger than one block; both are kept here. Its third condition, tiling not
+/// much worse than Huffman, only saves work when Huffman wins anyway and is
+/// not applied: the Huffman comparison still runs on the chosen tiles.
+///
+/// Both sizes are priced over every pixel. An earlier version sampled eight
+/// 8 × 8 and eight 16 × 16 blocks and compared the byte totals, which covered
+/// four times as many pixels at 16 and so favoured 8 — by 4× on flat data,
+/// where each block of either size is one constant.
+pub(super) fn encode_tiles_at_best_block_size<T: Sample>(
     data: &[T],
     mask: &BitMask,
-    hd: &HeaderInfo,
+    header: &HeaderInfo,
     z_min_vec: &[f64],
     z_max_vec: &[f64],
-) -> Result<i32> {
-    let n_rows = hd.n_rows as usize;
-    let n_cols = hd.n_cols as usize;
-    let n_depth = hd.n_depth as usize;
-
-    // Fast path for u8 lossless, all-valid, single-depth
-    let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
-    if T::DATA_TYPE == DataType::Byte && hd.max_z_error == 0.5 && all_valid && n_depth == 1 {
-        debug_assert_eq!(T::BYTES, 1);
-        let u8_data: &[u8] =
-            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
-        return Ok(select_block_size_u8_fast(u8_data, hd));
-    }
-
-    // For very small images, just try both fully
-    if n_rows <= 16 && n_cols <= 16 {
-        let mut hd8 = hd.clone();
-        hd8.micro_block_size = 8;
-        let mut buf8 = Vec::new();
-        encode_tiles(&mut buf8, data, mask, &hd8, z_min_vec, z_max_vec)?;
-
-        let mut hd16 = hd.clone();
-        hd16.micro_block_size = 16;
-        let mut buf16 = Vec::new();
-        encode_tiles(&mut buf16, data, mask, &hd16, z_min_vec, z_max_vec)?;
-
-        return if buf16.len() < buf8.len() {
-            Ok(16)
-        } else {
-            Ok(8)
-        };
-    }
-
-    let mut scratch = ScratchBuffers::new();
-
-    // Encode sampled tiles at block size 8
-    let mut size8 = 0usize;
-    let hd8 = {
-        let mut h = hd.clone();
-        h.micro_block_size = 8;
-        h
+) -> Result<EncodedTiles> {
+    let encode_at = |micro_block_size: i32| -> Result<EncodedTiles> {
+        let mut hd = header.clone();
+        hd.micro_block_size = micro_block_size;
+        let mut bytes = Vec::new();
+        encode_tiles(&mut bytes, data, mask, &hd, z_min_vec, z_max_vec)?;
+        Ok(EncodedTiles {
+            micro_block_size,
+            bytes,
+        })
     };
-    let ctx8 = TileEncodeContext {
-        data,
-        mask,
-        header: &hd8,
-        z_max_vec,
-    };
-    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
-        let rect = crate::types::TileRect { i0, i1, j0, j1 };
-        for i_depth in 0..n_depth {
-            size8 += encode_tile_to_count::<T>(&ctx8, rect, i_depth, &mut scratch)?;
-        }
-    }
 
-    // Encode sampled tiles at block size 16
-    let mut size16 = 0usize;
-    let hd16 = {
-        let mut h = hd.clone();
-        h.micro_block_size = 16;
-        h
-    };
-    let ctx16 = TileEncodeContext {
-        data,
-        mask,
-        header: &hd16,
-        z_max_vec,
-    };
-    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
-        let rect = crate::types::TileRect { i0, i1, j0, j1 };
-        for i_depth in 0..n_depth {
-            size16 += encode_tile_to_count::<T>(&ctx16, rect, i_depth, &mut scratch)?;
-        }
+    let tiles8 = encode_at(MICRO_BLOCK_SIZE)?;
+    if !worth_trying_doubled_block_size::<T>(tiles8.bytes.len(), header) {
+        return Ok(tiles8);
     }
+    let tiles16 = encode_at(MICRO_BLOCK_SIZE_DOUBLED)?;
+    Ok(if tiles16.bytes.len() <= tiles8.bytes.len() {
+        tiles16
+    } else {
+        tiles8
+    })
+}
 
-    if size16 < size8 { Ok(16) } else { Ok(8) }
+/// Esri's conditions for re-encoding at the doubled block size, given the
+/// 8 × 8 tiling's byte count.
+fn worth_trying_doubled_block_size<T: Sample>(tiling_bytes: usize, header: &HeaderInfo) -> bool {
+    let n_depth = header.n_depth as usize;
+    let num_total = header.n_rows as usize * header.n_cols as usize;
+    // Bytes of the uncompressed values ("one sweep" in Lerc2).
+    let raw_bytes = header.num_valid_pixel as usize * n_depth * T::BYTES;
+    // tiling_bytes × 8 bits < 1.5 bits × num_total × n_depth, in integers.
+    let low_bit_rate = tiling_bytes * 16 < num_total * n_depth * 3;
+    let bit_stuffing_effective = tiling_bytes < 4 * raw_bytes;
+    let larger_than_one_block =
+        header.n_rows > MICRO_BLOCK_SIZE || header.n_cols > MICRO_BLOCK_SIZE;
+    low_bit_rate && bit_stuffing_effective && larger_than_one_block
 }
 
 /// Scratch buffers reused across tiles to avoid per-tile allocations.
@@ -572,6 +522,66 @@ mod tests {
     use super::*;
 
     // -----------------------------------------------------------------------
+    // encode_tiles_at_best_block_size
+    // -----------------------------------------------------------------------
+
+    fn f32_header(n_rows: i32, n_cols: i32, max_z_error: f64) -> HeaderInfo {
+        HeaderInfo {
+            version: 3,
+            n_rows,
+            n_cols,
+            n_depth: 1,
+            num_valid_pixel: n_rows * n_cols,
+            data_type: DataType::Float,
+            max_z_error,
+            ..HeaderInfo::default()
+        }
+    }
+
+    fn best_block_size(data: &[f32], hd: &HeaderInfo) -> i32 {
+        let (z_min, z_max) = data.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &v| {
+            (lo.min(f64::from(v)), hi.max(f64::from(v)))
+        });
+        let mask = BitMask::all_valid(data.len());
+        encode_tiles_at_best_block_size(data, &mask, hd, &[z_min], &[z_max])
+            .expect("encode")
+            .micro_block_size
+    }
+
+    #[test]
+    fn flat_data_takes_the_doubled_block_size() {
+        // Sub-tolerance noise: every block is one constant at either size, so
+        // 16 × 16 needs a quarter of the block headers.
+        let data: Vec<f32> = (0..64 * 64)
+            .map(|i| 1000.0 + 0.001 * ((i * 7919) % 13) as f32)
+            .collect();
+        assert_eq!(best_block_size(&data, &f32_header(64, 64, 0.02)), 16);
+    }
+
+    #[test]
+    fn busy_data_keeps_the_8x8_block_size() {
+        // Several bits per pixel: Lerc2 does not try 16 × 16.
+        let data: Vec<f32> = (0..64 * 64).map(|i| ((i * 7919) % 1000) as f32).collect();
+        assert_eq!(best_block_size(&data, &f32_header(64, 64, 0.01)), 8);
+    }
+
+    #[test]
+    fn doubled_block_size_is_tried_only_at_low_bit_rates() {
+        let hd = f32_header(64, 64, 0.01);
+        // 1.5 bits per pixel is the threshold: 768 bytes for 4096 pixels.
+        assert!(worth_trying_doubled_block_size::<f32>(767, &hd));
+        assert!(!worth_trying_doubled_block_size::<f32>(768, &hd));
+    }
+
+    #[test]
+    fn doubled_block_size_is_not_tried_on_a_single_block() {
+        let hd = f32_header(8, 8, 0.01);
+        assert!(!worth_trying_doubled_block_size::<f32>(5, &hd));
+        let hd = f32_header(8, 9, 0.01);
+        assert!(worth_trying_doubled_block_size::<f32>(5, &hd));
+    }
+
+    // -----------------------------------------------------------------------
     // classify_recon
     // -----------------------------------------------------------------------
 
@@ -701,108 +711,5 @@ mod tests {
                 }
             ),
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // sample_tile_positions
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn sample_tile_positions_within_bounds() {
-        let n_rows = 100;
-        let n_cols = 200;
-        let mb_size = 8;
-        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i0 < n_rows, "i0={i0} >= n_rows={n_rows}");
-            assert!(i1 <= n_rows, "i1={i1} > n_rows={n_rows}");
-            assert!(i0 < i1, "i0={i0} >= i1={i1}");
-            assert!(j0 < n_cols, "j0={j0} >= n_cols={n_cols}");
-            assert!(j1 <= n_cols, "j1={j1} > n_cols={n_cols}");
-            assert!(j0 < j1, "j0={j0} >= j1={j1}");
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_small_image() {
-        // For a 1x1 image, should produce at least 1 position
-        let positions = sample_tile_positions(1, 1, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert_eq!(i0, 0);
-            assert_eq!(i1, 1);
-            assert_eq!(j0, 0);
-            assert_eq!(j1, 1);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_exact_tile_boundary() {
-        // Image size exactly divisible by mb_size
-        let positions = sample_tile_positions(16, 16, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i0 < 16);
-            assert!(i1 <= 16);
-            assert!(j0 < 16);
-            assert!(j1 <= 16);
-            assert_eq!(i1 - i0, 8); // exact block size
-            assert_eq!(j1 - j0, 8);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_non_divisible() {
-        // Image size not divisible by mb_size -- last tile is smaller
-        let positions = sample_tile_positions(10, 10, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i1 - i0 <= 8);
-            assert!(j1 - j0 <= 8);
-            assert!(i1 <= 10);
-            assert!(j1 <= 10);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_unique() {
-        let positions = sample_tile_positions(100, 100, 8);
-        // All positions should be unique (dedup was called)
-        let mut sorted = positions.clone();
-        sorted.sort();
-        sorted.dedup();
-        assert_eq!(sorted.len(), positions.len());
-    }
-
-    #[test]
-    fn sample_tile_positions_covers_corners() {
-        // Should include corners and center for a large-enough image
-        let n_rows = 64;
-        let n_cols = 64;
-        let mb_size = 8;
-        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
-        // Top-left corner
-        assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == 0));
-        // Top-right corner
-        let last_j0 = (n_cols.div_ceil(mb_size) - 1) * mb_size;
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == 0 && j0 == last_j0)
-        );
-        // Bottom-left corner
-        let last_i0 = (n_rows.div_ceil(mb_size) - 1) * mb_size;
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == 0)
-        );
-        // Bottom-right corner
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == last_j0)
-        );
     }
 }

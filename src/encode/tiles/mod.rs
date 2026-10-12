@@ -9,129 +9,79 @@ use crate::error::Result;
 use crate::header::HeaderInfo;
 use crate::types::{DataType, Sample};
 
-use inner::{TileInnerParams, encode_tile_inner};
-use u8_fast::{encode_tile_to_count, encode_tiles_u8_fast, select_block_size_u8_fast};
+use inner::{RangeCoding, TileInnerParams, encode_tile_inner};
+use u8_fast::encode_tiles_u8_fast;
 
-/// Pick representative tile positions for sampling at a given block size.
-fn sample_tile_positions(
-    n_rows: usize,
-    n_cols: usize,
-    mb_size: usize,
-) -> Vec<(usize, usize, usize, usize)> {
-    let num_tv = n_rows.div_ceil(mb_size);
-    let num_th = n_cols.div_ceil(mb_size);
+/// The micro-block size Lerc2 encodes with first, and the one it may switch to.
+const MICRO_BLOCK_SIZE: i32 = 8;
+const MICRO_BLOCK_SIZE_DOUBLED: i32 = 2 * MICRO_BLOCK_SIZE;
 
-    let mut positions = vec![
-        (0, 0),
-        (0, num_th.saturating_sub(1)),
-        (num_tv.saturating_sub(1), 0),
-        (num_tv.saturating_sub(1), num_th.saturating_sub(1)),
-        (num_tv / 2, num_th / 2),
-        (0, num_th / 2),
-        (num_tv / 2, 0),
-        (num_tv.saturating_sub(1), num_th / 2),
-    ];
-
-    positions.sort();
-    positions.dedup();
-
-    positions
-        .into_iter()
-        .map(|(it, jt)| {
-            let i0 = it * mb_size;
-            let i1 = (i0 + mb_size).min(n_rows);
-            let j0 = jt * mb_size;
-            let j1 = (j0 + mb_size).min(n_cols);
-            (i0, i1, j0, j1)
-        })
-        .collect()
+/// Tiles encoded at the micro-block size they were chosen for.
+pub(super) struct EncodedTiles {
+    pub(super) micro_block_size: i32,
+    pub(super) bytes: Vec<u8>,
 }
 
-/// Try encoding a sample of tiles at both block sizes 8 and 16, return whichever
-/// produces smaller output. Instead of encoding ALL tiles twice, we sample a
-/// small number of representative tiles to make the decision.
-pub(super) fn select_block_size<T: Sample>(
+/// Encode every tile at the micro-block size Esri's Lerc2 would choose
+/// (`Lerc2::ComputeNumBytesNeededToWrite` in `Lerc2.cpp`).
+///
+/// Encode at 8 × 8 first. When that comes to under 1.5 bits per pixel, the
+/// per-block headers (a flag byte and an offset per block) are a large share
+/// of the bytes, so encode again at 16 × 16 — a quarter of the headers — and
+/// keep it if it is no larger. Ties go to 16, which has fewer blocks to
+/// decode. Esri also skips the second pass when bit stuffing is ineffective
+/// (8 × 8 tiling at four times the raw size or more) and for images no
+/// larger than one block; both are kept here. Its third condition, tiling not
+/// much worse than Huffman, only saves work when Huffman wins anyway and is
+/// not applied: the Huffman comparison still runs on the chosen tiles.
+///
+/// Both sizes are priced over every pixel. An earlier version sampled eight
+/// 8 × 8 and eight 16 × 16 blocks and compared the byte totals, which covered
+/// four times as many pixels at 16 and so favoured 8 — by 4× on flat data,
+/// where each block of either size is one constant.
+pub(super) fn encode_tiles_at_best_block_size<T: Sample>(
     data: &[T],
     mask: &BitMask,
-    hd: &HeaderInfo,
+    header: &HeaderInfo,
     z_min_vec: &[f64],
     z_max_vec: &[f64],
-) -> Result<i32> {
-    let n_rows = hd.n_rows as usize;
-    let n_cols = hd.n_cols as usize;
-    let n_depth = hd.n_depth as usize;
-
-    // Fast path for u8 lossless, all-valid, single-depth
-    let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
-    if T::DATA_TYPE == DataType::Byte && hd.max_z_error == 0.5 && all_valid && n_depth == 1 {
-        debug_assert_eq!(T::BYTES, 1);
-        let u8_data: &[u8] =
-            unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len()) };
-        return Ok(select_block_size_u8_fast(u8_data, hd));
-    }
-
-    // For very small images, just try both fully
-    if n_rows <= 16 && n_cols <= 16 {
-        let mut hd8 = hd.clone();
-        hd8.micro_block_size = 8;
-        let mut buf8 = Vec::new();
-        encode_tiles(&mut buf8, data, mask, &hd8, z_min_vec, z_max_vec)?;
-
-        let mut hd16 = hd.clone();
-        hd16.micro_block_size = 16;
-        let mut buf16 = Vec::new();
-        encode_tiles(&mut buf16, data, mask, &hd16, z_min_vec, z_max_vec)?;
-
-        return if buf16.len() < buf8.len() {
-            Ok(16)
-        } else {
-            Ok(8)
-        };
-    }
-
-    let mut scratch = ScratchBuffers::new();
-
-    // Encode sampled tiles at block size 8
-    let mut size8 = 0usize;
-    let hd8 = {
-        let mut h = hd.clone();
-        h.micro_block_size = 8;
-        h
+) -> Result<EncodedTiles> {
+    let encode_at = |micro_block_size: i32| -> Result<EncodedTiles> {
+        let mut hd = header.clone();
+        hd.micro_block_size = micro_block_size;
+        let mut bytes = Vec::new();
+        encode_tiles(&mut bytes, data, mask, &hd, z_min_vec, z_max_vec)?;
+        Ok(EncodedTiles {
+            micro_block_size,
+            bytes,
+        })
     };
-    let ctx8 = TileEncodeContext {
-        data,
-        mask,
-        header: &hd8,
-        z_max_vec,
-    };
-    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 8) {
-        let rect = crate::types::TileRect { i0, i1, j0, j1 };
-        for i_depth in 0..n_depth {
-            size8 += encode_tile_to_count::<T>(&ctx8, rect, i_depth, &mut scratch)?;
-        }
-    }
 
-    // Encode sampled tiles at block size 16
-    let mut size16 = 0usize;
-    let hd16 = {
-        let mut h = hd.clone();
-        h.micro_block_size = 16;
-        h
-    };
-    let ctx16 = TileEncodeContext {
-        data,
-        mask,
-        header: &hd16,
-        z_max_vec,
-    };
-    for &(i0, i1, j0, j1) in &sample_tile_positions(n_rows, n_cols, 16) {
-        let rect = crate::types::TileRect { i0, i1, j0, j1 };
-        for i_depth in 0..n_depth {
-            size16 += encode_tile_to_count::<T>(&ctx16, rect, i_depth, &mut scratch)?;
-        }
+    let tiles8 = encode_at(MICRO_BLOCK_SIZE)?;
+    if !worth_trying_doubled_block_size::<T>(tiles8.bytes.len(), header) {
+        return Ok(tiles8);
     }
+    let tiles16 = encode_at(MICRO_BLOCK_SIZE_DOUBLED)?;
+    Ok(if tiles16.bytes.len() <= tiles8.bytes.len() {
+        tiles16
+    } else {
+        tiles8
+    })
+}
 
-    if size16 < size8 { Ok(16) } else { Ok(8) }
+/// Esri's conditions for re-encoding at the doubled block size, given the
+/// 8 × 8 tiling's byte count.
+fn worth_trying_doubled_block_size<T: Sample>(tiling_bytes: usize, header: &HeaderInfo) -> bool {
+    let n_depth = header.n_depth as usize;
+    let num_total = header.n_rows as usize * header.n_cols as usize;
+    // Bytes of the uncompressed values ("one sweep" in Lerc2).
+    let raw_bytes = header.num_valid_pixel as usize * n_depth * T::BYTES;
+    // tiling_bytes × 8 bits < 1.5 bits × num_total × n_depth, in integers.
+    let low_bit_rate = tiling_bytes * 16 < num_total * n_depth * 3;
+    let bit_stuffing_effective = tiling_bytes < 4 * raw_bytes;
+    let larger_than_one_block =
+        header.n_rows > MICRO_BLOCK_SIZE || header.n_cols > MICRO_BLOCK_SIZE;
+    low_bit_rate && bit_stuffing_effective && larger_than_one_block
 }
 
 /// Scratch buffers reused across tiles to avoid per-tile allocations.
@@ -373,7 +323,7 @@ fn encode_tile<T: Sample>(
         src_data_type: header.data_type,
         b_diff_enc: false,
     };
-    encode_tile_inner::<T>(
+    let non_diff_coding = encode_tile_inner::<T>(
         &mut scratch.tile_buf,
         &scratch.valid_data,
         &mut scratch.quant_vec,
@@ -384,13 +334,11 @@ fn encode_tile<T: Sample>(
     // Save the non-diff quantized values before the diff attempt overwrites quant_vec
     scratch.non_diff_quant.clear();
     scratch.non_diff_quant.extend_from_slice(&scratch.quant_vec);
-    let non_diff_z_min = z_min_f;
-    let non_diff_z_max = z_max_f;
 
     // Encode with diff (if available)
     let mut used_diff = false;
     let mut diff_z_min = 0.0f64;
-    let mut diff_z_max = 0.0f64;
+    let mut diff_coding = RangeCoding::ConstZero;
     if has_diff {
         let mut diff_min = f64::MAX;
         let mut diff_max = f64::MIN;
@@ -403,7 +351,6 @@ fn encode_tile<T: Sample>(
             }
         }
         diff_z_min = diff_min;
-        diff_z_max = diff_max;
         // Append diff encoding after the non-diff data in tile_buf
         let diff_start = scratch.tile_buf.len();
         let diff_params = TileInnerParams {
@@ -416,7 +363,7 @@ fn encode_tile<T: Sample>(
             src_data_type: header.data_type,
             b_diff_enc: true,
         };
-        encode_tile_inner::<T>(
+        diff_coding = encode_tile_inner::<T>(
             &mut scratch.tile_buf,
             &scratch.diff_data,
             &mut scratch.quant_vec,
@@ -444,31 +391,16 @@ fn encode_tile<T: Sample>(
             header.z_max
         };
 
-        // Determine reconstruction info based on the chosen encoding path
+        // Reconstruct from the coding the chosen attempt actually wrote.
         let recon_info = if used_diff {
-            // Diff encoding was chosen; reconstruct from diff quantized values
-            let rp = ReconParams {
-                num_valid,
-                z_min_f: diff_z_min,
-                z_max_f: diff_z_max,
-                max_z_error,
-                max_val_to_quantize,
-                z_max_depth,
-                b_diff_enc: true,
-            };
-            classify_recon(&scratch.diff_data, &scratch.quant_vec, &rp)
+            debug_assert_ne!(
+                diff_coding,
+                RangeCoding::Raw,
+                "a raw diff block is a sentinel and cannot win the size comparison"
+            );
+            recon_info(diff_coding, diff_z_min, max_z_error, z_max_depth)
         } else {
-            // Non-diff encoding was chosen; reconstruct from original quantized values
-            let rp = ReconParams {
-                num_valid,
-                z_min_f: non_diff_z_min,
-                z_max_f: non_diff_z_max,
-                max_z_error,
-                max_val_to_quantize,
-                z_max_depth,
-                b_diff_enc: false,
-            };
-            classify_recon(&scratch.valid_data, &scratch.non_diff_quant, &rp)
+            recon_info(non_diff_coding, z_min_f, max_z_error, z_max_depth)
         };
 
         // Apply reconstruction to the buffer
@@ -518,171 +450,122 @@ fn encode_tile<T: Sample>(
     Ok(())
 }
 
-/// Parameters for classifying how a tile was encoded for reconstruction.
-struct ReconParams {
-    num_valid: usize,
+/// What the decoder rebuilds for a block written with `written` (as returned
+/// by `encode_tile_inner`) at offset `z_min_f`.
+///
+/// This must follow the coding written, not re-derive it from the range: a
+/// quantized block whose bit-stuffed form came out no smaller than raw is
+/// stored raw, and the decoder reads its values back exactly. Reconstructing
+/// it as quantized left the next depth slice's diffs carrying the up-to-
+/// `max_z_error` gap between the two, so that slice decoded up to
+/// 2 × `max_z_error` off.
+fn recon_info(
+    written: RangeCoding,
     z_min_f: f64,
-    z_max_f: f64,
     max_z_error: f64,
-    max_val_to_quantize: f64,
     z_max_depth: f64,
-    b_diff_enc: bool,
-}
-
-/// Classify how a tile was encoded and return reconstruction info.
-/// This mirrors the logic in `encode_tile_inner` to determine whether the tile
-/// ended up as constant, quantized, or raw binary.
-fn classify_recon(values: &[f64], quant: &[u32], p: &ReconParams) -> TileReconInfo {
-    let ReconParams {
-        num_valid,
-        z_min_f,
-        z_max_f,
-        max_z_error,
-        max_val_to_quantize,
-        z_max_depth,
-        b_diff_enc,
-    } = *p;
-    if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
-        // Constant zero block
-        return TileReconInfo::Constant(0.0);
-    }
-
-    let need_quantize = if max_z_error == 0.0 {
-        z_max_f > z_min_f
-    } else {
-        let max_val = (z_max_f - z_min_f) / (2.0 * max_z_error);
-        max_val <= max_val_to_quantize && (max_val + 0.5) as u32 != 0
-    };
-
-    if !need_quantize && z_min_f == z_max_f {
-        // Constant block
-        return TileReconInfo::Constant(z_min_f);
-    }
-
-    if !need_quantize {
-        if !b_diff_enc {
-            // Raw binary
-            return TileReconInfo::RawBinary;
-        }
-        // Diff + raw binary is not allowed; this means non-diff won the size
-        // comparison in encode_tile. This code path should not be reached since
-        // the diff sentinel is always larger, but handle it safely.
-        return TileReconInfo::RawBinary;
-    }
-
-    // Check if all values quantize to the same value (max_quant == 0)
-    let max_quant = quant.iter().copied().max().unwrap_or(0);
-    if max_quant == 0 {
-        // All quantized to same -> constant block with z_min_f as offset
-        return TileReconInfo::Constant(z_min_f);
-    }
-
-    // Check if raw binary was cheaper (only for non-diff mode).
-    // We need to replicate the raw-binary fallback check from encode_tile_inner.
-    if !b_diff_enc {
-        // Estimate the encoded size: this mirrors the bitstuffer output size.
-        // If the actual encoder fell back to raw binary, the quant values are
-        // irrelevant and reconstruction should use original values.
-        // We approximate by checking if the encoded bytes would exceed raw size.
-        // However, we cannot know the exact encoded size here without re-encoding.
-        // Instead, rely on the fact that if raw binary was chosen, the values
-        // array contains the exact original values. In practice for lossy mode
-        // with max_z_error > 0, quantization always beats raw for non-trivial
-        // data ranges, so this fallback is rare.
-        //
-        // For correctness we conservatively return Quantized, which is correct
-        // when quantization was used and harmless when raw was used (since raw
-        // stores exact values, reconstruction is exact either way for depth 0,
-        // and raw binary cannot be used with diff encoding).
-        let _ = values;
-    }
-
-    let inv_scale = 2.0 * max_z_error;
-    TileReconInfo::Quantized {
-        offset: z_min_f,
-        inv_scale,
-        z_max: z_max_depth,
+) -> TileReconInfo {
+    match written {
+        RangeCoding::ConstZero => TileReconInfo::Constant(0.0),
+        // Every value is within max_z_error of z_min; the decoder rebuilds z_min.
+        RangeCoding::Constant => TileReconInfo::Constant(z_min_f),
+        RangeCoding::Raw => TileReconInfo::RawBinary,
+        RangeCoding::Quantized { .. } => TileReconInfo::Quantized {
+            offset: z_min_f,
+            inv_scale: 2.0 * max_z_error,
+            z_max: z_max_depth,
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
 
     // -----------------------------------------------------------------------
-    // classify_recon
+    // encode_tiles_at_best_block_size
+    // -----------------------------------------------------------------------
+
+    fn f32_header(n_rows: i32, n_cols: i32, max_z_error: f64) -> HeaderInfo {
+        HeaderInfo {
+            version: 3,
+            n_rows,
+            n_cols,
+            n_depth: 1,
+            num_valid_pixel: n_rows * n_cols,
+            data_type: DataType::Float,
+            max_z_error,
+            ..HeaderInfo::default()
+        }
+    }
+
+    fn best_block_size(data: &[f32], hd: &HeaderInfo) -> i32 {
+        let (z_min, z_max) = data.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &v| {
+            (lo.min(f64::from(v)), hi.max(f64::from(v)))
+        });
+        let mask = BitMask::all_valid(data.len());
+        encode_tiles_at_best_block_size(data, &mask, hd, &[z_min], &[z_max])
+            .expect("encode")
+            .micro_block_size
+    }
+
+    #[test]
+    fn flat_data_takes_the_doubled_block_size() {
+        // Sub-tolerance noise: every block is one constant at either size, so
+        // 16 × 16 needs a quarter of the block headers.
+        let data: Vec<f32> = (0..64 * 64)
+            .map(|i| 1000.0 + 0.001 * ((i * 7919) % 13) as f32)
+            .collect();
+        assert_eq!(best_block_size(&data, &f32_header(64, 64, 0.02)), 16);
+    }
+
+    #[test]
+    fn busy_data_keeps_the_8x8_block_size() {
+        // Several bits per pixel: Lerc2 does not try 16 × 16.
+        let data: Vec<f32> = (0..64 * 64).map(|i| ((i * 7919) % 1000) as f32).collect();
+        assert_eq!(best_block_size(&data, &f32_header(64, 64, 0.01)), 8);
+    }
+
+    #[test]
+    fn doubled_block_size_is_tried_only_at_low_bit_rates() {
+        let hd = f32_header(64, 64, 0.01);
+        // 1.5 bits per pixel is the threshold: 768 bytes for 4096 pixels.
+        assert!(worth_trying_doubled_block_size::<f32>(767, &hd));
+        assert!(!worth_trying_doubled_block_size::<f32>(768, &hd));
+    }
+
+    #[test]
+    fn doubled_block_size_is_not_tried_on_a_single_block() {
+        let hd = f32_header(8, 8, 0.01);
+        assert!(!worth_trying_doubled_block_size::<f32>(5, &hd));
+        let hd = f32_header(8, 9, 0.01);
+        assert!(worth_trying_doubled_block_size::<f32>(5, &hd));
+    }
+
+    // -----------------------------------------------------------------------
+    // recon_info
     // -----------------------------------------------------------------------
 
     #[test]
-    fn classify_recon_const_zero_num_valid_zero() {
-        let rp = ReconParams {
-            num_valid: 0,
-            z_min_f: f64::MAX,
-            z_max_f: f64::MIN,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&[], &[], &rp);
-        match info {
+    fn recon_info_const_zero_rebuilds_zero() {
+        match recon_info(RangeCoding::ConstZero, 5.0, 0.5, 255.0) {
             TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
             _ => panic!("expected Constant(0.0)"),
         }
     }
 
     #[test]
-    fn classify_recon_const_zero_zmin_zmax_zero() {
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: 0.0,
-            z_max_f: 0.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&[0.0, 0.0], &[0, 0], &rp);
-        match info {
-            TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
-            _ => panic!("expected Constant(0.0)"),
+    fn recon_info_constant_rebuilds_z_min() {
+        // Including a sub-tolerance range: every value comes back as z_min.
+        match recon_info(RangeCoding::Constant, 1000.0, 0.02, 2000.0) {
+            TileReconInfo::Constant(c) => assert_eq!(c, 1000.0),
+            _ => panic!("expected Constant(1000.0)"),
         }
     }
 
     #[test]
-    fn classify_recon_const_offset() {
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: 42.0,
-            z_max_f: 42.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&[42.0, 42.0], &[0, 0], &rp);
-        match info {
-            TileReconInfo::Constant(c) => assert_eq!(c, 42.0),
-            _ => panic!("expected Constant(42.0)"),
-        }
-    }
-
-    #[test]
-    fn classify_recon_quantized() {
-        let values: Vec<f64> = (0..8).map(|i| i as f64).collect();
-        let quant: Vec<u32> = (0..8).collect();
-        let rp = ReconParams {
-            num_valid: 8,
-            z_min_f: 0.0,
-            z_max_f: 7.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 15) - 1) as f64,
-            z_max_depth: 255.0,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&values, &quant, &rp);
-        match info {
+    fn recon_info_quantized_rebuilds_the_lattice() {
+        match recon_info(RangeCoding::Quantized { max_elem: 7 }, 0.0, 0.5, 255.0) {
             TileReconInfo::Quantized {
                 offset,
                 inv_scale,
@@ -697,163 +580,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_recon_raw_binary() {
-        // For need_quantize = false with z_min != z_max:
-        //   max_z_error > 0 and max_val > max_val_to_quantize => need_quantize = false.
-        let z_min = 0.0;
-        let z_max = 1e18; // huge range
-        let values = vec![z_min, z_max];
-        let quant = vec![0, 0];
-        let rp = ReconParams {
-            num_valid: 2,
-            z_min_f: z_min,
-            z_max_f: z_max,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
-            z_max_depth: 1e18,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&values, &quant, &rp);
-        match info {
-            TileReconInfo::RawBinary => {}
-            _ => panic!(
-                "expected RawBinary, got {:?}",
-                match info {
-                    TileReconInfo::Constant(c) => alloc::format!("Constant({c})"),
-                    TileReconInfo::Quantized {
-                        offset,
-                        inv_scale,
-                        z_max,
-                    } => alloc::format!(
-                        "Quantized(offset={offset}, inv_scale={inv_scale}, z_max={z_max})"
-                    ),
-                    TileReconInfo::RawBinary => "RawBinary".into(),
-                }
-            ),
-        }
-    }
-
-    #[test]
-    fn classify_recon_quantized_all_same_after_quant() {
-        // max_quant == 0 path: need_quantize = true but all quant values are 0.
-        let values = vec![10.0, 10.5, 11.0];
-        let quant = vec![0, 0, 0]; // force max_quant = 0
-        let rp = ReconParams {
-            num_valid: 3,
-            z_min_f: 10.0,
-            z_max_f: 11.0,
-            max_z_error: 0.5,
-            max_val_to_quantize: ((1u32 << 30) - 1) as f64,
-            z_max_depth: 100.0,
-            b_diff_enc: false,
-        };
-        let info = classify_recon(&values, &quant, &rp);
-        match info {
-            TileReconInfo::Constant(c) => assert_eq!(c, 10.0),
-            _ => panic!("expected Constant(10.0) for all-same quantization"),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // sample_tile_positions
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn sample_tile_positions_within_bounds() {
-        let n_rows = 100;
-        let n_cols = 200;
-        let mb_size = 8;
-        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i0 < n_rows, "i0={i0} >= n_rows={n_rows}");
-            assert!(i1 <= n_rows, "i1={i1} > n_rows={n_rows}");
-            assert!(i0 < i1, "i0={i0} >= i1={i1}");
-            assert!(j0 < n_cols, "j0={j0} >= n_cols={n_cols}");
-            assert!(j1 <= n_cols, "j1={j1} > n_cols={n_cols}");
-            assert!(j0 < j1, "j0={j0} >= j1={j1}");
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_small_image() {
-        // For a 1x1 image, should produce at least 1 position
-        let positions = sample_tile_positions(1, 1, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert_eq!(i0, 0);
-            assert_eq!(i1, 1);
-            assert_eq!(j0, 0);
-            assert_eq!(j1, 1);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_exact_tile_boundary() {
-        // Image size exactly divisible by mb_size
-        let positions = sample_tile_positions(16, 16, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i0 < 16);
-            assert!(i1 <= 16);
-            assert!(j0 < 16);
-            assert!(j1 <= 16);
-            assert_eq!(i1 - i0, 8); // exact block size
-            assert_eq!(j1 - j0, 8);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_non_divisible() {
-        // Image size not divisible by mb_size -- last tile is smaller
-        let positions = sample_tile_positions(10, 10, 8);
-        assert!(!positions.is_empty());
-        for &(i0, i1, j0, j1) in &positions {
-            assert!(i1 - i0 <= 8);
-            assert!(j1 - j0 <= 8);
-            assert!(i1 <= 10);
-            assert!(j1 <= 10);
-        }
-    }
-
-    #[test]
-    fn sample_tile_positions_unique() {
-        let positions = sample_tile_positions(100, 100, 8);
-        // All positions should be unique (dedup was called)
-        let mut sorted = positions.clone();
-        sorted.sort();
-        sorted.dedup();
-        assert_eq!(sorted.len(), positions.len());
-    }
-
-    #[test]
-    fn sample_tile_positions_covers_corners() {
-        // Should include corners and center for a large-enough image
-        let n_rows = 64;
-        let n_cols = 64;
-        let mb_size = 8;
-        let positions = sample_tile_positions(n_rows, n_cols, mb_size);
-        // Top-left corner
-        assert!(positions.iter().any(|&(i0, _, j0, _)| i0 == 0 && j0 == 0));
-        // Top-right corner
-        let last_j0 = (n_cols.div_ceil(mb_size) - 1) * mb_size;
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == 0 && j0 == last_j0)
-        );
-        // Bottom-left corner
-        let last_i0 = (n_rows.div_ceil(mb_size) - 1) * mb_size;
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == 0)
-        );
-        // Bottom-right corner
-        assert!(
-            positions
-                .iter()
-                .any(|&(i0, _, j0, _)| i0 == last_i0 && j0 == last_j0)
-        );
+    fn recon_info_raw_rebuilds_the_values() {
+        assert!(matches!(
+            recon_info(RangeCoding::Raw, 0.0, 0.5, 1e18),
+            TileReconInfo::RawBinary
+        ));
     }
 }

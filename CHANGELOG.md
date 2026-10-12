@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Lossy encoding codes a micro-block whose value range is under half a
+  quantization step (`(z_max - z_min) / (2 * max_z_error)` rounds to 0) as a
+  constant at `z_min`, as Esri's Lerc2 does; every value is within
+  `max_z_error` of it. Such blocks were stored as raw values instead — 32 bits
+  per pixel for `f32` — so near-flat data with noise below the tolerance
+  compressed several times worse than with the reference encoder (220× on a
+  synthetic flat `f32` raster, ~3× on real flat terrain tiles). The
+  block-coding decision now lives in one function shared by the encoder and
+  its multi-depth reconstruction, so the two cannot drift apart again.
+- The micro-block size is chosen as Esri's Lerc2 chooses it: encode at
+  8×8, and when that comes to under 1.5 bits per pixel encode again at 16×16
+  and keep it if no larger. The encoder used to sample eight 8×8 and eight
+  16×16 blocks and compare the byte totals, which priced four times as many
+  pixels at 16 and so favoured 8 — on flat data, where every block of either
+  size is one constant, the totals tied and 8×8 won at four times the size.
+  Output for data above 1.5 bits per pixel is unchanged on the reference
+  rasters, and encode time is within ±2% on the benchmarks (a new
+  `lossy_flat_0.02` case covers the low-bit-rate path). The u8 lossless
+  Huffman comparison now reuses the chosen tiling instead of encoding the
+  tiles a second time.
+- Lossy multi-depth encoding no longer lets a depth slice decode up to
+  2 × `max_z_error` off. The encoder diffs each slice against its own
+  reconstruction of the previous one, and reconstructed every quantized
+  block as quantized — including one whose bit-stuffed form was no smaller
+  than raw and was stored raw, which the decoder reads back exactly. Small or
+  sparsely valid blocks with a wide range hit this. The reconstruction now
+  follows the coding the encoder actually wrote.
+
 ## [0.5.0] - 2026-08-12
 
 ### Fixed

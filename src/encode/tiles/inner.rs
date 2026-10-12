@@ -14,16 +14,84 @@ pub(super) struct TileInnerParams {
     pub b_diff_enc: bool,
 }
 
-/// Encode the payload for a single tile block, appending to `buf`.
+/// How a block's value range is coded, decided from the range alone before
+/// any bits are counted.
+///
+/// [`classify_range`] decides it from the range; [`encode_tile_inner`] writes
+/// the block from that decision and returns the coding it actually wrote,
+/// which is `Raw` when bit-stuffing came out no smaller than the raw values.
+/// The multi-depth encoder's reconstruction of what the decoder will see
+/// (`recon_info` in the parent module) is built from that returned value, so
+/// the two cannot disagree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum RangeCoding {
+    /// No valid values, or every value is zero: the flag byte alone.
+    ConstZero,
+    /// Every value is within `max_z_error` of `z_min` (or equal to it when
+    /// lossless): the flag byte and `z_min`.
+    Constant,
+    /// Quantized to `0..=max_elem` steps of `2 * max_z_error` above `z_min`
+    /// and bit-stuffed. `max_elem` is at least 1.
+    Quantized { max_elem: u32 },
+    /// Too many steps to quantize (or lossless with distinct values): the
+    /// values verbatim.
+    Raw,
+}
+
+/// Classify a block's range the way Esri's Lerc2 does (`NumBytesTile`,
+/// `NeedToQuantize` and `WriteTile` in `Lerc2.cpp`).
+///
+/// A range under half a quantization step rounds to zero steps, so the
+/// block is a constant at `z_min`: every value lies within the range, so
+/// within `max_z_error`, of `z_min`. Testing only `z_min == z_max` for the
+/// constant case, as this encoder once did, sends such blocks out raw — the
+/// full sample width per value, on exactly the near-flat data lossy LERC is
+/// for.
+///
+/// `max_val` is computed as `range * (1 / (2 * max_z_error))`, matching
+/// Esri's `ComputeMaxVal` and the quantizer in [`encode_tile_inner`], so the
+/// largest value in the block quantizes to exactly `max_elem`.
+pub(super) fn classify_range(
+    num_valid: usize,
+    z_min: f64,
+    z_max: f64,
+    max_z_error: f64,
+    max_val_to_quantize: f64,
+) -> RangeCoding {
+    if num_valid == 0 || (z_min == 0.0 && z_max == 0.0) {
+        return RangeCoding::ConstZero;
+    }
+    if max_z_error == 0.0 {
+        return if z_max > z_min {
+            RangeCoding::Raw
+        } else {
+            RangeCoding::Constant
+        };
+    }
+    let max_val = (z_max - z_min) * (1.0 / (2.0 * max_z_error));
+    if max_val > max_val_to_quantize {
+        return RangeCoding::Raw;
+    }
+    match (max_val + 0.5) as u32 {
+        0 => RangeCoding::Constant,
+        max_elem => RangeCoding::Quantized { max_elem },
+    }
+}
+
+/// Encode the payload for a single tile block, appending to `buf`, and
+/// return the coding written.
 /// When `b_diff_enc` is true, bit 2 of the compression flag is set and the
-/// offset data type is forced to Int for integer source types.
-/// `quant_scratch` is a reusable scratch buffer for quantized values.
+/// offset data type is forced to Int for integer source types; a block that
+/// would be raw is written as a sentinel that always loses the size
+/// comparison (raw cannot carry a diff), and `Raw` is returned for it.
+/// `quant_scratch` is a reusable scratch buffer for quantized values; after a
+/// `Quantized` return it holds the block's quantized values.
 pub(super) fn encode_tile_inner<T: Sample>(
     buf: &mut Vec<u8>,
     values: &[f64],
     quant_scratch: &mut Vec<u32>,
     p: &TileInnerParams,
-) {
+) -> RangeCoding {
     let TileInnerParams {
         num_valid,
         z_min_f,
@@ -40,58 +108,52 @@ pub(super) fn encode_tile_inner<T: Sample>(
         0
     };
 
-    if num_valid == 0 || (z_min_f == 0.0 && z_max_f == 0.0) {
-        buf.push(TileCompressionMode::ConstZero as u8 | diff_flag | integrity);
-        return;
-    }
-
-    // Check if we need quantization
-    let need_quantize = if max_z_error == 0.0 {
-        z_max_f > z_min_f
-    } else {
-        let max_val = (z_max_f - z_min_f) / (2.0 * max_z_error);
-        max_val <= max_val_to_quantize && (max_val + 0.5) as u32 != 0
-    };
-
-    if !need_quantize && z_min_f == z_max_f {
-        // Constant block (all same value / all same diff)
-        let z_min_t = T::from_f64(z_min_f);
+    // The offset's reduced type and its flag bits, shared by the constant
+    // and quantized forms.
+    let reduced_offset = || {
         let (dt_reduced, tc) = if b_diff_enc && src_data_type.is_integer() {
             crate::tiles::reduce_data_type(z_min_f as i32, DataType::Int)
         } else {
-            crate::tiles::reduce_data_type(z_min_t, src_data_type)
+            crate::tiles::reduce_data_type(T::from_f64(z_min_f), src_data_type)
         };
-        let bits67 = (tc as u8) << tile_flags::TYPE_REDUCTION_SHIFT;
-        buf.push(TileCompressionMode::ConstOffset as u8 | bits67 | diff_flag | integrity);
-        crate::tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
-        return;
-    }
+        (dt_reduced, (tc as u8) << tile_flags::TYPE_REDUCTION_SHIFT)
+    };
 
-    if !need_quantize {
-        if !b_diff_enc {
-            buf.push(TileCompressionMode::RawBinary as u8 | integrity);
-            for val in values {
-                let t = T::from_f64(*val);
-                t.extend_le_bytes(buf);
-            }
-            return;
+    let max_elem = match classify_range(
+        num_valid,
+        z_min_f,
+        z_max_f,
+        max_z_error,
+        max_val_to_quantize,
+    ) {
+        RangeCoding::ConstZero => {
+            buf.push(TileCompressionMode::ConstZero as u8 | diff_flag | integrity);
+            return RangeCoding::ConstZero;
         }
-        // Raw binary is not allowed with diff enc per the decoder.
-        // Append an impossibly-large sentinel so the non-diff path wins
-        // the size comparison. We use raw-size + 1 so it always loses.
-        let sentinel_len = 1 + num_valid * T::BYTES + 1;
-        buf.resize(buf.len() + sentinel_len, 0u8);
-        return;
-    }
+        RangeCoding::Constant => {
+            // Constant block (all within max_z_error of z_min / same diff)
+            let (dt_reduced, bits67) = reduced_offset();
+            buf.push(TileCompressionMode::ConstOffset as u8 | bits67 | diff_flag | integrity);
+            crate::tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
+            return RangeCoding::Constant;
+        }
+        RangeCoding::Raw => {
+            if !b_diff_enc {
+                write_raw::<T>(buf, values, integrity);
+                return RangeCoding::Raw;
+            }
+            // Raw binary is not allowed with diff enc per the decoder.
+            // Append an impossibly-large sentinel so the non-diff path wins
+            // the size comparison. We use raw-size + 1 so it always loses.
+            let sentinel_len = 1 + num_valid * T::BYTES + 1;
+            buf.resize(buf.len() + sentinel_len, 0u8);
+            return RangeCoding::Raw;
+        }
+        RangeCoding::Quantized { max_elem } => max_elem,
+    };
 
     // Quantize and bit-stuff
-    let z_min_t = T::from_f64(z_min_f);
-    let (dt_reduced, tc) = if b_diff_enc && src_data_type.is_integer() {
-        crate::tiles::reduce_data_type(z_min_f as i32, DataType::Int)
-    } else {
-        crate::tiles::reduce_data_type(z_min_t, src_data_type)
-    };
-    let bits67 = (tc as u8) << tile_flags::TYPE_REDUCTION_SHIFT;
+    let (dt_reduced, bits67) = reduced_offset();
 
     // Quantize values (reusing scratch buffer)
     quant_scratch.clear();
@@ -107,14 +169,14 @@ pub(super) fn encode_tile_inner<T: Sample>(
         }
     }
 
+    // classify_range computes max_elem with the quantizer's own arithmetic,
+    // so the block's largest value lands on it exactly.
     let max_quant = quant_scratch.iter().copied().max().unwrap_or(0);
-
-    if max_quant == 0 {
-        // All values quantize to same -> constant block
-        buf.push(TileCompressionMode::ConstOffset as u8 | bits67 | diff_flag | integrity);
-        crate::tiles::write_variable_data_type(buf, z_min_f, dt_reduced);
-        return;
-    }
+    debug_assert_eq!(
+        max_quant, max_elem,
+        "quantized maximum disagrees with classify_range (z_min={z_min_f}, z_max={z_max_f}, \
+         max_z_error={max_z_error})"
+    );
 
     // Try LUT vs simple encoding
     let encoded_start = buf.len();
@@ -130,19 +192,27 @@ pub(super) fn encode_tile_inner<T: Sample>(
         crate::bitstuffer::encode_simple_into(buf, quant_scratch, max_quant);
     }
 
-    // Check if raw binary would be smaller (only for non-diff mode)
+    // Check if raw binary would be smaller (only for non-diff mode). The
+    // decoder then reads the values back exactly, not quantized, which is
+    // why the coding written is returned rather than re-derived.
     if !b_diff_enc {
         let raw_size = 1 + num_valid * T::BYTES;
         let encoded_len = buf.len() - encoded_start;
         if encoded_len >= raw_size {
             // Raw binary fallback: replace the encoded data
             buf.truncate(encoded_start);
-            buf.push(TileCompressionMode::RawBinary as u8 | integrity);
-            for val in values {
-                let t = T::from_f64(*val);
-                t.extend_le_bytes(buf);
-            }
+            write_raw::<T>(buf, values, integrity);
+            return RangeCoding::Raw;
         }
+    }
+    RangeCoding::Quantized { max_elem }
+}
+
+/// Write a raw block: the flag byte, then every valid value verbatim.
+fn write_raw<T: Sample>(buf: &mut Vec<u8>, values: &[f64], integrity: u8) {
+    buf.push(TileCompressionMode::RawBinary as u8 | integrity);
+    for val in values {
+        T::from_f64(*val).extend_le_bytes(buf);
     }
 }
 
@@ -356,6 +426,41 @@ mod tests {
     }
 
     #[test]
+    fn encode_tile_inner_reports_raw_when_bit_stuffing_does_not_pay() {
+        // Two f64 values 29 quantization steps' worth of bits apart: the
+        // bit-stuffed block (flag, offset, bit-stuffer header, bits) is no
+        // smaller than the flag byte plus two raw values, so the block is
+        // stored raw, and the coding returned must say so: the decoder reads
+        // the values back exactly, not quantized.
+        let values = vec![-1.0e9, 1.0e9];
+        let mut buf = Vec::new();
+        let mut quant_scratch = Vec::new();
+        let p = TileInnerParams {
+            num_valid: values.len(),
+            z_min_f: values[0],
+            z_max_f: values[1],
+            max_z_error: 2.0,
+            max_val_to_quantize: MAX_VAL_F,
+            integrity: 0,
+            src_data_type: DataType::Int,
+            b_diff_enc: false,
+        };
+        assert_eq!(
+            classify_range(2, values[0], values[1], 2.0, MAX_VAL_F),
+            RangeCoding::Quantized {
+                max_elem: 500_000_000
+            }
+        );
+        let written = encode_tile_inner::<i32>(&mut buf, &values, &mut quant_scratch, &p);
+        assert_eq!(written, RangeCoding::Raw);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::RawBinary as u8
+        );
+        assert_eq!(buf.len(), 1 + 2 * 4);
+    }
+
+    #[test]
     fn encode_tile_inner_raw_binary_contains_original_values() {
         // Use enough values to ensure raw binary wins over bitstuffed
         let n = 32;
@@ -431,10 +536,14 @@ mod tests {
             b_diff_enc: true,
         };
         encode_tile_inner::<f64>(&mut buf, &values, &mut quant_scratch, &p);
-        // Should NOT be raw binary when diff is true
-        assert_ne!(
-            buf[0] & tile_flags::MODE_MASK,
-            TileCompressionMode::RawBinary as u8
+        // A lossless block with distinct values is raw, which a diff block
+        // cannot be: the sentinel must outweigh the non-diff raw block
+        // (flag byte + 8 bytes per value) so the size comparison drops it.
+        let raw_len = 1 + values.len() * 8;
+        assert!(
+            buf.len() > raw_len,
+            "diff sentinel of {} bytes does not lose to raw {raw_len}",
+            buf.len()
         );
     }
 
@@ -487,23 +596,90 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // encode_tile_inner: all-quantized-to-same (max_quant == 0)
+    // classify_range
+    // -----------------------------------------------------------------------
+
+    const MAX_VAL_F: f64 = ((1u32 << 30) - 1) as f64;
+
+    #[test]
+    fn classify_range_empty_or_all_zero_is_const_zero() {
+        assert_eq!(
+            classify_range(0, f64::MAX, f64::MIN, 0.01, MAX_VAL_F),
+            RangeCoding::ConstZero
+        );
+        assert_eq!(
+            classify_range(4, 0.0, 0.0, 0.01, MAX_VAL_F),
+            RangeCoding::ConstZero
+        );
+    }
+
+    #[test]
+    fn classify_range_under_half_a_step_is_constant() {
+        // Step 2 × 0.02 = 0.04; a 0.019 range is 0.475 of a step.
+        assert_eq!(
+            classify_range(64, 1000.0, 1000.019, 0.02, MAX_VAL_F),
+            RangeCoding::Constant
+        );
+        assert_eq!(
+            classify_range(64, 7.0, 7.0, 0.02, MAX_VAL_F),
+            RangeCoding::Constant
+        );
+    }
+
+    #[test]
+    fn classify_range_from_half_a_step_is_quantized() {
+        // Exactly half a step rounds up to one: max_val 0.5 → max_elem 1.
+        // (0.25 and 0.5 are exact in binary, so the boundary is exact.)
+        assert_eq!(
+            classify_range(64, 0.0, 0.25, 0.25, MAX_VAL_F),
+            RangeCoding::Quantized { max_elem: 1 }
+        );
+        assert_eq!(
+            classify_range(64, 0.0, 10.0, 0.25, MAX_VAL_F),
+            RangeCoding::Quantized { max_elem: 20 }
+        );
+    }
+
+    #[test]
+    fn classify_range_beyond_max_val_to_quantize_is_raw() {
+        assert_eq!(
+            classify_range(64, 0.0, MAX_VAL_F + 100.0, 0.5, MAX_VAL_F),
+            RangeCoding::Raw
+        );
+    }
+
+    #[test]
+    fn classify_range_lossless_distinct_values_are_raw() {
+        assert_eq!(
+            classify_range(2, 0.0, 1e15, 0.0, MAX_VAL_F),
+            RangeCoding::Raw
+        );
+        assert_eq!(
+            classify_range(2, 3.5, 3.5, 0.0, MAX_VAL_F),
+            RangeCoding::Constant
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // encode_tile_inner: ranges under half a quantization step
     // -----------------------------------------------------------------------
 
     #[test]
-    fn encode_tile_inner_all_quantize_to_same() {
-        // Actually let's use: values where after quantization all become 0.
-        // This is tricky because (max_val + 0.5) as u32 == 0 when max_val < 0.5.
-        // For max_quant=0 we need all individual quant values to be 0, but
-        // (max_val + 0.5) as u32 > 0 (so max_val >= 0.5).
-        // When max_val >= 0.5, scale = 1/(2*max_z_error), and at least
-        // the largest value will quantize to max_val * scale + 0.5 >= 1.
-        // So max_quant=0 in the quantized path cannot happen unless all values
-        // are exactly z_min, which means z_min == z_max (caught earlier).
-        //
-        // Therefore the max_quant==0 ConstOffset path in the quantized section
-        // is effectively unreachable for well-formed input. Skip this test case.
-        // Instead verify a near-constant case that ends up as ConstOffset.
+    fn encode_tile_inner_sub_tolerance_range_is_const_offset() {
+        // Values spread over 0.019 with max_z_error 0.02 are all within the
+        // tolerance of z_min: a constant block, not raw f64 values.
+        let values: Vec<f64> = (0..64).map(|i| 1000.0 + 0.019 * i as f64 / 63.0).collect();
+        let (buf, _) = encode_tile_inner_f64(&values, values[0], values[63], 0.02);
+        assert_eq!(
+            buf[0] & tile_flags::MODE_MASK,
+            TileCompressionMode::ConstOffset as u8
+        );
+        // Flag byte plus z_min, reduced from f64 to the smallest exact type.
+        assert!(buf.len() <= 1 + 8, "constant block is {} bytes", buf.len());
+    }
+
+    #[test]
+    fn encode_tile_inner_identical_values_are_const_offset() {
         let values = vec![42.0; 16];
         let (buf, _) = encode_tile_inner_u8(&values, 42.0, 42.0, false);
         assert_eq!(

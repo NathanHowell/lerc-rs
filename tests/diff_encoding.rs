@@ -742,3 +742,77 @@ fn lossy_multi_depth_multiband_round_trip() {
         _ => panic!("expected F32 data"),
     }
 }
+
+#[test]
+fn lossy_multi_depth_after_raw_fallback_round_trip() {
+    // A quantized block whose bit-stuffed form is no smaller than raw is
+    // stored raw, so the decoder reads its values back exactly. The next
+    // depth slice is diffed against the encoder's reconstruction of this
+    // one, which must therefore be the exact values too: if it assumed the
+    // quantized values, every diff would carry the up-to-max_z_error gap
+    // between them, and the next slice would decode up to 2 × max_z_error
+    // off.
+    //
+    // One valid pair per 16×16 region, so every non-empty block holds two
+    // valid pixels whichever micro-block size the encoder picks. Spanning
+    // ~2e9 with max_z_error = 2, they need 29 bits each: bit-stuffed (flag,
+    // offset, bit-stuffer header, 8 bytes of bits) they cost more than the
+    // raw i32 values plus the flag byte, so the block is stored raw.
+    let width = 64u32;
+    let height = 64u32;
+    let n_depth = 2u32;
+    let max_z_error = 2.0;
+    let num_pixels = (width * height) as usize;
+
+    let mut mask = BitMask::new(num_pixels);
+    for k in 0..num_pixels {
+        let (row, col) = (k / width as usize, k % width as usize);
+        if row % 16 == 0 && col % 16 < 2 {
+            mask.set_valid(k);
+        }
+    }
+
+    let mut pixels = vec![0i32; num_pixels * n_depth as usize];
+    for k in 0..num_pixels {
+        if mask.is_valid(k) {
+            // Alternate between the ends of the range so every block spans it.
+            let base = if (k / 8 + k) % 2 == 0 {
+                -1_000_000_000 + (k as i32 % 7)
+            } else {
+                1_000_000_000 - (k as i32 % 5)
+            };
+            pixels[k * 2] = base;
+            pixels[k * 2 + 1] = base + (k as i32 % 4);
+        }
+    }
+
+    let image = Image {
+        width,
+        height,
+        depth: n_depth,
+        bands: 1,
+        data_type: DataType::Int,
+        valid_masks: vec![mask.clone()],
+        data: SampleData::I32(pixels.clone()),
+        no_data_value: None,
+    };
+
+    let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode failed");
+    let decoded = lerc::decode(&encoded).expect("decode failed");
+
+    let SampleData::I32(dec_pixels) = &decoded.data else {
+        panic!("expected I32 data");
+    };
+    for k in (0..num_pixels).filter(|&k| mask.is_valid(k)) {
+        for m in 0..n_depth as usize {
+            let idx = k * n_depth as usize + m;
+            let diff = (i64::from(pixels[idx]) - i64::from(dec_pixels[idx])).abs();
+            assert!(
+                diff as f64 <= max_z_error,
+                "pixel {k} depth {m}: orig={}, decoded={}, diff={diff} > {max_z_error}",
+                pixels[idx],
+                dec_pixels[idx]
+            );
+        }
+    }
+}

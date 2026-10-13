@@ -19,6 +19,13 @@
 //!    catches encoder changes that silently shift the FPL bitstuffer or
 //!    Huffman path away from the reference.
 //!
+//!    The C++ Huffman tree builder breaks weight ties via `std::priority_queue`,
+//!    whose order differs between libc++ and libstdc++, so the reference
+//!    output is itself platform-dependent whenever a tie changes a code
+//!    length. These cases pass because their data has no such ties. Lossless
+//!    float with depth > 1 is not pinned for this reason; its wire format is
+//!    covered by the bit-exact round trips in `cpp_cross_validation.rs`.
+//!
 //! Other data-type / precision combinations are intentionally NOT pinned
 //! against the C++ reference. Rust's `encode_one_band` emits the
 //! minimum-required codec version (3 / 5 / 6 depending on features used),

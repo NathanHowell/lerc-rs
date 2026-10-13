@@ -1,7 +1,6 @@
 mod inner;
 mod u8_fast;
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::bitmask::BitMask;
@@ -9,7 +8,7 @@ use crate::error::Result;
 use crate::header::HeaderInfo;
 use crate::types::{DataType, Sample};
 
-use inner::{RangeCoding, TileInnerParams, encode_tile_inner};
+use inner::{TileInnerParams, encode_tile_inner};
 use u8_fast::encode_tiles_u8_fast;
 
 /// The micro-block size Lerc2 encodes with first, and the one it may switch to.
@@ -43,14 +42,12 @@ pub(super) fn encode_tiles_at_best_block_size<T: Sample>(
     data: &[T],
     mask: &BitMask,
     header: &HeaderInfo,
-    z_min_vec: &[f64],
-    z_max_vec: &[f64],
 ) -> Result<EncodedTiles> {
     let encode_at = |micro_block_size: i32| -> Result<EncodedTiles> {
         let mut hd = header.clone();
         hd.micro_block_size = micro_block_size;
         let mut bytes = Vec::new();
-        encode_tiles(&mut bytes, data, mask, &hd, z_min_vec, z_max_vec)?;
+        encode_tiles(&mut bytes, data, mask, &hd)?;
         Ok(EncodedTiles {
             micro_block_size,
             bytes,
@@ -89,9 +86,6 @@ pub(super) struct ScratchBuffers {
     pub(super) valid_data: Vec<f64>,
     pub(super) diff_data: Vec<f64>,
     pub(super) quant_vec: Vec<u32>,
-    /// Holds the quantized values from the non-diff encoding attempt,
-    /// saved before the diff encoding attempt overwrites `quant_vec`.
-    pub(super) non_diff_quant: Vec<u32>,
     pub(super) tile_buf: Vec<u8>,
 }
 
@@ -101,27 +95,9 @@ impl ScratchBuffers {
             valid_data: Vec::new(),
             diff_data: Vec::new(),
             quant_vec: Vec::new(),
-            non_diff_quant: Vec::new(),
             tile_buf: Vec::new(),
         }
     }
-}
-
-/// Information about how a tile was encoded, used to compute the decoder's
-/// reconstructed values for the previous-depth reconstruction buffer.
-#[derive(Clone, Copy)]
-enum TileReconInfo {
-    /// All valid pixels in the tile have the same reconstructed value.
-    Constant(f64),
-    /// Values were quantized: reconstructed[i] = offset + quant[i] * inv_scale
-    /// (clamped to z_max).
-    Quantized {
-        offset: f64,
-        inv_scale: f64,
-        z_max: f64,
-    },
-    /// Raw binary: reconstruction matches the original values exactly.
-    RawBinary,
 }
 
 /// Read-only context shared across all tiles during encoding.
@@ -129,7 +105,28 @@ struct TileEncodeContext<'a, T> {
     data: &'a [T],
     mask: &'a BitMask,
     header: &'a HeaderInfo,
-    z_max_vec: &'a [f64],
+    /// Whether depth slices after the first may be coded as differences from
+    /// the slice before ([`tries_diff_encoding`]).
+    try_diff: bool,
+}
+
+/// Whether a blob's depth slices after the first may be coded as differences
+/// from the slice before, as Lerc2 v5 allows.
+///
+/// Esri's encoder tries it only for lossless integer data
+/// (`Lerc2::WriteTiles`: `bTryDiffEnc = version >= 5 && nDepth > 1 &&
+/// bIntLossless`, "to avoid error propagation"), and so does this one. There
+/// the previous slice decodes to exactly its source values, every difference
+/// is an integer, and a block's offset is stored exactly in an integer type.
+///
+/// This encoder once tried it for lossy and float data too. The previous
+/// slice then had to be tracked as the decoder would rebuild it, and a
+/// block's offset became an f64 difference that its storage type could not
+/// hold: a float offset of -0.99999997 was judged by its f32 rounding (-1),
+/// stored as a 16-bit integer and written truncated to 0, so every value in
+/// the block decoded 1.0 too high.
+fn tries_diff_encoding<T: Sample>(header: &HeaderInfo) -> bool {
+    header.version >= 5 && header.n_depth > 1 && T::is_integer() && header.max_z_error == 0.5
 }
 
 pub(super) fn encode_tiles<T: Sample>(
@@ -137,8 +134,6 @@ pub(super) fn encode_tiles<T: Sample>(
     data: &[T],
     mask: &BitMask,
     header: &HeaderInfo,
-    _z_min_vec: &[f64],
-    z_max_vec: &[f64],
 ) -> Result<()> {
     let mb_size = header.micro_block_size as usize;
     let n_depth = header.n_depth as usize;
@@ -170,21 +165,9 @@ pub(super) fn encode_tiles<T: Sample>(
         data,
         mask,
         header,
-        z_max_vec,
+        try_diff: tries_diff_encoding::<T>(header),
     };
     let mut scratch = ScratchBuffers::new();
-
-    // Allocate a per-pixel reconstruction buffer when multi-depth lossy encoding
-    // is active. This mirrors the C++ ScaleBack approach: after encoding each
-    // depth slice, we store the values as the decoder would reconstruct them,
-    // so that subsequent depth-slice diffs are computed from reconstructed (not
-    // original) values.
-    let needs_recon = n_depth > 1 && max_z_error > 0.0;
-    let mut recon_buf: Vec<f64> = if needs_recon {
-        vec![0.0; n_rows * n_cols]
-    } else {
-        Vec::new()
-    };
 
     for i_tile in 0..num_tiles_vert {
         let i0 = i_tile * mb_size;
@@ -196,18 +179,7 @@ pub(super) fn encode_tiles<T: Sample>(
             let rect = crate::types::TileRect { i0, i1, j0, j1 };
 
             for i_depth in 0..n_depth {
-                encode_tile(
-                    blob,
-                    &ctx,
-                    rect,
-                    i_depth,
-                    &mut scratch,
-                    if needs_recon {
-                        Some(&mut recon_buf)
-                    } else {
-                        None
-                    },
-                )?;
+                encode_tile(blob, &ctx, rect, i_depth, &mut scratch)?;
             }
         }
     }
@@ -215,29 +187,23 @@ pub(super) fn encode_tiles<T: Sample>(
     Ok(())
 }
 
-/// Encode a single tile block (one depth slice of one micro-block).
-/// When depth > 0 and nDepth > 1, the encoder tries diff (delta) encoding
-/// relative to the previous depth slice and picks whichever representation
-/// is smaller.
+/// Encode one tile (micro-block) for a single depth slice.
 ///
-/// When `recon_buf` is `Some`, it holds the decoder-reconstructed values for the
-/// previous depth slice (indexed by pixel index `k = row * n_cols + col`).
-/// Diffs are computed against these reconstructed values instead of the original
-/// data. After encoding, the buffer is updated with this depth slice's
-/// reconstructed values so it is ready for the next depth.
+/// Where [`tries_diff_encoding`] allows it and this is not the first depth
+/// slice, the block is also coded as differences from the previous slice's
+/// source values (exact, since the data is lossless integer), and the smaller
+/// of the two codings is kept.
 fn encode_tile<T: Sample>(
     blob: &mut Vec<u8>,
     ctx: &TileEncodeContext<'_, T>,
     rect: crate::types::TileRect,
     i_depth: usize,
     scratch: &mut ScratchBuffers,
-    recon_buf: Option<&mut Vec<f64>>,
 ) -> Result<()> {
     let crate::types::TileRect { i0, i1, j0, j1 } = rect;
     let data = ctx.data;
     let mask = ctx.mask;
     let header = ctx.header;
-    let z_max_vec = ctx.z_max_vec;
     let n_cols = header.n_cols as usize;
     let n_depth = header.n_depth as usize;
     let max_z_error = header.max_z_error;
@@ -247,7 +213,6 @@ fn encode_tile<T: Sample>(
         }
         _ => ((1u32 << 30) - 1) as f64,
     };
-    let try_diff = n_depth > 1 && i_depth > 0;
 
     // Collect valid pixels for this depth slice (reusing scratch buffer)
     scratch.valid_data.clear();
@@ -276,37 +241,27 @@ fn encode_tile<T: Sample>(
     let pattern: u8 = if header.version >= 5 { 14 } else { 15 };
     let integrity = ((j0 as u8 >> 3) & pattern) << 2;
 
-    // Compute diff values if applicable.
-    // When a reconstruction buffer is provided, use the reconstructed (quantized)
-    // previous-depth values instead of the original data. This matches what the
-    // C++ encoder does via ScaleBack and what the decoder uses for reconstruction.
-    let has_diff = if try_diff {
+    // Differences from the previous slice, when diff coding is tried. The
+    // data is lossless integer, so the previous slice decodes to exactly its
+    // source values; a difference that does not fit in i32 rules it out.
+    let has_diff = if ctx.try_diff && i_depth > 0 {
         scratch.diff_data.clear();
         let mut overflow = false;
-        let mut idx = 0;
         'outer: for i in i0..i1 {
             for j in j0..j1 {
                 let k = i * n_cols + j;
                 if mask.is_valid(k) {
-                    let cur = data[k * n_depth + i_depth].to_f64();
-                    let prev = if let Some(ref rb) = recon_buf {
-                        rb[k]
-                    } else {
-                        data[k * n_depth + i_depth - 1].to_f64()
-                    };
-                    let diff = cur - prev;
-                    // Check for integer overflow: for integer types, the diff
-                    // must be representable as i32
-                    if T::is_integer() && (diff < i32::MIN as f64 || diff > i32::MAX as f64) {
+                    let diff = data[k * n_depth + i_depth].to_f64()
+                        - data[k * n_depth + i_depth - 1].to_f64();
+                    if diff < i32::MIN as f64 || diff > i32::MAX as f64 {
                         overflow = true;
                         break 'outer;
                     }
                     scratch.diff_data.push(diff);
-                    idx += 1;
                 }
             }
         }
-        !overflow && idx == num_valid
+        !overflow
     } else {
         false
     };
@@ -323,7 +278,7 @@ fn encode_tile<T: Sample>(
         src_data_type: header.data_type,
         b_diff_enc: false,
     };
-    let non_diff_coding = encode_tile_inner::<T>(
+    encode_tile_inner::<T>(
         &mut scratch.tile_buf,
         &scratch.valid_data,
         &mut scratch.quant_vec,
@@ -331,151 +286,41 @@ fn encode_tile<T: Sample>(
     );
     let non_diff_len = scratch.tile_buf.len();
 
-    // Save the non-diff quantized values before the diff attempt overwrites quant_vec
-    scratch.non_diff_quant.clear();
-    scratch.non_diff_quant.extend_from_slice(&scratch.quant_vec);
-
-    // Encode with diff (if available)
-    let mut used_diff = false;
-    let mut diff_z_min = 0.0f64;
-    let mut diff_coding = RangeCoding::ConstZero;
-    if has_diff {
-        let mut diff_min = f64::MAX;
-        let mut diff_max = f64::MIN;
-        for &d in scratch.diff_data.iter() {
-            if d < diff_min {
-                diff_min = d;
-            }
-            if d > diff_max {
-                diff_max = d;
-            }
-        }
-        diff_z_min = diff_min;
-        // Append diff encoding after the non-diff data in tile_buf
-        let diff_start = scratch.tile_buf.len();
-        let diff_params = TileInnerParams {
-            num_valid,
-            z_min_f: diff_min,
-            z_max_f: diff_max,
-            max_z_error,
-            max_val_to_quantize,
-            integrity,
-            src_data_type: header.data_type,
-            b_diff_enc: true,
-        };
-        diff_coding = encode_tile_inner::<T>(
-            &mut scratch.tile_buf,
-            &scratch.diff_data,
-            &mut scratch.quant_vec,
-            &diff_params,
-        );
-        let diff_len = scratch.tile_buf.len() - diff_start;
-
-        // Pick the smaller encoding
-        if diff_len < non_diff_len {
-            blob.extend_from_slice(&scratch.tile_buf[diff_start..]);
-            used_diff = true;
-        } else {
-            blob.extend_from_slice(&scratch.tile_buf[..non_diff_len]);
-        }
-    } else {
+    if !has_diff {
         blob.extend_from_slice(&scratch.tile_buf);
+        return Ok(());
     }
 
-    // Update the reconstruction buffer with what the decoder would produce for
-    // this depth slice.
-    if let Some(rb) = recon_buf {
-        let z_max_depth = if n_depth > 1 {
-            z_max_vec[i_depth]
-        } else {
-            header.z_max
-        };
-
-        // Reconstruct from the coding the chosen attempt actually wrote.
-        let recon_info = if used_diff {
-            debug_assert_ne!(
-                diff_coding,
-                RangeCoding::Raw,
-                "a raw diff block is a sentinel and cannot win the size comparison"
-            );
-            recon_info(diff_coding, diff_z_min, max_z_error, z_max_depth)
-        } else {
-            recon_info(non_diff_coding, z_min_f, max_z_error, z_max_depth)
-        };
-
-        // Apply reconstruction to the buffer
-        let mut valid_idx = 0;
-        for i in i0..i1 {
-            for j in j0..j1 {
-                let k = i * n_cols + j;
-                if mask.is_valid(k) {
-                    let recon_val = match recon_info {
-                        TileReconInfo::Constant(c) => {
-                            if used_diff {
-                                // diff constant: decoder adds offset to prev
-                                (c + rb[k]).min(z_max_depth)
-                            } else {
-                                c
-                            }
-                        }
-                        TileReconInfo::Quantized {
-                            offset,
-                            inv_scale,
-                            z_max,
-                        } => {
-                            let q = if used_diff {
-                                scratch.quant_vec[valid_idx] as f64
-                            } else {
-                                scratch.non_diff_quant[valid_idx] as f64
-                            };
-                            let z = offset + q * inv_scale;
-                            if used_diff {
-                                (z + rb[k]).min(z_max)
-                            } else {
-                                z.min(z_max)
-                            }
-                        }
-                        TileReconInfo::RawBinary => {
-                            // Raw binary: the original values are stored exactly
-                            scratch.valid_data[valid_idx]
-                        }
-                    };
-                    rb[k] = recon_val;
-                    valid_idx += 1;
-                }
-            }
-        }
+    // Encode with diff, appended after the non-diff coding, and keep the
+    // smaller of the two.
+    let (diff_min, diff_max) = scratch
+        .diff_data
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), &d| (lo.min(d), hi.max(d)));
+    let diff_params = TileInnerParams {
+        num_valid,
+        z_min_f: diff_min,
+        z_max_f: diff_max,
+        max_z_error,
+        max_val_to_quantize,
+        integrity,
+        src_data_type: header.data_type,
+        b_diff_enc: true,
+    };
+    encode_tile_inner::<T>(
+        &mut scratch.tile_buf,
+        &scratch.diff_data,
+        &mut scratch.quant_vec,
+        &diff_params,
+    );
+    let diff_len = scratch.tile_buf.len() - non_diff_len;
+    if diff_len < non_diff_len {
+        blob.extend_from_slice(&scratch.tile_buf[non_diff_len..]);
+    } else {
+        blob.extend_from_slice(&scratch.tile_buf[..non_diff_len]);
     }
 
     Ok(())
-}
-
-/// What the decoder rebuilds for a block written with `written` (as returned
-/// by `encode_tile_inner`) at offset `z_min_f`.
-///
-/// This must follow the coding written, not re-derive it from the range: a
-/// quantized block whose bit-stuffed form came out no smaller than raw is
-/// stored raw, and the decoder reads its values back exactly. Reconstructing
-/// it as quantized left the next depth slice's diffs carrying the up-to-
-/// `max_z_error` gap between the two, so that slice decoded up to
-/// 2 × `max_z_error` off.
-fn recon_info(
-    written: RangeCoding,
-    z_min_f: f64,
-    max_z_error: f64,
-    z_max_depth: f64,
-) -> TileReconInfo {
-    match written {
-        RangeCoding::ConstZero => TileReconInfo::Constant(0.0),
-        // Every value is within max_z_error of z_min; the decoder rebuilds z_min.
-        RangeCoding::Constant => TileReconInfo::Constant(z_min_f),
-        RangeCoding::Raw => TileReconInfo::RawBinary,
-        RangeCoding::Quantized { .. } => TileReconInfo::Quantized {
-            offset: z_min_f,
-            inv_scale: 2.0 * max_z_error,
-            z_max: z_max_depth,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -500,11 +345,8 @@ mod tests {
     }
 
     fn best_block_size(data: &[f32], hd: &HeaderInfo) -> i32 {
-        let (z_min, z_max) = data.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &v| {
-            (lo.min(f64::from(v)), hi.max(f64::from(v)))
-        });
         let mask = BitMask::all_valid(data.len());
-        encode_tiles_at_best_block_size(data, &mask, hd, &[z_min], &[z_max])
+        encode_tiles_at_best_block_size(data, &mask, hd)
             .expect("encode")
             .micro_block_size
     }
@@ -540,50 +382,5 @@ mod tests {
         assert!(!worth_trying_doubled_block_size::<f32>(5, &hd));
         let hd = f32_header(8, 9, 0.01);
         assert!(worth_trying_doubled_block_size::<f32>(5, &hd));
-    }
-
-    // -----------------------------------------------------------------------
-    // recon_info
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn recon_info_const_zero_rebuilds_zero() {
-        match recon_info(RangeCoding::ConstZero, 5.0, 0.5, 255.0) {
-            TileReconInfo::Constant(c) => assert_eq!(c, 0.0),
-            _ => panic!("expected Constant(0.0)"),
-        }
-    }
-
-    #[test]
-    fn recon_info_constant_rebuilds_z_min() {
-        // Including a sub-tolerance range: every value comes back as z_min.
-        match recon_info(RangeCoding::Constant, 1000.0, 0.02, 2000.0) {
-            TileReconInfo::Constant(c) => assert_eq!(c, 1000.0),
-            _ => panic!("expected Constant(1000.0)"),
-        }
-    }
-
-    #[test]
-    fn recon_info_quantized_rebuilds_the_lattice() {
-        match recon_info(RangeCoding::Quantized { max_elem: 7 }, 0.0, 0.5, 255.0) {
-            TileReconInfo::Quantized {
-                offset,
-                inv_scale,
-                z_max,
-            } => {
-                assert_eq!(offset, 0.0);
-                assert_eq!(inv_scale, 1.0); // 2 * 0.5
-                assert_eq!(z_max, 255.0);
-            }
-            _ => panic!("expected Quantized"),
-        }
-    }
-
-    #[test]
-    fn recon_info_raw_rebuilds_the_values() {
-        assert!(matches!(
-            recon_info(RangeCoding::Raw, 0.0, 0.5, 1e18),
-            TileReconInfo::RawBinary
-        ));
     }
 }

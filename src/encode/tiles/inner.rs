@@ -20,9 +20,6 @@ pub(super) struct TileInnerParams {
 /// [`classify_range`] decides it from the range; [`encode_tile_inner`] writes
 /// the block from that decision and returns the coding it actually wrote,
 /// which is `Raw` when bit-stuffing came out no smaller than the raw values.
-/// The multi-depth encoder's reconstruction of what the decoder will see
-/// (`recon_info` in the parent module) is built from that returned value, so
-/// the two cannot disagree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum RangeCoding {
     /// No valid values, or every value is zero: the flag byte alone.

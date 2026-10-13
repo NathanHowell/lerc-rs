@@ -483,7 +483,7 @@ fn make_correlated_f32_lossy(width: u32, height: u32) -> Vec<f32> {
 }
 
 #[test]
-fn reconstructed_prev_depth_produces_smaller_blobs() {
+fn lossy_multi_depth_f32_correlated_round_trip() {
     // Verify that the encoder produces correct round-trip results for
     // multi-depth lossy f32 data with correlated depths.
     let width = 64u32;
@@ -527,7 +527,7 @@ fn reconstructed_prev_depth_produces_smaller_blobs() {
 
 #[test]
 fn lossy_multi_depth_f64_round_trip() {
-    // Test lossy f64 multi-depth round-trip with reconstruction buffer
+    // Test lossy f64 multi-depth round-trip (slices coded independently)
     let width = 32u32;
     let height = 32u32;
     let n_depth = 2u32;
@@ -746,12 +746,11 @@ fn lossy_multi_depth_multiband_round_trip() {
 #[test]
 fn lossy_multi_depth_after_raw_fallback_round_trip() {
     // A quantized block whose bit-stuffed form is no smaller than raw is
-    // stored raw, so the decoder reads its values back exactly. The next
-    // depth slice is diffed against the encoder's reconstruction of this
-    // one, which must therefore be the exact values too: if it assumed the
-    // quantized values, every diff would carry the up-to-max_z_error gap
-    // between them, and the next slice would decode up to 2 × max_z_error
-    // off.
+    // stored raw, so the decoder reads its values back exactly. Lossy
+    // slices are coded independently (diff coding is for lossless integer
+    // data only), so a raw block in one slice must not disturb the next;
+    // an encoder that diffed against its own reconstruction once got this
+    // wrong by up to 2 × max_z_error.
     //
     // One valid pair per 16×16 region, so every non-empty block holds two
     // valid pixels whichever micro-block size the encoder picks. Spanning
@@ -812,6 +811,66 @@ fn lossy_multi_depth_after_raw_fallback_round_trip() {
                 "pixel {k} depth {m}: orig={}, decoded={}, diff={diff} > {max_z_error}",
                 pixels[idx],
                 dec_pixels[idx]
+            );
+        }
+    }
+}
+
+/// Lossy float depth slices are coded independently, as Esri's encoder codes
+/// them (diff coding is for lossless integer data only).
+///
+/// This 8 × 8 block is two gradient components rounded to a 0.01 lattice.
+/// When the encoder diff-coded lossy floats, the second slice's diffs had a
+/// minimum of -0.99999997 (an f64 difference); its f32 rounding, -1, was
+/// judged integral, the offset was stored as a 16-bit integer and written
+/// truncated to 0, and the whole block decoded 1.0 too high. Esri's decoder
+/// read the same wrong values, so the blob itself was wrong.
+#[test]
+fn lossy_float_depth_slices_decode_within_tolerance() {
+    const DX: [[f32; 8]; 8] = [
+        [0.17, 0.17, 0.22, 0.26, 0.25, 0.2, 0.16, 0.13],
+        [0.23, 0.16, 0.2, 0.27, 0.25, 0.19, 0.12, 0.03],
+        [0.25, 0.11, 0.14, 0.24, 0.25, 0.21, 0.11, -0.01],
+        [0.21, 0.06, 0.09, 0.22, 0.29, 0.26, 0.13, -0.05],
+        [0.11, 0.03, 0.06, 0.22, 0.36, 0.33, 0.13, -0.08],
+        [-0.03, -0.04, 0.04, 0.21, 0.39, 0.35, 0.11, -0.12],
+        [-0.2, -0.16, -0.01, 0.18, 0.33, 0.27, 0.03, -0.18],
+        [-0.35, -0.27, -0.05, 0.14, 0.2, 0.08, -0.15, -0.33],
+    ];
+    const DY: [[f32; 8]; 8] = [
+        [0.25, 0.3, 0.32, 0.35, 0.39, 0.39, 0.33, 0.24],
+        [0.37, 0.37, 0.32, 0.28, 0.27, 0.27, 0.26, 0.21],
+        [0.28, 0.25, 0.18, 0.12, 0.1, 0.13, 0.16, 0.15],
+        [-0.01, -0.06, -0.09, -0.11, -0.08, -0.01, 0.03, 0.02],
+        [-0.26, -0.34, -0.36, -0.37, -0.33, -0.26, -0.23, -0.26],
+        [-0.3, -0.43, -0.5, -0.53, -0.55, -0.56, -0.59, -0.62],
+        [-0.22, -0.37, -0.46, -0.51, -0.58, -0.71, -0.85, -0.96],
+        [-0.18, -0.29, -0.35, -0.39, -0.49, -0.67, -0.91, -1.12],
+    ];
+    let pixels: Vec<f32> = (0..64)
+        .flat_map(|i| [DX[i / 8][i % 8], DY[i / 8][i % 8]])
+        .collect();
+    let image = Image {
+        width: 8,
+        height: 8,
+        depth: 2,
+        bands: 1,
+        data_type: DataType::Float,
+        valid_masks: vec![BitMask::all_valid(64)],
+        data: SampleData::F32(pixels.clone()),
+        no_data_value: None,
+    };
+    for max_z_error in [1e-6, 1e-3, 0.02] {
+        let encoded = lerc::encode(&image, Precision::Tolerance(max_z_error)).expect("encode");
+        let SampleData::F32(decoded) = lerc::decode(&encoded).expect("decode").data else {
+            panic!("expected F32 data");
+        };
+        for (i, (&orig, &dec)) in pixels.iter().zip(&decoded).enumerate() {
+            let diff = (f64::from(orig) - f64::from(dec)).abs();
+            let tol = lossy_tol_f32(orig, dec, max_z_error);
+            assert!(
+                diff <= tol,
+                "maxZErr {max_z_error}: value {i}: {orig} decoded as {dec}"
             );
         }
     }

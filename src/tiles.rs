@@ -68,7 +68,20 @@ fn read_variable_data_type(data: &[u8], pos: &mut usize, dt: DataType) -> Result
 }
 
 /// Write a variable-width value to the byte buffer.
+///
+/// `z` must be exactly representable in `dt`: the integer arms truncate. A
+/// block offset that is not (an f64 difference judged integral by its f32
+/// rounding, as diff-coded float blocks once were) is written as a different
+/// number, and every value in the block decodes off by the gap.
 pub(crate) fn write_variable_data_type(buf: &mut Vec<u8>, z: f64, dt: DataType) {
+    debug_assert!(
+        match dt {
+            DataType::Float => f64::from(z as f32) == z,
+            DataType::Double => true,
+            _ => crate::mathutils::floor(z) == z,
+        },
+        "block offset {z} is not exactly representable as {dt:?}"
+    );
     match dt {
         DataType::Char => buf.push(z as i8 as u8),
         DataType::Byte => buf.push(z as u8),

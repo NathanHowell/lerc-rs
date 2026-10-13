@@ -478,8 +478,7 @@ fn write_blob_payload<T: Sample>(
         return Ok(());
     }
 
-    let tiles =
-        encode_tiles_at_best_block_size(encode_data, mask, hd, &stats.z_min_vec, &stats.z_max_vec)?;
+    let tiles = encode_tiles_at_best_block_size(encode_data, mask, hd)?;
     hd.micro_block_size = tiles.micro_block_size;
 
     if try_huffman_int {

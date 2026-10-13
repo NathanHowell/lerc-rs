@@ -51,9 +51,7 @@ fn flat_ground() -> Vec<f32> {
 }
 
 /// A ramp on the quantization lattice: 0.24 m per pixel is six steps of
-/// `2 × MAX_Z_ERROR`, so it quantizes with (up to `f32` rounding) no error
-/// and the encoder's reconstruction of it matches the input. A later depth
-/// slice's diff against it then carries only the noise added to that slice.
+/// `2 × MAX_Z_ERROR`, so it quantizes with (up to `f32` rounding) no error.
 fn lattice_ramp() -> Vec<f32> {
     (0..PIXELS)
         .map(|i| {
@@ -64,10 +62,10 @@ fn lattice_ramp() -> Vec<f32> {
 }
 
 /// Three depth slices, pixel-interleaved: the lattice ramp, then twice more
-/// with 0.3 × `MAX_Z_ERROR` of noise added per slice. Each diff block is
-/// sub-tolerance, including the third slice's: it is diffed against the
-/// second slice's reconstruction, so it carries its own noise plus the
-/// second slice's sub-step residual, together under 0.6 × `MAX_Z_ERROR`.
+/// with 0.3 × `MAX_Z_ERROR` of noise added per slice, so every slice differs
+/// from the one before by less than the tolerance. Lerc2 still codes each
+/// slice on its own: diff coding between slices is for lossless integer
+/// data only.
 fn sub_tolerance_depths() -> Image {
     let base = lattice_ramp();
     let (noise_1, noise_2) = (sub_tolerance_noise(0.3, 1), sub_tolerance_noise(0.3, 2));
@@ -139,26 +137,21 @@ fn sub_tolerance_noise_is_coded_as_constant_blocks() {
     assert_within_tolerance(&data, &decoded.pixels, "single depth");
 }
 
-/// The encoder diffs each depth slice against its own reconstruction of the
-/// previous one, so a constant diff block must be reconstructed the way the
-/// decoder rebuilds it; if it were not, the third slice would decode outside
-/// the tolerance.
+/// Lossy float slices are coded independently, as Esri's encoder codes them,
+/// even when each differs from the previous by less than the tolerance; each
+/// is a quantized ramp, so the blob is about three base slices, and every
+/// slice decodes within the tolerance.
 #[test]
-fn sub_tolerance_depth_diffs_are_coded_as_constant_blocks() {
+fn lossy_float_depth_slices_are_coded_independently() {
     let image = sub_tolerance_depths();
     let blob = lerc::encode(&image, Precision::Tolerance(MAX_Z_ERROR)).expect("encode");
 
-    // The base slice coded on its own prices the quantized ramp; depths 1
-    // and 2 should add only constant diff blocks on top of it.
-    let base_only = encode_single_depth(&lattice_ramp());
-    let extra = blob.len().saturating_sub(base_only.len());
-    let extra_bpp = bytes_per_pixel(extra, 2 * PIXELS);
+    let base_only = encode_single_depth(&lattice_ramp()).len() as f64;
+    let ratio = blob.len() as f64 / base_only;
     assert!(
-        extra_bpp < CONSTANT_BLOCK_BYTES_PER_PIXEL,
-        "sub-tolerance diff blocks were not coded as constants: {extra_bpp:.3} bytes/pixel \
-         for the two diff slices (three depths {} bytes, base slice alone {})",
-        blob.len(),
-        base_only.len()
+        (2.5..=3.5).contains(&ratio),
+        "three depths {} bytes against one slice {base_only} bytes: ratio {ratio:.2}",
+        blob.len()
     );
 
     let decoded = lerc::decode(&blob).expect("decode");
@@ -167,10 +160,9 @@ fn sub_tolerance_depth_diffs_are_coded_as_constant_blocks() {
 }
 
 /// The same blobs against Esri's reference: it must decode them within the
-/// tolerance, and on a single depth the two encoders should agree on size —
-/// which takes both the constant blocks and the reference's choice of 16 × 16
-/// micro-blocks at this bit rate. (The reference encoder diff-encodes integer
-/// lossless data only, so it has no size to compare on the lossy diff path.)
+/// tolerance, and the two encoders should agree on size — which takes both
+/// the constant blocks and the reference's choice of 16 × 16 micro-blocks at
+/// this bit rate, and, with several depths, coding each slice on its own.
 #[cfg(feature = "cpp-validation")]
 mod cpp_reference {
     use super::*;
@@ -217,11 +209,34 @@ mod cpp_reference {
     }
 
     #[test]
-    fn reference_decodes_sub_tolerance_constant_diff_blocks() {
+    fn reference_decodes_independently_coded_depth_slices() {
         let image = sub_tolerance_depths();
         let blob = lerc::encode(&image, Precision::Tolerance(MAX_Z_ERROR)).expect("encode");
         let (decoded, _): (Vec<f32>, _) =
             cpp::decode(&blob, DT_FLOAT, WIDTH as i32, HEIGHT as i32, 3, 1);
         assert_within_tolerance(f32_pixels(&image), &decoded, "reference, three depths");
+    }
+
+    #[test]
+    fn lossy_depth_slices_match_the_reference_size() {
+        let image = sub_tolerance_depths();
+        let rust_blob = lerc::encode(&image, Precision::Tolerance(MAX_Z_ERROR)).expect("encode");
+        let cpp_blob = cpp::encode(
+            f32_pixels(&image),
+            DT_FLOAT,
+            WIDTH as i32,
+            HEIGHT as i32,
+            3,
+            1,
+            None,
+            MAX_Z_ERROR,
+        );
+        let ratio = rust_blob.len() as f64 / cpp_blob.len() as f64;
+        assert!(
+            ratio <= MAX_RATIO,
+            "rust {} bytes vs cpp {} bytes: ratio {ratio:.3} exceeds {MAX_RATIO}",
+            rust_blob.len(),
+            cpp_blob.len()
+        );
     }
 }

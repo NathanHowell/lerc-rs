@@ -78,7 +78,7 @@ pub(crate) fn write_variable_data_type(buf: &mut Vec<u8>, z: f64, dt: DataType) 
         match dt {
             DataType::Float => f64::from(z as f32) == z,
             DataType::Double => true,
-            _ => z.fract() == 0.0,
+            _ => crate::mathutils::floor(z) == z,
         },
         "block offset {z} is not exactly representable as {dt:?}"
     );

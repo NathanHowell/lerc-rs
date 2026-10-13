@@ -1177,3 +1177,135 @@ fn fpl_cross_validation_constant_byte_plane() {
         );
     }
 }
+
+// ===========================================================================
+// FPL path with depth > 1
+//
+// The C++ reference codes all depths as one pixel-interleaved slice of width
+// nDepth and height nCols*nRows, rather than one nCols x nRows slice per depth.
+// ===========================================================================
+
+fn make_multi_depth_f32(width: u32, height: u32, n_depth: u32) -> Vec<f32> {
+    let n = (width * height) as usize;
+    (0..n * n_depth as usize)
+        .map(|m| {
+            let (i, d) = (m / n_depth as usize, m % n_depth as usize);
+            let x = (i % width as usize) as f32;
+            let y = (i / width as usize) as f32;
+            (x * 0.37 + y * 1.13).sin() * 50.0 + d as f32 * 3.7 + 100.0
+        })
+        .collect()
+}
+
+fn make_multi_depth_f64(width: u32, height: u32, n_depth: u32) -> Vec<f64> {
+    let n = (width * height) as usize;
+    (0..n * n_depth as usize)
+        .map(|m| {
+            let (i, d) = (m / n_depth as usize, m % n_depth as usize);
+            let x = (i % width as usize) as f64;
+            let y = (i / width as usize) as f64;
+            (x * 0.37 + y * 1.13).sin() * 500.0 + d as f64 * 3.7 + 1000.0
+        })
+        .collect()
+}
+
+fn multi_depth_image(width: u32, height: u32, n_depth: u32, data: SampleData) -> Image {
+    let data_type = match data {
+        SampleData::F32(_) => DataType::Float,
+        SampleData::F64(_) => DataType::Double,
+        _ => unreachable!(),
+    };
+    Image {
+        width,
+        height,
+        depth: n_depth,
+        bands: 1,
+        data_type,
+        valid_masks: vec![BitMask::all_valid((width * height) as usize)],
+        data,
+        no_data_value: None,
+    }
+}
+
+macro_rules! fpl_multi_depth_tests {
+    ($rust_to_cpp:ident, $cpp_to_rust:ident, $ty:ty, $variant:ident, $dt:expr, $make:ident, $depth:expr) => {
+        #[test]
+        fn $rust_to_cpp() {
+            let (width, height, n_depth) = (37u32, 23u32, $depth);
+            let data = $make(width, height, n_depth);
+            let image =
+                multi_depth_image(width, height, n_depth, SampleData::$variant(data.clone()));
+            let blob = lerc::encode(&image, Precision::Lossless).unwrap();
+
+            let (decoded, valid_bytes): (Vec<$ty>, _) =
+                cpp::decode(&blob, $dt, width as i32, height as i32, n_depth as i32, 1);
+
+            assert!(valid_bytes.iter().all(|&v| v == 1));
+            assert_eq!(decoded.len(), data.len());
+            for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+                assert_eq!(o.to_bits(), d.to_bits(), "value {i}: {o} vs {d}");
+            }
+        }
+
+        #[test]
+        fn $cpp_to_rust() {
+            let (width, height, n_depth) = (37u32, 23u32, $depth);
+            let data = $make(width, height, n_depth);
+            let blob = cpp::encode(
+                &data,
+                $dt,
+                width as i32,
+                height as i32,
+                n_depth as i32,
+                1,
+                None,
+                0.0,
+            );
+
+            let image = lerc::decode(&blob).unwrap();
+            assert_eq!(image.depth, n_depth);
+            let decoded = image.as_typed::<$ty>().unwrap();
+            assert_eq!(decoded.len(), data.len());
+            for (i, (&o, &d)) in data.iter().zip(decoded.iter()).enumerate() {
+                assert_eq!(o.to_bits(), d.to_bits(), "value {i}: {o} vs {d}");
+            }
+        }
+    };
+}
+
+fpl_multi_depth_tests!(
+    rust_encode_cpp_decode_f32_lossless_fpl_depth2,
+    cpp_encode_rust_decode_f32_lossless_fpl_depth2,
+    f32,
+    F32,
+    DT_FLOAT,
+    make_multi_depth_f32,
+    2
+);
+fpl_multi_depth_tests!(
+    rust_encode_cpp_decode_f32_lossless_fpl_depth3,
+    cpp_encode_rust_decode_f32_lossless_fpl_depth3,
+    f32,
+    F32,
+    DT_FLOAT,
+    make_multi_depth_f32,
+    3
+);
+fpl_multi_depth_tests!(
+    rust_encode_cpp_decode_f64_lossless_fpl_depth2,
+    cpp_encode_rust_decode_f64_lossless_fpl_depth2,
+    f64,
+    F64,
+    DT_DOUBLE,
+    make_multi_depth_f64,
+    2
+);
+fpl_multi_depth_tests!(
+    rust_encode_cpp_decode_f64_lossless_fpl_depth3,
+    cpp_encode_rust_decode_f64_lossless_fpl_depth3,
+    f64,
+    F64,
+    DT_DOUBLE,
+    make_multi_depth_f64,
+    3
+);

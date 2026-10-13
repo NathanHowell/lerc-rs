@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   encoder no longer tracks the previous slice's reconstruction. Writing a
   block offset now asserts in debug builds that the value is exactly
   representable in the type chosen for it.
+- Lossless float data with depth > 1 is coded in Esri's layout: all depths as
+  one pixel-interleaved slice of width `nDepth` and height `nCols * nRows`
+  (`ComputeHuffmanCodesFlt` / `DecodeHuffmanFlt`). The encoder and decoder
+  coded one `nCols × nRows` slice per depth, so Esri's decoder could not read
+  this encoder's blobs and this decoder could not read Esri's. Blobs written
+  in the old layout no longer decode. Cross-validation now covers depth 2 and
+  3, f32 and f64, in both directions. Byte identity with the reference is not
+  pinned for these: its Huffman tree builder breaks weight ties via
+  `std::priority_queue`, whose order differs between libc++ and libstdc++.
 
 ## [0.6.0] - 2026-10-12
 

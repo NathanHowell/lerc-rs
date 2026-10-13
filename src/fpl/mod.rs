@@ -7,17 +7,16 @@ use crate::types::Sample;
 mod compression;
 mod predictor;
 
-/// Parameters for decoding a single FPL (float-point lossless) depth slice.
-struct FplSliceParams {
-    is_double: bool,
-    width: usize,
-    height: usize,
-    n_depth: usize,
-}
-
-impl FplSliceParams {
-    fn unit_size(&self) -> usize {
-        if self.is_double { 8 } else { 4 }
+/// Map an image's dimensions to the dimensions of its single FPL slice.
+///
+/// Matches the C++ `ComputeHuffmanCodesFlt` / `DecodeHuffmanFlt`: depth 1 is
+/// coded as a `width x height` slice; depth > 1 is coded as one slice of width
+/// `n_depth` and height `width * height` over the pixel-interleaved values.
+fn slice_dims(width: usize, height: usize, n_depth: usize) -> (usize, usize) {
+    if n_depth == 1 {
+        (width, height)
+    } else {
+        (n_depth, width * height)
     }
 }
 
@@ -31,25 +30,16 @@ pub(crate) fn decode_huffman_flt<T: Sample>(
     n_depth: usize,
     output: &mut [T],
 ) -> Result<()> {
-    let params = FplSliceParams {
-        is_double,
-        width,
-        height,
-        n_depth,
-    };
-
-    for i_depth in 0..n_depth {
-        decode_huffman_flt_slice(data, pos, &params, i_depth, output)?;
-    }
-
-    Ok(())
+    let (width, height) = slice_dims(width, height, n_depth);
+    decode_huffman_flt_slice(data, pos, is_double, width, height, output)
 }
 
 fn decode_huffman_flt_slice<T: Sample>(
     data: &[u8],
     pos: &mut usize,
-    params: &FplSliceParams,
-    i_depth: usize,
+    is_double: bool,
+    width: usize,
+    height: usize,
     output: &mut [T],
 ) -> Result<()> {
     if *pos >= data.len() {
@@ -67,11 +57,7 @@ fn decode_huffman_flt_slice<T: Sample>(
         return Err(LercError::InvalidData("invalid FPL predictor code".into()));
     }
 
-    let width = params.width;
-    let height = params.height;
-    let n_depth = params.n_depth;
-    let unit_size = params.unit_size();
-    let is_double = params.is_double;
+    let unit_size = if is_double { 8 } else { 4 };
 
     let num_pixels = width * height;
     let mut byte_planes: Vec<Vec<u8>> = vec![Vec::new(); unit_size];
@@ -147,24 +133,16 @@ fn decode_huffman_flt_slice<T: Sample>(
     if is_double {
         // C++ does NOT apply bit reorganization for doubles (no undoFloatTransform).
         // Just reinterpret the raw LE bytes as f64.
-        for pixel in 0..num_pixels {
-            let offset = pixel * unit_size;
-            let mut bytes = [0u8; 8];
-            bytes.copy_from_slice(&unit_buffer[offset..offset + 8]);
-            let val = f64::from_le_bytes(bytes);
-            let m = pixel * n_depth + i_depth;
-            output[m] = T::from_f64(val);
+        for (out, unit) in output.iter_mut().zip(unit_buffer.as_chunks::<8>().0) {
+            let val = f64::from_le_bytes(*unit);
+            *out = T::from_f64(val);
         }
     } else {
-        for pixel in 0..num_pixels {
-            let offset = pixel * unit_size;
-            let mut bytes = [0u8; 4];
-            bytes.copy_from_slice(&unit_buffer[offset..offset + 4]);
-            let bits = u32::from_le_bytes(bytes);
+        for (out, unit) in output.iter_mut().zip(unit_buffer.as_chunks::<4>().0) {
+            let bits = u32::from_le_bytes(*unit);
             let restored = undo_float_transform(bits);
             let val = f32::from_bits(restored);
-            let m = pixel * n_depth + i_depth;
-            output[m] = T::from_f64(val as f64);
+            *out = T::from_f64(val as f64);
         }
     }
 
@@ -221,16 +199,8 @@ pub(crate) fn encode_huffman_flt<T: Sample>(
     height: usize,
     n_depth: usize,
 ) -> Result<Vec<u8>> {
-    let unit_size = if is_double { 8 } else { 4 };
-    let mut result = Vec::new();
-
-    for i_depth in 0..n_depth {
-        let slice_data =
-            encode_huffman_flt_slice(input, is_double, width, height, i_depth, n_depth, unit_size)?;
-        result.extend_from_slice(&slice_data);
-    }
-
-    Ok(result)
+    let (width, height) = slice_dims(width, height, n_depth);
+    encode_huffman_flt_slice(input, is_double, width, height)
 }
 
 fn encode_huffman_flt_slice<T: Sample>(
@@ -238,10 +208,8 @@ fn encode_huffman_flt_slice<T: Sample>(
     is_double: bool,
     width: usize,
     height: usize,
-    i_depth: usize,
-    n_depth: usize,
-    unit_size: usize,
 ) -> Result<Vec<u8>> {
+    let unit_size = if is_double { 8 } else { 4 };
     let num_pixels = width * height;
 
     // Step 1: Apply float bit reorganization and build interleaved unit buffer
@@ -251,16 +219,14 @@ fn encode_huffman_flt_slice<T: Sample>(
         // C++ does NOT apply bit reorganization for doubles (no doFloatTransform).
         // Just copy the raw LE bytes.
         for pixel in 0..num_pixels {
-            let m = pixel * n_depth + i_depth;
-            let val = input[m].to_f64();
+            let val = input[pixel].to_f64();
             let bytes = val.to_le_bytes();
             unit_buffer[pixel * unit_size..pixel * unit_size + unit_size].copy_from_slice(&bytes);
         }
     } else {
         for pixel in 0..num_pixels {
-            let m = pixel * n_depth + i_depth;
             // For f32, read bits directly without f64 round-trip
-            let bits = input[m].to_bits_u64() as u32;
+            let bits = input[pixel].to_bits_u64() as u32;
             let transformed = float_transform(bits);
             let bytes = transformed.to_le_bytes();
             unit_buffer[pixel * unit_size..pixel * unit_size + unit_size].copy_from_slice(&bytes);

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Depth slices after the first are diff-coded against the previous slice
+  only for lossless integer data, as Esri's Lerc2 does (`bTryDiffEnc` in
+  `Lerc2::WriteTiles`). The encoder also diff-coded lossy and float data,
+  where a block's offset is an f64 difference: an offset of -0.99999997 was
+  judged integral by its f32 rounding (-1), stored as a 16-bit integer and
+  written truncated to 0, so every value in the block decoded 1.0 too high —
+  in this decoder and in Esri's alike. It needs the block's diff minimum
+  within an f32 rounding of a non-zero integer: rare on measured data (none
+  in 26 M real terrain-gradient values), common on data rounded to a
+  lattice. Lossy multi-depth blobs are now coded slice by slice, as the
+  reference codes them (+0.9% on a real 514×514×2 gradient corpus), and the
+  encoder no longer tracks the previous slice's reconstruction. Writing a
+  block offset now asserts in debug builds that the value is exactly
+  representable in the type chosen for it.
+
 ## [0.6.0] - 2026-10-12
 
 ### Fixed

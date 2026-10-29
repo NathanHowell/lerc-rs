@@ -129,6 +129,7 @@ jobs:
     name: Fuzz (${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         target: [decode, roundtrip]
     steps:
@@ -138,6 +139,9 @@ jobs:
         with:
           workspaces: fuzz
       - run: cargo install cargo-fuzz --locked
+      # libFuzzer needs the corpus directory to exist; it writes the inputs it
+      # finds into the first one given.
+      - run: mkdir -p fuzz/corpus/decode
       - name: Fuzz for a minute
         run: >
           cargo fuzz run ${{ matrix.target }}

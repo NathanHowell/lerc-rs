@@ -18,19 +18,26 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
         return crate::lerc1::decode_info(data);
     }
 
-    let (hd, _) = header::read_header(data)?;
+    let (hd, header_size) = header::read_header(data)?;
 
     // Count total bands by walking concatenated blobs
     let n_bands = if hd.version >= 6 && hd.n_blobs_more > 0 {
+        // Every band is a blob with a header of its own.
+        if hd.n_blobs_more as usize > data.len() / header_size {
+            return Err(LercError::InvalidData(
+                "more bands than the blob can hold".into(),
+            ));
+        }
         1 + hd.n_blobs_more as u32
     } else {
-        // For older versions, scan for more blobs
+        // For older versions, scan for more blobs. `read_header` makes every
+        // blob at least a header long, so the offset advances.
         let mut count = 1u32;
         let mut offset = hd.blob_size as usize;
         while offset < data.len() {
             if let Ok((next_hd, _)) = header::read_header(&data[offset..]) {
                 count += 1;
-                offset += next_hd.blob_size as usize;
+                offset = offset.saturating_add(next_hd.blob_size as usize);
             } else {
                 break;
             }
@@ -73,11 +80,18 @@ pub fn decode(data: &[u8]) -> Result<Image> {
     let dt = info.data_type;
     let no_data_value = info.no_data_value;
 
-    let total_pixels = width as usize * height as usize * n_depth as usize * n_bands as usize;
+    let total_pixels = total_samples(&info)?;
+    check_plausible_size(total_pixels, data.len())?;
 
     macro_rules! decode_bands {
         ($default:expr, $variant:ident) => {{
-            let mut output = vec![$default; total_pixels];
+            let mut output = Vec::new();
+            output.try_reserve_exact(total_pixels).map_err(|_| {
+                LercError::InvalidData(alloc::format!(
+                    "cannot allocate {total_pixels} samples for a {width} x {height} image"
+                ))
+            })?;
+            output.resize(total_pixels, $default);
             let result = decode_bands_into(data, &info, &mut output)?;
             Ok(Image {
                 width,
@@ -104,6 +118,42 @@ pub fn decode(data: &[u8]) -> Result<Image> {
     }
 }
 
+/// `width * height * depth * bands`, or an error if it does not fit in `usize`.
+fn total_samples(info: &LercInfo) -> Result<usize> {
+    (info.width as usize)
+        .checked_mul(info.height as usize)
+        .and_then(|n| n.checked_mul(info.depth as usize))
+        .and_then(|n| n.checked_mul(info.bands as usize))
+        .filter(|&n| n <= isize::MAX as usize / 8)
+        .ok_or_else(|| LercError::InvalidData("image has too many samples".into()))
+}
+
+/// Samples that `decode` accepts without regard to the blob's size.
+const FREE_SAMPLES: u64 = 1 << 26;
+/// Samples `decode` accepts per byte of blob beyond [`FREE_SAMPLES`]. Constant
+/// and near-constant images compress by far more than other data, and a
+/// blob a few bytes long can still describe a constant image of any size.
+const SAMPLES_PER_BLOB_BYTE: u64 = 1 << 12;
+/// The most samples `decode` will allocate.
+const MAX_SAMPLES: u64 = 1 << 32;
+
+/// Refuse to allocate an output buffer far larger than the blob could
+/// plausibly fill. The header alone sizes it, and allocating that much
+/// overcommits address space and then touches all of it. `decode_into`, whose
+/// caller owns the buffer, has no such limit.
+pub(crate) fn check_plausible_size(samples: usize, blob_len: usize) -> Result<()> {
+    let samples = samples as u64;
+    let allowed =
+        FREE_SAMPLES.saturating_add((blob_len as u64).saturating_mul(SAMPLES_PER_BLOB_BYTE));
+    if samples > MAX_SAMPLES || samples > allowed {
+        return Err(LercError::InvalidData(alloc::format!(
+            "{samples} samples is implausibly many for a {blob_len}-byte blob; \
+             use decode_info to inspect it and decode_into to decode it"
+        )));
+    }
+    Ok(())
+}
+
 /// Decode LERC2 data into a pre-allocated typed buffer, returning metadata.
 /// The buffer must have at least `width * height * n_depth * n_bands` elements.
 /// The data type `T` must match the blob's data type.
@@ -124,8 +174,7 @@ pub fn decode_into<T: Sample>(data: &[u8], output: &mut [T]) -> Result<DecodeRes
         });
     }
 
-    let total_pixels =
-        info.width as usize * info.height as usize * info.depth as usize * info.bands as usize;
+    let total_pixels = total_samples(&info)?;
 
     // Verify buffer size
     if output.len() < total_pixels {
@@ -145,15 +194,15 @@ fn decode_bands_into<T: Sample>(
     output: &mut [T],
 ) -> Result<DecodeResult> {
     let n_bands = info.bands;
-    let band_pixels = info.width as usize * info.height as usize * info.depth as usize;
+    let band_pixels = total_samples(info)? / n_bands as usize;
 
-    let mut masks = Vec::with_capacity(n_bands as usize);
+    let mut masks = Vec::new();
     let mut offset = 0usize;
 
     for band in 0..n_bands as usize {
         let prev_mask = masks.last();
         let (mask, hd, consumed) = decode_one_band(
-            &data[offset..],
+            data.get(offset..).unwrap_or_default(),
             &mut output[band * band_pixels..(band + 1) * band_pixels],
             prev_mask,
         )?;
@@ -217,6 +266,20 @@ fn decode_one_band<T: Sample>(
     let (hd, header_size) = header::read_header(blob)?;
     let blob_size = hd.blob_size as usize;
 
+    // The band must match the buffer sized from the first band's header, and
+    // be decoded as the type that buffer holds.
+    if hd.num_samples() != output.len() || hd.data_type != T::DATA_TYPE {
+        return Err(LercError::InvalidData(
+            "band differs from the first band in size or data type".into(),
+        ));
+    }
+    if blob.len() < blob_size {
+        return Err(LercError::BufferTooSmall {
+            needed: blob_size,
+            available: blob.len(),
+        });
+    }
+
     // Verify checksum
     header::verify_checksum(blob, &hd)?;
 
@@ -227,8 +290,7 @@ fn decode_one_band<T: Sample>(
 
     // Zero the output for images with invalid pixels. For fully valid images,
     // every element will be overwritten by the decode path, so skip zeroing.
-    let all_valid = hd.num_valid_pixel == hd.n_rows * hd.n_cols;
-    if !all_valid {
+    if !hd.is_all_valid() {
         for v in output.iter_mut() {
             *v = T::default();
         }
@@ -354,13 +416,13 @@ fn read_mask(
     let num_bytes_mask = i32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap());
     *pos += 4;
 
-    let num_pixels = header.n_rows as usize * header.n_cols as usize;
+    let num_pixels = header.num_pixels();
 
     if header.num_valid_pixel == 0 {
         return Ok(BitMask::new(num_pixels));
     }
 
-    if header.num_valid_pixel == header.n_rows * header.n_cols {
+    if header.is_all_valid() {
         return Ok(BitMask::all_valid(num_pixels));
     }
 
@@ -517,7 +579,7 @@ fn decode_huffman<T: Sample>(
     let mut bit_pos = 0i32;
     let start_byte_pos = byte_pos;
 
-    let all_valid = header.num_valid_pixel == header.n_rows * header.n_cols;
+    let all_valid = header.is_all_valid();
 
     // For 8-bit types, use wrapping integer arithmetic for reconstruction
     let is_byte_type = matches!(header.data_type, DataType::Char | DataType::Byte);

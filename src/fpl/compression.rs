@@ -54,7 +54,9 @@ fn decode_packbits(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
     // Matches C++ fpl_EsriHuffman decodePackBits format:
     //   b <= 127: literal of (b + 1) bytes
     //   b > 127:  run of (b - 126) identical bytes
-    let mut out = Vec::with_capacity(expected_size);
+    // A run of up to 129 bytes takes 2, so do not reserve more than that on
+    // the input's say-so.
+    let mut out = Vec::with_capacity(expected_size.min(data.len().saturating_mul(65)));
     let mut pos = 0;
 
     while pos < data.len() && out.len() < expected_size {
@@ -98,7 +100,8 @@ fn decode_fpl_huffman(data: &[u8], expected_size: usize) -> Result<Vec<u8>> {
     codec.read_code_table(data, &mut pos, 6)?;
     let num_bits_lut = codec.build_tree_from_codes()?;
 
-    let mut result = Vec::with_capacity(expected_size);
+    // Every code is at least one bit long.
+    let mut result = Vec::with_capacity(expected_size.min(data.len().saturating_mul(8)));
     let mut byte_pos = pos;
     let mut bit_pos = 0i32;
 

@@ -129,16 +129,17 @@ fn bit_unstuff(data: &[u8], pos: &mut usize, num_elements: u32, num_bits: u32) -
         return Err(LercError::InvalidData("bitstuffer: invalid params".into()));
     }
 
-    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
-    let num_bytes_used =
-        (num_uints * 4) - num_tail_bytes_not_needed(num_elements, num_bits) as usize;
+    // In u64, so that a corrupt element count cannot overflow a 32-bit usize.
+    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32);
+    let num_bytes_used = num_uints * 4 - num_tail_bytes_not_needed(num_elements, num_bits) as u64;
 
-    if *pos + num_bytes_used > data.len() {
+    if *pos as u64 + num_bytes_used > data.len() as u64 {
         return Err(LercError::BufferTooSmall {
-            needed: *pos + num_bytes_used,
+            needed: usize::try_from(*pos as u64 + num_bytes_used).unwrap_or(usize::MAX),
             available: data.len(),
         });
     }
+    let num_bytes_used = num_bytes_used as usize;
 
     let bytes = &data[*pos..*pos + num_bytes_used];
     let mut result = vec![0u32; num_elements as usize];
@@ -194,17 +195,18 @@ fn bit_unstuff_before_v3(
         return Err(LercError::InvalidData("bitstuffer: invalid params".into()));
     }
 
-    let num_uints = (num_elements as u64 * num_bits as u64).div_ceil(32) as usize;
     let ntbnn = num_tail_bytes_not_needed(num_elements, num_bits) as usize;
 
-    let num_bytes_to_copy = (num_elements as u64 * num_bits as u64).div_ceil(8) as usize;
-
-    if *pos + num_bytes_to_copy > data.len() {
+    // In u64, so that a corrupt element count cannot overflow a 32-bit usize.
+    let num_bytes_to_copy = (num_elements as u64 * num_bits as u64).div_ceil(8);
+    if *pos as u64 + num_bytes_to_copy > data.len() as u64 {
         return Err(LercError::BufferTooSmall {
-            needed: *pos + num_bytes_to_copy,
+            needed: usize::try_from(*pos as u64 + num_bytes_to_copy).unwrap_or(usize::MAX),
             available: data.len(),
         });
     }
+    let num_bytes_to_copy = num_bytes_to_copy as usize;
+    let num_uints = num_bytes_to_copy.div_ceil(4);
 
     // Copy into aligned u32 buffer
     let mut src = vec![0u32; num_uints];

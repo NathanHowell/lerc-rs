@@ -185,6 +185,13 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
 }
 
 /// Decode a LERC blob, returning the image with pixel data and validity masks.
+///
+/// Malformed input yields an error, never a panic. The header sizes the output,
+/// so a blob that describes far more samples than its length could plausibly
+/// fill is refused before allocating (the limit is 2^26 samples plus 4096 per
+/// byte of blob, and at most 2^32). To apply a limit of your own, check
+/// [`decode_info`] first; to decode a larger image, use [`decode_into`] with a
+/// buffer you allocated.
 pub fn decode(data: &[u8]) -> Result<Image> {
     decode::decode(data)
 }

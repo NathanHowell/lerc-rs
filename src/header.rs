@@ -77,6 +77,26 @@ impl HeaderInfo {
         }
         size
     }
+
+    /// Number of pixels in one depth slice, `n_rows * n_cols`.
+    ///
+    /// `read_header` guarantees both are positive and the product fits in `i32`.
+    pub fn num_pixels(&self) -> usize {
+        self.n_rows as usize * self.n_cols as usize
+    }
+
+    /// Number of samples in the band, `n_rows * n_cols * n_depth`.
+    ///
+    /// `read_header` guarantees the product, scaled by the widest sample
+    /// type, fits in `isize`.
+    pub fn num_samples(&self) -> usize {
+        self.num_pixels() * self.n_depth as usize
+    }
+
+    /// Whether every pixel is valid. Computed without `i32` overflow.
+    pub fn is_all_valid(&self) -> bool {
+        i64::from(self.num_valid_pixel) == i64::from(self.n_rows) * i64::from(self.n_cols)
+    }
 }
 
 struct Cursor<'a> {
@@ -126,6 +146,54 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// The widest sample type, in bytes.
+const MAX_SAMPLE_BYTES: usize = 8;
+
+/// Reject headers whose sizes cannot describe a decodable band, so that the
+/// rest of the decoder can size buffers and index with them.
+fn validate_dimensions(
+    n_rows: i32,
+    n_cols: i32,
+    n_depth: i32,
+    num_valid_pixel: i32,
+    micro_block_size: i32,
+) -> Result<()> {
+    if n_rows <= 0 || n_cols <= 0 || n_depth <= 0 {
+        return Err(LercError::InvalidData(alloc::format!(
+            "invalid dimensions {n_rows} x {n_cols} x {n_depth}"
+        )));
+    }
+    // The valid pixel count is an i32 on the wire, so a band of more pixels
+    // than that cannot be written by the reference encoder either.
+    let pixels = i64::from(n_rows) * i64::from(n_cols);
+    if pixels > i64::from(i32::MAX) {
+        return Err(LercError::InvalidData(alloc::format!(
+            "{n_rows} x {n_cols} pixels is too many"
+        )));
+    }
+    if !(0..=pixels).contains(&i64::from(num_valid_pixel)) {
+        return Err(LercError::InvalidData(alloc::format!(
+            "valid pixel count {num_valid_pixel} is outside 0..={pixels}"
+        )));
+    }
+    if micro_block_size <= 0 {
+        return Err(LercError::InvalidData(alloc::format!(
+            "invalid micro block size {micro_block_size}"
+        )));
+    }
+    // Samples, and their byte size, must be addressable.
+    let fits = (pixels as usize)
+        .checked_mul(n_depth as usize)
+        .and_then(|n| n.checked_mul(MAX_SAMPLE_BYTES))
+        .is_some_and(|n| n <= isize::MAX as usize);
+    if !fits {
+        return Err(LercError::InvalidData(alloc::format!(
+            "{n_rows} x {n_cols} x {n_depth} samples is too many"
+        )));
+    }
+    Ok(())
+}
+
 pub fn read_header(data: &[u8]) -> Result<(HeaderInfo, usize)> {
     let mut c = Cursor::new(data);
 
@@ -173,6 +241,13 @@ pub fn read_header(data: &[u8]) -> Result<(HeaderInfo, usize)> {
     } else {
         (0.0, 0.0)
     };
+
+    validate_dimensions(n_rows, n_cols, n_depth, num_valid_pixel, micro_block_size)?;
+    if blob_size < HeaderInfo::header_size(version) as i32 {
+        return Err(LercError::InvalidData(alloc::format!(
+            "blob size {blob_size} is smaller than the header"
+        )));
+    }
 
     let header = HeaderInfo {
         version,

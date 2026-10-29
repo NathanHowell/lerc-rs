@@ -298,12 +298,25 @@ impl HuffmanCodec {
         if version < 2 {
             return Err(LercError::InvalidData("huffman version too old".into()));
         }
-        if i0 >= i1 || i0 < 0 || size < 0 || size as usize > MAX_HISTO_SIZE {
+        // Indexes in `i0..i1` wrap around once past `size`, so `i1` can be at
+        // most twice it, and the range cannot be longer than the table.
+        if i0 >= i1
+            || i0 < 0
+            || size <= 0
+            || size as usize > MAX_HISTO_SIZE
+            || i64::from(i1) > 2 * i64::from(size)
+            || i1 - i0 > size
+        {
             return Err(LercError::InvalidData("invalid code table range".into()));
         }
 
         // Decode code lengths
         let data_vec = bitstuffer::decode(data, pos, (i1 - i0) as usize, lerc2_version)?;
+        if data_vec.len() != (i1 - i0) as usize {
+            return Err(LercError::InvalidData(
+                "code table has the wrong number of code lengths".into(),
+            ));
+        }
 
         self.code_table = vec![(0u16, 0u32); size as usize];
         for i in i0..i1 {

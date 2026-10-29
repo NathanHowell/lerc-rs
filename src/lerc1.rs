@@ -169,8 +169,9 @@ fn read_uint(cursor: &mut Cursor, num_bytes: usize) -> Result<u32> {
 /// u32 words in little-endian byte order (the C++ reference uses `memcpy`
 /// into native u32 followed by a no-op `SWAP_4` on LE).
 ///
-/// Matches C++ `BitStuffer::read`.
-fn bit_unstuff(cursor: &mut Cursor) -> Result<Vec<u32>> {
+/// Matches C++ `BitStuffer::read`. Fails if the array has more than
+/// `max_elements` values, which bounds the allocation by what the caller can use.
+fn bit_unstuff(cursor: &mut Cursor, max_elements: usize) -> Result<Vec<u32>> {
     // First byte: bits 0-5 = numBits, bits 6-7 encode the byte width of numElements
     let first_byte = cursor.read_u8()?;
     let bits67 = (first_byte >> 6) as usize;
@@ -182,6 +183,11 @@ fn bit_unstuff(cursor: &mut Cursor) -> Result<Vec<u32>> {
     if num_bits >= 32 {
         return Err(LercError::InvalidData(
             "lerc1: numBits >= 32 in bit stuffer".into(),
+        ));
+    }
+    if num_elements > max_elements {
+        return Err(LercError::InvalidData(
+            "lerc1: too many elements in bit stuffer".into(),
         ));
     }
 
@@ -349,9 +355,9 @@ fn read_cnt_tile(
         let n = if bits67 == 0 { 4 } else { 3 - bits67 };
         let offset = read_flt(cursor, n)?;
 
-        let data_vec = bit_unstuff(cursor)?;
-
         let num_pixel = (i1 - i0) * (j1 - j0);
+        let data_vec = bit_unstuff(cursor, num_pixel)?;
+
         if data_vec.len() < num_pixel {
             return Err(LercError::InvalidData(
                 "lerc1: bit stuffer returned too few elements for cnt tile".into(),
@@ -441,11 +447,16 @@ fn read_z_tile(
             }
         } else {
             // compr_flag == 1: bit-stuffed
-            let data_vec = bit_unstuff(cursor)?;
+            let data_vec = bit_unstuff(cursor, (i1 - i0) * (j1 - j0))?;
             let inv_scale = 2.0 * cfg.max_z_error_in_file;
             let mut src_idx = 0;
+            let too_few = || LercError::InvalidData("lerc1: z tile has too few values".into());
 
             if cfg.decoder_can_ignore_mask {
+                // The tile holds a value for every pixel.
+                if data_vec.len() < (i1 - i0) * (j1 - j0) {
+                    return Err(too_few());
+                }
                 for i in i0..i1 {
                     for j in j0..j1 {
                         let idx = i * width + j;
@@ -459,7 +470,8 @@ fn read_z_tile(
                     for j in j0..j1 {
                         let idx = i * width + j;
                         if cnt[idx] > 0.0 {
-                            let val = (offset as f64 + data_vec[src_idx] as f64 * inv_scale) as f32;
+                            let q = *data_vec.get(src_idx).ok_or_else(too_few)?;
+                            let val = (offset as f64 + q as f64 * inv_scale) as f32;
                             z[idx] = val.min(cfg.max_z_in_img);
                             src_idx += 1;
                         }
@@ -470,6 +482,18 @@ fn read_z_tile(
     }
 
     Ok(())
+}
+
+/// The tile indexes along a dimension that are not empty: `0..=num_tiles`,
+/// but when there are more tiles than pixels only the last, remainder tile
+/// has any, so a corrupt tile count cannot make the loop run for billions of
+/// empty iterations.
+fn tile_range(dim: usize, num_tiles: i32) -> core::ops::RangeInclusive<i32> {
+    if dim / num_tiles as usize == 0 {
+        num_tiles..=num_tiles
+    } else {
+        0..=num_tiles
+    }
 }
 
 /// Read tiles for a section (count or z part).
@@ -489,7 +513,7 @@ fn read_tiles_cnt(
         return Err(LercError::InvalidData("lerc1: invalid tile counts".into()));
     }
 
-    for i_tile in 0..=num_tiles_vert {
+    for i_tile in tile_range(height, num_tiles_vert) {
         let tile_h = if i_tile == num_tiles_vert {
             height % num_tiles_vert as usize
         } else {
@@ -500,7 +524,7 @@ fn read_tiles_cnt(
         }
         let i0 = i_tile as usize * (height / num_tiles_vert as usize);
 
-        for j_tile in 0..=num_tiles_hori {
+        for j_tile in tile_range(width, num_tiles_hori) {
             let tile_w = if j_tile == num_tiles_hori {
                 width % num_tiles_hori as usize
             } else {
@@ -533,7 +557,7 @@ fn read_tiles_z(
         return Err(LercError::InvalidData("lerc1: invalid tile counts".into()));
     }
 
-    for i_tile in 0..=num_tiles_vert {
+    for i_tile in tile_range(height, num_tiles_vert) {
         let tile_h = if i_tile == num_tiles_vert {
             height % num_tiles_vert as usize
         } else {
@@ -544,7 +568,7 @@ fn read_tiles_z(
         }
         let i0 = i_tile as usize * (height / num_tiles_vert as usize);
 
-        for j_tile in 0..=num_tiles_hori {
+        for j_tile in tile_range(width, num_tiles_hori) {
             let tile_w = if j_tile == num_tiles_hori {
                 width % num_tiles_hori as usize
             } else {
@@ -611,18 +635,32 @@ pub fn decode_info(data: &[u8]) -> Result<LercInfo> {
     })
 }
 
+/// A zero-filled buffer, or an error rather than an abort if it cannot be allocated.
+fn zeroed(len: usize) -> Result<Vec<f32>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(len)
+        .map_err(|_| LercError::InvalidData("lerc1: image too large to allocate".into()))?;
+    v.resize(len, 0.0);
+    Ok(v)
+}
+
 /// Fully decode a Lerc1 blob into an `Image`.
 pub fn decode(data: &[u8]) -> Result<Image> {
+    // Check that the headers and the count section are all there before
+    // allocating two buffers of the size the header claims.
+    decode_info(data)?;
+
     let mut cursor = Cursor::new(data);
     let hd = read_lerc1_header(&mut cursor)?;
 
     let width = hd.width as usize;
     let height = hd.height as usize;
     let num_pixels = width * height;
+    crate::decode::check_plausible_size(num_pixels, data.len())?;
 
     // Allocate cnt and z arrays (both f32, initialized to 0)
-    let mut cnt = vec![0.0f32; num_pixels];
-    let mut z = vec![0.0f32; num_pixels];
+    let mut cnt = zeroed(num_pixels)?;
+    let mut z = zeroed(num_pixels)?;
 
     let mut decoder_can_ignore_mask = false;
 
@@ -649,7 +687,12 @@ pub fn decode(data: &[u8]) -> Result<Image> {
         } else {
             // Count part is binary mask, RLE compressed
             let mask_byte_count = num_pixels.div_ceil(8);
-            let rle_data = &data[cursor.pos..cursor.pos + cnt_sec.num_bytes as usize];
+            let rle_data = data
+                .get(cursor.pos..cursor.pos.saturating_add(cnt_sec.num_bytes as usize))
+                .ok_or(LercError::BufferTooSmall {
+                    needed: cursor.pos.saturating_add(cnt_sec.num_bytes as usize),
+                    available: data.len(),
+                })?;
             let mask_bytes = rle::decompress(rle_data, mask_byte_count)?;
             let bitmask = BitMask::from_bytes(mask_bytes, num_pixels);
 
@@ -726,7 +769,7 @@ mod tests {
         // numElements as u16 LE: 5, 0
         let data = [0x40, 0x05, 0x00];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert_eq!(result, vec![0u32; 5]);
     }
 
@@ -743,7 +786,7 @@ mod tests {
         // Data: 1 byte = 0b1011_0000 = 0xB0
         let data = [0x41, 0x04, 0x00, 0xB0];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert_eq!(result, vec![1, 0, 1, 1]);
     }
 
@@ -754,7 +797,7 @@ mod tests {
         // numElements as u16 LE: 0, 0
         let data = [0x41, 0x00, 0x00];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert!(result.is_empty());
     }
 
@@ -774,7 +817,7 @@ mod tests {
         // LE bytes: 0xFE 0xFF 0xFF 0xFF
         let data = [0x5F, 0x01, 0x00, 0xFE, 0xFF, 0xFF, 0xFF];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert_eq!(result, vec![0x7FFF_FFFF]);
     }
 
@@ -859,7 +902,7 @@ mod tests {
         // Data: 1 byte = 0x6C
         let data = [0x42, 0x03, 0x00, 0x6C];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert_eq!(result, vec![1, 2, 3]);
     }
 
@@ -908,7 +951,7 @@ mod tests {
         // numElements as u16 LE: 3, 0
         let data = [0x48, 0x03, 0x00, 0x2A, 0xC8, 0x64];
         let mut cursor = Cursor::new(&data);
-        let result = bit_unstuff(&mut cursor).unwrap();
+        let result = bit_unstuff(&mut cursor, 1 << 16).unwrap();
         assert_eq!(result, vec![100, 200, 42]);
     }
 
@@ -919,7 +962,7 @@ mod tests {
         // numElements as u16 LE: 1, 0
         let data = [0x60, 0x01, 0x00];
         let mut cursor = Cursor::new(&data);
-        assert!(bit_unstuff(&mut cursor).is_err());
+        assert!(bit_unstuff(&mut cursor, 1 << 16).is_err());
     }
 
     #[test]

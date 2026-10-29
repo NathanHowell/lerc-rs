@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The decoder returns an error, instead of panicking, hanging or aborting,
+  on malformed blobs, found by fuzzing (`fuzz/`, new):
+  - A Lerc2 header with a zero or negative dimension, a valid pixel count
+    outside `0..=rows*cols`, a micro block size below 1, or a blob size
+    shorter than the header is rejected. A micro block size of 0 divided by
+    zero, a short blob size sliced `data[14..blob_size]` backwards, and
+    `rows * cols` in `i32` overflowed.
+  - A version 2-5 blob with `blobSize = 0` made `decode_info` loop forever
+    walking the concatenated bands. A version 6 band count larger than the
+    blob can hold is rejected.
+  - Every band must match the first in size and data type, and lie within the
+    data. A later band of another size indexed past the output buffer.
+  - A tile whose mask marks more pixels valid than the tile has values, a
+    Huffman code table whose range runs past its size or whose lengths are
+    short, and a float byte plane stored twice (leaving another empty) indexed
+    out of bounds.
+  - `decode` no longer allocates what a header claims before checking it:
+    sizes are checked for overflow, the allocation is fallible, and a blob
+    that describes more than 2^26 samples plus 4096 per byte of blob (at most
+    2^32) is refused, since a few header bytes could otherwise request
+    gigabytes. `decode_into`, whose caller owns the buffer, has no such limit.
+    RLE, PackBits and Huffman buffers are no longer reserved on the input's
+    say-so.
+  - On 32-bit targets (wasm32), the byte count of a bit-stuffed array with a
+    corrupt element count overflowed `usize`.
+  - Lerc1: a count section longer than the data sliced past it, a bit-stuffed
+    z tile with fewer values than valid pixels indexed past them, a bit
+    stuffer could allocate for billions of elements, and a tile count larger
+    than the image looped billions of times.
+
 ## [0.7.0] - 2026-10-12
 
 ### Fixed

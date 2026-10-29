@@ -13,7 +13,7 @@ repository = "https://github.com/NathanHowell/lerc-rs"
 documentation = "https://docs.rs/lerc-rs"
 keywords = ["lerc", "raster", "compression", "geospatial", "esri"]
 categories = ["compression", "encoding", "no-std"]
-exclude = ["esri-lerc/", "crates/", "benches/", "examples/", "tests/"]
+exclude = ["esri-lerc/", "crates/", "benches/", "examples/", "tests/", "fuzz/"]
 
 [lib]
 name = "lerc"

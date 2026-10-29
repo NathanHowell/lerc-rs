@@ -58,7 +58,9 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
 
 /// RLE-decompress data in the LERC mask RLE format.
 pub fn decompress(input: &[u8], expected_size: usize) -> Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(expected_size);
+    // A repeat run is 3 bytes and yields up to 32767, so a short input cannot
+    // fill a large `expected_size`; do not reserve it on the input's say-so.
+    let mut out = Vec::with_capacity(expected_size.min(input.len().saturating_mul(1 << 14)));
     let mut pos = 0;
 
     loop {
@@ -78,6 +80,11 @@ pub fn decompress(input: &[u8], expected_size: usize) -> Result<Vec<u8>> {
             if pos + n > input.len() {
                 return Err(LercError::InvalidData("RLE: literal run overflow".into()));
             }
+            if out.len() + n > expected_size {
+                return Err(LercError::InvalidData(
+                    "RLE: output exceeds expected size".into(),
+                ));
+            }
             out.extend_from_slice(&input[pos..pos + n]);
             pos += n;
         } else {
@@ -85,6 +92,11 @@ pub fn decompress(input: &[u8], expected_size: usize) -> Result<Vec<u8>> {
             let n = (-count) as usize;
             if pos >= input.len() {
                 return Err(LercError::InvalidData("RLE: missing repeat byte".into()));
+            }
+            if out.len() + n > expected_size {
+                return Err(LercError::InvalidData(
+                    "RLE: output exceeds expected size".into(),
+                ));
             }
             let byte = input[pos];
             pos += 1;

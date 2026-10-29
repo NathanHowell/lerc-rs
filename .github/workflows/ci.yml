@@ -125,6 +125,31 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [decode, roundtrip]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz for a minute
+        run: >
+          cargo fuzz run ${{ matrix.target }}
+          ${{ matrix.target == 'decode' && 'fuzz/corpus/decode fuzz/seeds/decode' || '' }}
+          -- -max_total_time=60 -rss_limit_mb=2048 -timeout=10 -max_len=70000
+      - name: Upload the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts
+
   iai-bench:
     name: Callgrind benchmarks
     runs-on: ubuntu-latest

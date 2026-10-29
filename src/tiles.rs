@@ -485,7 +485,11 @@ fn read_tile<T: Sample>(
                 let m = k * n_depth + i_depth;
                 let valid = if all_valid { true } else { mask.is_valid(k) };
                 if valid {
-                    let quant = buffer_vec[src_idx] as f64;
+                    // The tile holds one value per valid pixel; a mask that
+                    // marks more pixels valid than that is inconsistent.
+                    let quant = *buffer_vec.get(src_idx).ok_or_else(|| {
+                        LercError::InvalidData("tile has fewer values than valid pixels".into())
+                    })? as f64;
                     src_idx += 1;
 
                     if !b_diff_enc {

@@ -79,7 +79,8 @@ fn decode_huffman_flt_slice<T: Sample>(
             u32::from_le_bytes(data[*pos + 2..*pos + 6].try_into().unwrap()) as usize;
         *pos += 6;
 
-        if byte_index >= unit_size || best_level > 5 {
+        // Each byte plane is stored exactly once.
+        if byte_index >= unit_size || best_level > 5 || !byte_planes[byte_index].is_empty() {
             return Err(LercError::InvalidData(
                 "invalid FPL byte plane header".into(),
             ));

@@ -141,6 +141,18 @@ The test suite includes bidirectional cross-validation against the C++ reference
 cargo test --features cpp-validation
 ```
 
+### Fuzzing
+
+The decoder is fuzzed with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz); see [`fuzz/`](fuzz/README.md).
+
+## Untrusted input
+
+`decode` and `decode_info` return an error, never panic, on malformed blobs.
+A blob's header sizes the output, so `decode` refuses blobs that describe far
+more samples than their length could plausibly fill; check `decode_info` first
+to apply your own limit, and use `decode_into` with a buffer you sized to
+decode anything the header describes.
+
 ## License
 
 Apache-2.0, matching the [Esri LERC](https://github.com/Esri/lerc) reference implementation.
